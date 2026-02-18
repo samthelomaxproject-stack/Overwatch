@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Overwatch - Tactical Operations Center</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
             --primary: #1a3a5c;
@@ -14,6 +15,7 @@
             --danger: #f56565;
             --background: #1a202c;
             --text: #e2e8f0;
+            --text-muted: #a0aec0;
         }
         
         * {
@@ -27,34 +29,40 @@
             background: var(--background);
             color: var(--text);
             min-height: 100vh;
+            overflow: hidden;
         }
         
+        /* Header */
         .header {
             background: var(--primary);
-            padding: 1rem;
+            padding: 0.75rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-bottom: 2px solid var(--accent);
+            height: 50px;
         }
         
         .logo {
-            font-size: 1.5rem;
+            font-size: 1.25rem;
             font-weight: bold;
             color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
         
-        .status {
+        .header-right {
             display: flex;
-            gap: 1rem;
             align-items: center;
+            gap: 1rem;
         }
         
         .status-indicator {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            font-size: 0.875rem;
+            font-size: 0.75rem;
         }
         
         .dot {
@@ -68,35 +76,69 @@
             background: var(--danger);
         }
         
-        .container {
-            display: flex;
-            height: calc(100vh - 60px);
+        .transport-select {
+            background: var(--secondary);
+            color: var(--text);
+            border: 1px solid var(--primary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
         }
         
+        /* Layout */
+        .container {
+            display: flex;
+            height: calc(100vh - 50px);
+        }
+        
+        /* Sidebar */
         .sidebar {
-            width: 200px;
+            width: 180px;
             background: var(--secondary);
-            padding: 1rem;
+            padding: 0.5rem;
+            overflow-y: auto;
         }
         
         .nav-item {
-            padding: 0.75rem;
-            margin-bottom: 0.5rem;
+            padding: 0.6rem 0.75rem;
+            margin-bottom: 0.25rem;
             border-radius: 4px;
             cursor: pointer;
             transition: background 0.2s;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
         
-        .nav-item:hover, .nav-item.active {
+        .nav-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        
+        .nav-item.active {
             background: var(--primary);
+            color: var(--accent);
         }
         
+        .nav-icon {
+            font-size: 1rem;
+            width: 20px;
+            text-align: center;
+        }
+        
+        /* Main Content */
         .main {
             flex: 1;
             padding: 1rem;
             overflow-y: auto;
+            display: none;
         }
         
+        .main.active {
+            display: block;
+        }
+        
+        /* Cards */
         .card {
             background: var(--secondary);
             padding: 1rem;
@@ -104,11 +146,19 @@
             margin-bottom: 1rem;
         }
         
-        .card h3 {
-            color: var(--accent);
-            margin-bottom: 0.5rem;
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
         }
         
+        .card h3 {
+            color: var(--accent);
+            font-size: 1rem;
+        }
+        
+        /* Buttons */
         .btn {
             background: var(--accent);
             color: var(--background);
@@ -117,57 +167,678 @@
             border-radius: 4px;
             cursor: pointer;
             font-weight: bold;
+            font-size: 0.875rem;
+            transition: opacity 0.2s;
         }
         
         .btn:hover {
             opacity: 0.9;
         }
+        
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+        
+        /* Forms */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            background: var(--background);
+            color: var(--text);
+            border: 1px solid var(--primary);
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        
+        /* Packets List */
+        .packet-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .packet-item {
+            background: var(--background);
+            padding: 0.75rem;
+            border-radius: 4px;
+            border-left: 3px solid var(--accent);
+        }
+        
+        .packet-item.priority-urgent {
+            border-left-color: var(--danger);
+        }
+        
+        .packet-item.priority-flash {
+            border-left-color: var(--danger);
+            background: rgba(245, 101, 101, 0.1);
+        }
+        
+        .packet-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        
+        .packet-type {
+            font-weight: bold;
+            color: var(--accent);
+            font-size: 0.875rem;
+        }
+        
+        .packet-priority {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.3rem;
+            border-radius: 2px;
+            background: var(--primary);
+        }
+        
+        .packet-meta {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+        
+        .packet-content {
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+        
+        /* Map */
+        #map {
+            height: calc(100vh - 180px);
+            border-radius: 8px;
+        }
+        
+        /* Squads */
+        .squad-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .squad-card {
+            background: var(--background);
+            padding: 1rem;
+            border-radius: 4px;
+        }
+        
+        .squad-name {
+            font-weight: bold;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+        
+        .squad-members {
+            font-size: 0.875rem;
+        }
+        
+        /* Zones */
+        .zone-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .zone-tag {
+            background: var(--primary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .zone-tag.restricted {
+            border: 1px solid var(--danger);
+        }
+        
+        .zone-tag.friendly {
+            border: 1px solid var(--success);
+        }
+        
+        .zone-tag.objective {
+            border: 1px solid var(--warning);
+        }
+        
+        /* SATCOM */
+        .sat-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 0.5rem;
+        }
+        
+        .sat-item {
+            background: var(--background);
+            padding: 0.75rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .sat-name {
+            font-weight: bold;
+            color: var(--accent);
+        }
+        
+        .sat-info {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+        
+        /* Settings */
+        .settings-section {
+            margin-bottom: 1.5rem;
+        }
+        
+        .settings-section h4 {
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+        }
+        
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: var(--secondary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        
+        /* Packet type colors */
+        .type-sitrep { border-left-color: #f6ad55; }
+        .type-task { border-left-color: #48bb78; }
+        .type-checkin { border-left-color: #4299e1; }
+        .type-contact { border-left-color: #f56565; }
+        .type-resource { border-left-color: #9f7aea; }
+        .type-asset { border-left-color: #38b2ac; }
+        .type-zone { border-left-color: #ed8936; }
+        .type-mission { border-left-color: #fc8181; }
+        .type-event { border-left-color: #63b3ed; }
     </style>
 </head>
 <body>
+    <!-- Header -->
     <div class="header">
-        <div class="logo">⚡ Overwatch</div>
-        <div class="status">
+        <div class="logo">
+            <span>⚡</span>
+            <span>Overwatch</span>
+        </div>
+        <div class="header-right">
+            <select class="transport-select" id="transportSelect">
+                <option value="">No Transport</option>
+                <option value="reticulum">Reticulum</option>
+                <option value="meshtastic">Meshtastic</option>
+                <option value="clipboard">Clipboard</option>
+            </select>
             <div class="status-indicator">
-                <span class="dot"></span>
-                <span>Online</span>
+                <span class="dot" id="statusDot"></span>
+                <span id="statusText">Online</span>
             </div>
         </div>
     </div>
     
     <div class="container">
+        <!-- Sidebar -->
         <div class="sidebar">
-            <div class="nav-item active">📡 Packets</div>
-            <div class="nav-item">🗺️ Map</div>
-            <div class="nav-item">👥 Squads</div>
-            <div class="nav-item">🛰️ SATCOM</div>
-            <div class="nav-item">📍 Zones</div>
-            <div class="nav-item">🔌 ATAK</div>
-            <div class="nav-item">⚙️ Settings</div>
+            <div class="nav-item active" data-view="packets">
+                <span class="nav-icon">📡</span>
+                <span>Packets</span>
+            </div>
+            <div class="nav-item" data-view="map">
+                <span class="nav-icon">🗺️</span>
+                <span>Map</span>
+            </div>
+            <div class="nav-item" data-view="squads">
+                <span class="nav-icon">👥</span>
+                <span>Squads</span>
+            </div>
+            <div class="nav-item" data-view="satcom">
+                <span class="nav-icon">🛰️</span>
+                <span>SATCOM</span>
+            </div>
+            <div class="nav-item" data-view="zones">
+                <span class="nav-icon">📍</span>
+                <span>Zones</span>
+            </div>
+            <div class="nav-item" data-view="atak">
+                <span class="nav-icon">🔌</span>
+                <span>ATAK</span>
+            </div>
+            <div class="nav-item" data-view="settings">
+                <span class="nav-icon">⚙️</span>
+                <span>Settings</span>
+            </div>
         </div>
         
-        <div class="main">
+        <!-- Packets View -->
+        <div class="main active" id="view-packets">
             <div class="card">
-                <h3>Create Packet</h3>
-                <p>Select packet type and fill in details</p>
-                <br>
-                <button class="btn">+ New Packet</button>
+                <div class="card-header">
+                    <h3>Create Packet</h3>
+                    <button class="btn" onclick="showPacketModal()">+ New Packet</button>
+                </div>
             </div>
             
             <div class="card">
                 <h3>Recent Packets</h3>
-                <p>No packets yet. Create your first packet above.</p>
+                <div class="packet-list" id="packetList">
+                    <div class="packet-item type-sitrep">
+                        <div class="packet-header">
+                            <span class="packet-type">SITREP</span>
+                            <span class="packet-priority">ROUTINE</span>
+                        </div>
+                        <div class="packet-meta">FROM: ALPHA-1 | TO: ALL | 12:34 UTC</div>
+                        <div class="packet-content">Area clear. No contacts. Moving to checkpoint 3.</div>
+                    </div>
+                    <div class="packet-item type-task priority-urgent">
+                        <div class="packet-header">
+                            <span class="packet-type">TASK</span>
+                            <span class="packet-priority">URGENT</span>
+                        </div>
+                        <div class="packet-meta">FROM: COMMAND | TO: ALPHA | 12:30 UTC</div>
+                        <div class="packet-content">Secure grid square 1234. Enemy vehicle reported.</div>
+                    </div>
+                </div>
             </div>
-            
+        </div>
+        
+        <!-- Map View -->
+        <div class="main" id="view-map">
             <div class="card">
-                <h3>Transport Status</h3>
-                <p>Configure mesh transports in Settings</p>
+                <div class="card-header">
+                    <h3>Tactical Map</h3>
+                    <div>
+                        <button class="btn btn-sm" onclick="toggleLayer('members')">Members</button>
+                        <button class="btn btn-sm" onclick="toggleLayer('zones')">Zones</button>
+                        <button class="btn btn-sm" onclick="toggleLayer('mesh')">Mesh</button>
+                    </div>
+                </div>
+                <div id="map"></div>
+            </div>
+        </div>
+        
+        <!-- Squads View -->
+        <div class="main" id="view-squads">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Squads</h3>
+                    <button class="btn" onclick="showSquadModal()">+ New Squad</button>
+                </div>
+                <div class="squad-grid" id="squadGrid">
+                    <div class="squad-card">
+                        <div class="squad-name">ALPHA</div>
+                        <div class="squad-members">
+                            <div>ALPHA-1 (Team Lead)</div>
+                            <div>ALPHA-2 (Point)</div>
+                            <div>ALPHA-3 (Rear)</div>
+                        </div>
+                    </div>
+                    <div class="squad-card">
+                        <div class="squad-name">BRAVO</div>
+                        <div class="squad-members">
+                            <div>BRAVO-1 (Team Lead)</div>
+                            <div>BRAVO-2 (Medic)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- SATCOM View -->
+        <div class="main" id="view-satcom">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Satellite Tracking</h3>
+                    <button class="btn btn-sm" onclick="loadTLEs()">Load TLEs</button>
+                </div>
+                <div class="sat-list" id="satList">
+                    <div class="sat-item">
+                        <div class="sat-name">ISS (ZARYA)</div>
+                        <div class="sat-info">Elev: 45° | Az: 180°</div>
+                    </div>
+                    <div class="sat-item">
+                        <div class="sat-name">NOAA 19</div>
+                        <div class="sat-info">Elev: 12° | Az: 270°</div>
+                    </div>
+                    <div class="sat-item">
+                        <div class="sat-name">AO-91</div>
+                        <div class="sat-info">Elev: -- | AOS in 23min</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Zones View -->
+        <div class="main" id="view-zones">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Zones</h3>
+                    <button class="btn" onclick="showZoneModal()">+ New Zone</button>
+                </div>
+                <div class="zone-list" id="zoneList">
+                    <div class="zone-tag restricted">🔴 Restricted: Grid 1234-5678</div>
+                    <div class="zone-tag friendly">🟢 Friendly: LZ Alpha</div>
+                    <div class="zone-tag objective">🟡 Objective: Target Area</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ATAK View -->
+        <div class="main" id="view-atak">
+            <div class="card">
+                <h3>ATAK Integration</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1rem;">Import/export KML/KMZ files and CoT data</p>
+                
+                <div class="form-group">
+                    <button class="btn" onclick="importKML()">Import KML/KMZ</button>
+                    <button class="btn" onclick="exportKML()">Export KML</button>
+                </div>
+                
+                <div class="form-group">
+                    <label>CoT Bridge Status</label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="dot offline"></span>
+                        <span>Not Connected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Settings View -->
+        <div class="main" id="view-settings">
+            <div class="card">
+                <h3>Settings</h3>
+                
+                <div class="settings-section">
+                    <h4>Callsign</h4>
+                    <div class="form-group">
+                        <label>My Callsign</label>
+                        <input type="text" id="myCallsign" placeholder="ALPHA-1" value="ALPHA-1">
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Encryption</h4>
+                    <div class="form-group">
+                        <label>Mode</label>
+                        <select id="encryptionMode">
+                            <option value="clear">CLEAR (No Encryption)</option>
+                            <option value="secure">SECURE (Team Key)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="keyGroup" style="display: none;">
+                        <label>Team Key</label>
+                        <input type="password" id="teamKey" placeholder="Enter team key">
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>Data</h4>
+                    <button class="btn btn-sm" onclick="exportData()">Export Data</button>
+                    <button class="btn btn-sm" onclick="importData()">Import Data</button>
+                    <button class="btn btn-sm btn-danger" onclick="clearData()">Clear All</button>
+                </div>
             </div>
         </div>
     </div>
     
+    <!-- New Packet Modal -->
+    <div class="modal" id="packetModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>New Packet</h3>
+                <button class="modal-close" onclick="hideModal('packetModal')">&times;</button>
+            </div>
+            <form id="packetForm" onsubmit="createPacket(event)">
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="packetType" required>
+                        <option value="SITREP">SITREP - Situation Report</option>
+                        <option value="TASK">TASK - Task Assignment</option>
+                        <option value="CHECKIN">CHECKIN - Location/Status</option>
+                        <option value="CONTACT">CONTACT - Contact Report</option>
+                        <option value="RESOURCE">RESOURCE - Resource Request</option>
+                        <option value="ASSET">ASSET - Asset Status</option>
+                        <option value="ZONE">ZONE - Zone Definition</option>
+                        <option value="MISSION">MISSION - Mission Brief</option>
+                        <option value="EVENT">EVENT - Event Log</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="packetPriority">
+                        <option value="ROUTINE">ROUTINE</option>
+                        <option value="PRIORITY">PRIORITY</option>
+                        <option value="URGENT">URGENT</option>
+                        <option value="FLASH">FLASH</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>To</label>
+                    <input type="text" id="packetTo" placeholder="ALL" value="ALL">
+                </div>
+                <div class="form-group">
+                    <label>Content</label>
+                    <textarea id="packetContent" placeholder="Enter packet content..." required></textarea>
+                </div>
+                <button type="submit" class="btn btn-success">Create Packet</button>
+            </form>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Placeholder for future functionality
+        // State
+        let map = null;
+        let packets = [];
+        let squads = [];
+        let zones = [];
+        
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const view = item.dataset.view;
+                
+                // Update active nav
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                // Show correct view
+                document.querySelectorAll('.main').forEach(m => m.classList.remove('active'));
+                document.getElementById('view-' + view).classList.add('active');
+                
+                // Initialize map if needed
+                if (view === 'map' && !map) {
+                    setTimeout(initMap, 100);
+                }
+            });
+        });
+        
+        // Modal functions
+        function showPacketModal() {
+            document.getElementById('packetModal').classList.add('active');
+        }
+        
+        function hideModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+        
+        // Create packet
+        function createPacket(e) {
+            e.preventDefault();
+            const type = document.getElementById('packetType').value;
+            const priority = document.getElementById('packetPriority').value;
+            const to = document.getElementById('packetTo').value;
+            const content = document.getElementById('packetContent').value;
+            const from = document.getElementById('myCallsign').value || 'ME';
+            
+            const packet = {
+                id: Date.now(),
+                type,
+                priority,
+                from,
+                to,
+                content,
+                timestamp: new Date().toISOString()
+            };
+            
+            packets.unshift(packet);
+            renderPackets();
+            hideModal('packetModal');
+            document.getElementById('packetForm').reset();
+        }
+        
+        function renderPackets() {
+            const list = document.getElementById('packetList');
+            list.innerHTML = packets.map(p => `
+                <div class="packet-item type-${p.type.toLowerCase()} priority-${p.priority.toLowerCase()}">
+                    <div class="packet-header">
+                        <span class="packet-type">${p.type}</span>
+                        <span class="packet-priority">${p.priority}</span>
+                    </div>
+                    <div class="packet-meta">FROM: ${p.from} | TO: ${p.to} | ${new Date(p.timestamp).toLocaleTimeString()}</div>
+                    <div class="packet-content">${p.content}</div>
+                </div>
+            `).join('');
+        }
+        
+        // Map
+        function initMap() {
+            map = L.map('map').setView([34.0522, -118.2437], 10);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+        }
+        
+        function toggleLayer(layer) {
+            console.log('Toggle layer:', layer);
+        }
+        
+        // Squads
+        function showSquadModal() {
+            alert('Squad creation coming soon!');
+        }
+        
+        // Zones
+        function showZoneModal() {
+            alert('Zone creation coming soon!');
+        }
+        
+        // SATCOM
+        function loadTLEs() {
+            alert('TLE loading coming soon! Paste TLEs from CelesTrak.');
+        }
+        
+        // ATAK
+        function importKML() {
+            alert('KML import coming soon!');
+        }
+        
+        function exportKML() {
+            alert('KML export coming soon!');
+        }
+        
+        // Settings
+        document.getElementById('encryptionMode').addEventListener('change', (e) => {
+            document.getElementById('keyGroup').style.display = 
+                e.target.value === 'secure' ? 'block' : 'none';
+        });
+        
+        function exportData() {
+            const data = { packets, squads, zones };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'overwatch-data.json';
+            a.click();
+        }
+        
+        function importData() {
+            alert('Import coming soon!');
+        }
+        
+        function clearData() {
+            if (confirm('Clear all data? This cannot be undone.')) {
+                packets = [];
+                squads = [];
+                zones = [];
+                renderPackets();
+            }
+        }
+        
+        // Close modals on outside click
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.remove('active');
+                }
+            });
+        });
+        
         console.log('Overwatch v0.1.0 loaded');
     </script>
 </body>
