@@ -151,6 +151,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
         }
         
         .card h3 {
@@ -188,6 +190,11 @@
         .btn-success {
             background: var(--success);
             color: white;
+        }
+        
+        .btn-secondary {
+            background: var(--primary);
+            color: var(--text);
         }
         
         /* Forms */
@@ -273,8 +280,165 @@
         
         /* Map */
         #map {
-            height: calc(100vh - 180px);
+            height: calc(100vh - 220px);
             border-radius: 8px;
+            filter: brightness(0.7) saturate(1.2);
+        }
+        
+        .map-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .map-controls .btn.active {
+            background: var(--accent);
+            color: var(--background);
+        }
+        
+        .layer-group {
+            display: flex;
+            gap: 0.25rem;
+            flex-wrap: wrap;
+        }
+        
+        .layer-btn {
+            background: var(--primary);
+            color: var(--text);
+            border: 1px solid transparent;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .layer-btn:hover {
+            border-color: var(--accent);
+        }
+        
+        .layer-btn.active {
+            background: var(--accent);
+            color: var(--background);
+            border-color: var(--accent);
+        }
+        
+        /* SDR Panel */
+        .sdr-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+        
+        .sdr-card {
+            background: var(--background);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--primary);
+        }
+        
+        .sdr-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        
+        .sdr-title {
+            font-weight: bold;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .sdr-status {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.7rem;
+        }
+        
+        .sdr-status .dot {
+            width: 6px;
+            height: 6px;
+        }
+        
+        .sdr-toggle {
+            background: var(--secondary);
+            border: 1px solid var(--primary);
+            color: var(--text);
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        
+        .sdr-toggle.active {
+            background: var(--success);
+            border-color: var(--success);
+            color: white;
+        }
+        
+        .sdr-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+            font-size: 0.75rem;
+        }
+        
+        .sdr-stat {
+            background: var(--secondary);
+            padding: 0.5rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .sdr-stat-value {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+        
+        .sdr-stat-label {
+            color: var(--text-muted);
+            font-size: 0.65rem;
+        }
+        
+        .sdr-freq {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+        
+        /* Aircraft/Ship List */
+        .track-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .track-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            background: var(--secondary);
+            border-radius: 4px;
+            margin-bottom: 0.25rem;
+            font-size: 0.8rem;
+        }
+        
+        .track-icao {
+            font-family: monospace;
+            color: var(--accent);
+        }
+        
+        .track-info {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.7rem;
+            color: var(--text-muted);
         }
         
         /* Squads */
@@ -288,6 +452,24 @@
             background: var(--background);
             padding: 1rem;
             border-radius: 4px;
+            position: relative;
+        }
+        
+        .squad-delete {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: var(--danger);
+            color: white;
+            border: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 0.7rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .squad-name {
@@ -298,6 +480,17 @@
         
         .squad-members {
             font-size: 0.875rem;
+        }
+        
+        .squad-member {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--primary);
+        }
+        
+        .squad-member:last-child {
+            border-bottom: none;
         }
         
         /* Zones */
@@ -351,6 +544,10 @@
         .sat-info {
             font-size: 0.7rem;
             color: var(--text-muted);
+        }
+        
+        .sat-tracked {
+            border: 1px solid var(--success);
         }
         
         /* Settings */
@@ -451,6 +648,10 @@
                 <span class="nav-icon">🗺️</span>
                 <span>Map</span>
             </div>
+            <div class="nav-item" data-view="sdr">
+                <span class="nav-icon">📡</span>
+                <span>SDR</span>
+            </div>
             <div class="nav-item" data-view="squads">
                 <span class="nav-icon">👥</span>
                 <span>Squads</span>
@@ -493,14 +694,6 @@
                         <div class="packet-meta">FROM: ALPHA-1 | TO: ALL | 12:34 UTC</div>
                         <div class="packet-content">Area clear. No contacts. Moving to checkpoint 3.</div>
                     </div>
-                    <div class="packet-item type-task priority-urgent">
-                        <div class="packet-header">
-                            <span class="packet-type">TASK</span>
-                            <span class="packet-priority">URGENT</span>
-                        </div>
-                        <div class="packet-meta">FROM: COMMAND | TO: ALPHA | 12:30 UTC</div>
-                        <div class="packet-content">Secure grid square 1234. Enemy vehicle reported.</div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -510,13 +703,122 @@
             <div class="card">
                 <div class="card-header">
                     <h3>Tactical Map</h3>
-                    <div>
-                        <button class="btn btn-sm" onclick="toggleLayer('members')">Members</button>
-                        <button class="btn btn-sm" onclick="toggleLayer('zones')">Zones</button>
-                        <button class="btn btn-sm" onclick="toggleLayer('mesh')">Mesh</button>
+                </div>
+                <div class="map-controls">
+                    <div class="layer-group">
+                        <button class="layer-btn active" onclick="setMapStyle('dark')">🌙 Dark</button>
+                        <button class="layer-btn" onclick="setMapStyle('satellite')">🛰️ Satellite</button>
+                        <button class="layer-btn" onclick="setMapStyle('terrain')">⛰️ Terrain</button>
+                        <button class="layer-btn" onclick="setMapStyle('streets')">🛣️ Streets</button>
+                    </div>
+                    <div class="layer-group">
+                        <button class="layer-btn active" onclick="toggleLayer('members')">👥 Members</button>
+                        <button class="layer-btn active" onclick="toggleLayer('zones')">📍 Zones</button>
+                        <button class="layer-btn" onclick="toggleLayer('adsb')">✈️ ADS-B</button>
+                        <button class="layer-btn" onclick="toggleLayer('ais')">🚢 AIS</button>
+                        <button class="layer-btn" onclick="toggleLayer('satcom')">🛰️ SATCOM</button>
                     </div>
                 </div>
                 <div id="map"></div>
+            </div>
+        </div>
+        
+        <!-- SDR View -->
+        <div class="main" id="view-sdr">
+            <div class="card">
+                <h3>SDR Receivers</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1rem; font-size: 0.875rem;">
+                    Connect RTL-SDR or other SDR hardware to track aircraft (ADS-B), ships (AIS), and satellites.
+                </p>
+                
+                <div class="sdr-panel">
+                    <!-- ADS-B -->
+                    <div class="sdr-card">
+                        <div class="sdr-header">
+                            <div class="sdr-title">
+                                <span>✈️</span> ADS-B (Flight Tracking)
+                            </div>
+                            <button class="sdr-toggle" id="adsbToggle" onclick="toggleSDR('adsb')">Start</button>
+                        </div>
+                        <div class="sdr-stats">
+                            <div class="sdr-stat">
+                                <div class="sdr-stat-value" id="adsbCount">0</div>
+                                <div class="sdr-stat-label">Aircraft</div>
+                            </div>
+                            <div class="sdr-stat">
+                                <div class="sdr-stat-value" id="adsbRange">--</div>
+                                <div class="sdr-stat-label">Max Range</div>
+                            </div>
+                        </div>
+                        <div class="sdr-freq">Frequency: 1090 MHz</div>
+                        <div class="track-list" id="adsbList" style="margin-top: 0.75rem;"></div>
+                    </div>
+                    
+                    <!-- AIS -->
+                    <div class="sdr-card">
+                        <div class="sdr-header">
+                            <div class="sdr-title">
+                                <span>🚢</span> AIS (Ship Tracking)
+                            </div>
+                            <button class="sdr-toggle" id="aisToggle" onclick="toggleSDR('ais')">Start</button>
+                        </div>
+                        <div class="sdr-stats">
+                            <div class="sdr-stat">
+                                <div class="sdr-stat-value" id="aisCount">0</div>
+                                <div class="sdr-stat-label">Ships</div>
+                            </div>
+                            <div class="sdr-stat">
+                                <div class="sdr-stat-value" id="aisRange">--</div>
+                                <div class="sdr-stat-label">Max Range</div>
+                            </div>
+                        </div>
+                        <div class="sdr-freq">Frequency: 161.975 MHz / 162.025 MHz</div>
+                        <div class="track-list" id="aisList" style="margin-top: 0.75rem;"></div>
+                    </div>
+                    
+                    <!-- SATCOM -->
+                    <div class="sdr-card">
+                        <div class="sdr-header">
+                            <div class="sdr-title">
+                                <span>🛰️</span> SATCOM (Satellite Tracking)
+                            </div>
+                            <button class="sdr-toggle" id="satcomToggle" onclick="toggleSDR('satcom')">Start</button>
+                        </div>
+                        <div class="sdr-stats">
+                            <div class="sdr-stat">
+                                <div class="sdr-stat-value" id="satCount">3</div>
+                                <div class="sdr-stat-label">Satellites</div>
+                            </div>
+                            <div class="sdr-stat">
+                                <div class="sdr-stat-value" id="satPasses">2</div>
+                                <div class="sdr-stat-label">Passes Today</div>
+                            </div>
+                        </div>
+                        <div class="sdr-freq">Multiple (NOAA, Meteor, ISS)</div>
+                        <div class="track-list" id="satcomList" style="margin-top: 0.75rem;">
+                            <div class="track-item">
+                                <span class="track-icao">ISS</span>
+                                <div class="track-info">
+                                    <span>Elev: 45°</span>
+                                    <span>Az: 180°</span>
+                                </div>
+                            </div>
+                            <div class="track-item">
+                                <span class="track-icao">NOAA 19</span>
+                                <div class="track-info">
+                                    <span>Elev: 12°</span>
+                                    <span>Az: 270°</span>
+                                </div>
+                            </div>
+                            <div class="track-item">
+                                <span class="track-icao">AO-91</span>
+                                <div class="track-info">
+                                    <span>AOS: 23m</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -529,18 +831,35 @@
                 </div>
                 <div class="squad-grid" id="squadGrid">
                     <div class="squad-card">
+                        <button class="squad-delete" onclick="deleteSquad(0)">×</button>
                         <div class="squad-name">ALPHA</div>
                         <div class="squad-members">
-                            <div>ALPHA-1 (Team Lead)</div>
-                            <div>ALPHA-2 (Point)</div>
-                            <div>ALPHA-3 (Rear)</div>
+                            <div class="squad-member">
+                                <span>ALPHA-1</span>
+                                <span>Team Lead</span>
+                            </div>
+                            <div class="squad-member">
+                                <span>ALPHA-2</span>
+                                <span>Point</span>
+                            </div>
+                            <div class="squad-member">
+                                <span>ALPHA-3</span>
+                                <span>Rear</span>
+                            </div>
                         </div>
                     </div>
                     <div class="squad-card">
+                        <button class="squad-delete" onclick="deleteSquad(1)">×</button>
                         <div class="squad-name">BRAVO</div>
                         <div class="squad-members">
-                            <div>BRAVO-1 (Team Lead)</div>
-                            <div>BRAVO-2 (Medic)</div>
+                            <div class="squad-member">
+                                <span>BRAVO-1</span>
+                                <span>Team Lead</span>
+                            </div>
+                            <div class="squad-member">
+                                <span>BRAVO-2</span>
+                                <span>Medic</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -555,17 +874,17 @@
                     <button class="btn btn-sm" onclick="loadTLEs()">Load TLEs</button>
                 </div>
                 <div class="sat-list" id="satList">
-                    <div class="sat-item">
+                    <div class="sat-item sat-tracked">
                         <div class="sat-name">ISS (ZARYA)</div>
                         <div class="sat-info">Elev: 45° | Az: 180°</div>
                     </div>
-                    <div class="sat-item">
+                    <div class="sat-item sat-tracked">
                         <div class="sat-name">NOAA 19</div>
                         <div class="sat-info">Elev: 12° | Az: 270°</div>
                     </div>
                     <div class="sat-item">
                         <div class="sat-name">AO-91</div>
-                        <div class="sat-info">Elev: -- | AOS in 23min</div>
+                        <div class="sat-info">AOS in 23min</div>
                     </div>
                 </div>
             </div>
@@ -617,6 +936,23 @@
                     <div class="form-group">
                         <label>My Callsign</label>
                         <input type="text" id="myCallsign" placeholder="ALPHA-1" value="ALPHA-1">
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h4>SDR Configuration</h4>
+                    <div class="form-group">
+                        <label>SDR Device</label>
+                        <select id="sdrDevice">
+                            <option value="">Auto-detect</option>
+                            <option value="rtl2832">RTL-SDR (RTL2832U)</option>
+                            <option value="hackrf">HackRF One</option>
+                            <option value="sdrplay">SDRplay</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>GPS Location (for SDR tracking)</label>
+                        <input type="text" id="gpsLocation" placeholder="34.0522, -118.2437">
                     </div>
                 </div>
                 
@@ -689,35 +1025,212 @@
         </div>
     </div>
     
+    <!-- New Squad Modal -->
+    <div class="modal" id="squadModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>New Squad</h3>
+                <button class="modal-close" onclick="hideModal('squadModal')">&times;</button>
+            </div>
+            <form id="squadForm" onsubmit="createSquad(event)">
+                <div class="form-group">
+                    <label>Squad Name</label>
+                    <input type="text" id="squadName" placeholder="ALPHA" required>
+                </div>
+                <div class="form-group">
+                    <label>Members (one per line, callsign | role)</label>
+                    <textarea id="squadMembers" placeholder="ALPHA-1 | Team Lead&#10;ALPHA-2 | Point"></textarea>
+                </div>
+                <button type="submit" class="btn btn-success">Create Squad</button>
+            </form>
+        </div>
+    </div>
+    
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // State
         let map = null;
         let packets = [];
-        let squads = [];
+        let squads = [
+            { name: 'ALPHA', members: [{ callsign: 'ALPHA-1', role: 'Team Lead' }, { callsign: 'ALPHA-2', role: 'Point' }, { callsign: 'ALPHA-3', role: 'Rear' }] },
+            { name: 'BRAVO', members: [{ callsign: 'BRAVO-1', role: 'Team Lead' }, { callsign: 'BRAVO-2', role: 'Medic' }] }
+        ];
         let zones = [];
+        let sdrActive = { adsb: false, ais: false, satcom: false };
+        
+        // Map styles
+        const mapStyles = {
+            dark: {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                attribution: '© CartoDB'
+            },
+            satellite: {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri'
+            },
+            terrain: {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenTopoMap'
+            },
+            streets: {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenStreetMap'
+            }
+        };
+        
+        let currentStyle = 'dark';
         
         // Navigation
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', () => {
                 const view = item.dataset.view;
                 
-                // Update active nav
                 document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
                 
-                // Show correct view
                 document.querySelectorAll('.main').forEach(m => m.classList.remove('active'));
                 document.getElementById('view-' + view).classList.add('active');
                 
-                // Initialize map if needed
                 if (view === 'map' && !map) {
                     setTimeout(initMap, 100);
                 }
             });
         });
         
-        // Modal functions
+        // Map functions
+        function initMap() {
+            map = L.map('map').setView([34.0522, -118.2437], 10);
+            L.tileLayer(mapStyles.dark.url, {
+                attribution: mapStyles.dark.attribution,
+                maxZoom: 19
+            }).addTo(map);
+        }
+        
+        function setMapStyle(style) {
+            currentStyle = style;
+            
+            // Update button states
+            document.querySelectorAll('.map-controls .layer-btn').forEach(btn => {
+                if (btn.textContent.toLowerCase().includes(style)) {
+                    btn.classList.add('active');
+                } else if (['dark', 'satellite', 'terrain', 'streets'].some(s => btn.textContent.toLowerCase().includes(s))) {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            // Recreate map with new tiles
+            if (map) {
+                map.eachLayer(layer => {
+                    if (layer instanceof L.TileLayer) {
+                        map.removeLayer(layer);
+                    }
+                });
+                
+                L.tileLayer(mapStyles[style].url, {
+                    attribution: mapStyles[style].attribution,
+                    maxZoom: 19
+                }).addTo(map);
+            }
+        }
+        
+        function toggleLayer(layer) {
+            // Toggle button state
+            event.target.classList.toggle('active');
+            console.log('Toggle layer:', layer);
+        }
+        
+        // SDR functions
+        function toggleSDR(type) {
+            sdrActive[type] = !sdrActive[type];
+            const btn = document.getElementById(type + 'Toggle');
+            
+            if (sdrActive[type]) {
+                btn.textContent = 'Stop';
+                btn.classList.add('active');
+                startSDR(type);
+            } else {
+                btn.textContent = 'Start';
+                btn.classList.remove('active');
+                stopSDR(type);
+            }
+        }
+        
+        function startSDR(type) {
+            // Placeholder - would connect to SDR hardware
+            console.log('Starting SDR:', type);
+            alert('SDR functionality requires RTL-SDR hardware and additional setup.\n\nThis is a placeholder UI. Backend integration coming soon.');
+        }
+        
+        function stopSDR(type) {
+            console.log('Stopping SDR:', type);
+        }
+        
+        // Squad functions
+        function showSquadModal() {
+            document.getElementById('squadModal').classList.add('active');
+        }
+        
+        function createSquad(e) {
+            e.preventDefault();
+            const name = document.getElementById('squadName').value;
+            const membersText = document.getElementById('squadMembers').value;
+            
+            const members = membersText.split('\n').filter(line => line.trim()).map(line => {
+                const [callsign, role] = line.split('|').map(s => s.trim());
+                return { callsign: callsign || 'Unknown', role: role || 'Member' };
+            });
+            
+            squads.push({ name, members });
+            renderSquads();
+            hideModal('squadModal');
+            document.getElementById('squadForm').reset();
+        }
+        
+        function deleteSquad(index) {
+            if (confirm('Delete this squad?')) {
+                squads.splice(index, 1);
+                renderSquads();
+            }
+        }
+        
+        function renderSquads() {
+            const grid = document.getElementById('squadGrid');
+            grid.innerHTML = squads.map((squad, index) => `
+                <div class="squad-card">
+                    <button class="squad-delete" onclick="deleteSquad(${index})">×</button>
+                    <div class="squad-name">${squad.name}</div>
+                    <div class="squad-members">
+                        ${squad.members.map(m => `
+                            <div class="squad-member">
+                                <span>${m.callsign}</span>
+                                <span>${m.role}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Zone functions
+        function showZoneModal() {
+            alert('Zone creation coming soon!');
+        }
+        
+        // SATCOM functions
+        function loadTLEs() {
+            alert('TLE loading coming soon! Paste TLEs from CelesTrak.');
+        }
+        
+        // ATAK functions
+        function importKML() {
+            alert('KML import coming soon!');
+        }
+        
+        function exportKML() {
+            alert('KML export coming soon!');
+        }
+        
+        // Packet functions
         function showPacketModal() {
             document.getElementById('packetModal').classList.add('active');
         }
@@ -726,7 +1239,6 @@
             document.getElementById(id).classList.remove('active');
         }
         
-        // Create packet
         function createPacket(e) {
             e.preventDefault();
             const type = document.getElementById('packetType').value;
@@ -753,6 +1265,10 @@
         
         function renderPackets() {
             const list = document.getElementById('packetList');
+            if (packets.length === 0) {
+                list.innerHTML = '<p style="color: var(--text-muted);">No packets yet. Create your first packet above.</p>';
+                return;
+            }
             list.innerHTML = packets.map(p => `
                 <div class="packet-item type-${p.type.toLowerCase()} priority-${p.priority.toLowerCase()}">
                     <div class="packet-header">
@@ -763,42 +1279,6 @@
                     <div class="packet-content">${p.content}</div>
                 </div>
             `).join('');
-        }
-        
-        // Map
-        function initMap() {
-            map = L.map('map').setView([34.0522, -118.2437], 10);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap'
-            }).addTo(map);
-        }
-        
-        function toggleLayer(layer) {
-            console.log('Toggle layer:', layer);
-        }
-        
-        // Squads
-        function showSquadModal() {
-            alert('Squad creation coming soon!');
-        }
-        
-        // Zones
-        function showZoneModal() {
-            alert('Zone creation coming soon!');
-        }
-        
-        // SATCOM
-        function loadTLEs() {
-            alert('TLE loading coming soon! Paste TLEs from CelesTrak.');
-        }
-        
-        // ATAK
-        function importKML() {
-            alert('KML import coming soon!');
-        }
-        
-        function exportKML() {
-            alert('KML export coming soon!');
         }
         
         // Settings
@@ -827,6 +1307,7 @@
                 squads = [];
                 zones = [];
                 renderPackets();
+                renderSquads();
             }
         }
         
@@ -839,7 +1320,9 @@
             });
         });
         
-        console.log('Overwatch v0.1.0 loaded');
+        // Initialize
+        renderSquads();
+        console.log('Overwatch v0.1.1 loaded');
     </script>
 </body>
 </html>
