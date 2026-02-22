@@ -34,6 +34,12 @@
     ],
     "resources": [
       "../webui/*"
-    ]
+    ],
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "12.0",
+      "entitlements": "./Entitlements.plist",
+      "infoPlist": "./Info.plist"
+    }
   }
 }

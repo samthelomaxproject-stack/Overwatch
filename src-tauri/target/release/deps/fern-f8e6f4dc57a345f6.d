@@ -1,0 +1,11 @@
+/Users/thelomaxproject/Overwatch/src-tauri/target/release/deps/fern-f8e6f4dc57a345f6.d: /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/lib.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/builders.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/errors.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/log_impl.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/meta.rs
+
+/Users/thelomaxproject/Overwatch/src-tauri/target/release/deps/libfern-f8e6f4dc57a345f6.rlib: /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/lib.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/builders.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/errors.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/log_impl.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/meta.rs
+
+/Users/thelomaxproject/Overwatch/src-tauri/target/release/deps/libfern-f8e6f4dc57a345f6.rmeta: /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/lib.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/builders.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/errors.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/log_impl.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/meta.rs
+
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/lib.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/builders.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/errors.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/log_impl.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fern-0.7.1/src/meta.rs:

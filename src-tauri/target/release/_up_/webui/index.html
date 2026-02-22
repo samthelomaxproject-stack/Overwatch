@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Overwatch | Tactical Operations Center</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="tac-ui.css">
+    <style>
+        /* Military Symbol System - MIL-STD-2525 Inspired */
+        .tac-symbol {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+        }
+        
+        .tac-symbol-friendly {
+            border-color: var(--tac-friendly);
+            color: var(--tac-friendly);
+            background: rgba(0, 200, 81, 0.1);
+        }
+        
+        .tac-symbol-hostile {
+            border-color: var(--tac-hostile);
+            color: var(--tac-hostile);
+            background: rgba(255, 51, 51, 0.1);
+            border-radius: 50%;
+        }
+        
+        .tac-symbol-neutral {
+            border-color: var(--tac-neutral);
+            color: var(--tac-neutral);
+            background: rgba(0, 212, 255, 0.1);
+        }
+        
+        .tac-symbol-unknown {
+            border-color: var(--tac-unknown);
+            color: var(--tac-unknown);
+            background: rgba(255, 204, 0, 0.1);
+        }
+        
+        /* Unit Type Icons */
+        .tac-icon-infantry::before { content: '⏚'; }
+        .tac-icon-armor::before { content: '▰'; }
+        .tac-icon-air::before { content: '⛨'; }
+        .tac-icon-naval::before { content: '≋'; }
+        .tac-icon-drone::before { content: '⏍'; }
+        .tac-icon-sensor::before { content: '◎'; }
+        
+        /* Entity Cards */
+        .tac-entity {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-sm) var(--space-md);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            transition: all var(--transition-fast);
+        }
+        
+        .tac-entity:hover {
+            border-color: var(--accent-cyan-dim);
+        }
+        
+        .tac-entity-info {
+            flex: 1;
+        }
+        
+        .tac-entity-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+        }
+        
+        .tac-entity-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+        
+        .tac-entity-coords {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent-cyan);
+        }
+        
+        /* Map Overlay Controls */
+        .tac-map-overlay {
+            position: absolute;
+            top: var(--space-md);
+            right: var(--space-md);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }
+        
+        .tac-map-btn {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            backdrop-filter: blur(8px);
+        }
+        
+        .tac-map-btn:hover {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+        
+        .tac-map-btn.active {
+            background: var(--accent-cyan-dim);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+        
+        /* Layer Toggle Group */
+        .tac-layer-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--space-xs);
+            padding: var(--space-xs);
+            background: var(--bg-panel);
+            border-radius: 4px;
+            backdrop-filter: blur(8px);
+        }
+        
+        .tac-layer-btn {
+            padding: var(--space-xs) var(--space-sm);
+            font-size: 0.625rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            border-radius: 3px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            font-weight: 600;
+        }
+        
+        .tac-layer-btn:hover {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+        
+        .tac-layer-btn.active {
+            background: var(--accent-cyan-dim);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+        
+        /* Packet List Items */
+        .tac-packet {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: var(--space-md);
+            align-items: center;
+            padding: var(--space-sm) var(--space-md);
+            background: var(--bg-tertiary);
+            border-left: 3px solid;
+            border-radius: 0 4px 4px 0;
+            margin-bottom: var(--space-xs);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        
+        .tac-packet:hover {
+            background: rgba(0, 212, 255, 0.05);
+        }
+        
+        .tac-packet-type {
+            font-family: var(--font-mono);
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 2px 8px;
+            border-radius: 2px;
+            background: var(--bg-secondary);
+        }
+        
+        .tac-packet-content {
+            min-width: 0;
+        }
+        
+        .tac-packet-text {
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .tac-packet-meta {
+            font-size: 0.6875rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+        
+        /* Squad Cards */
+        .tac-squad {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .tac-squad-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-sm) var(--space-md);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        
+        .tac-squad-name {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            color: var(--accent-cyan);
+            font-size: 0.875rem;
+        }
+        
+        .tac-squad-members {
+            padding: var(--space-sm);
+        }
+        
+        .tac-squad-member {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-xs) var(--space-sm);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        
+        .tac-squad-member:last-child {
+            border-bottom: none;
+        }
+        
+        .tac-squad-callsign {
+            font-family: var(--font-mono);
+            font-size: 0.8125rem;
+            color: var(--text-primary);
+        }
+        
+        .tac-squad-role {
+            font-size: 0.6875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        
+        /* Quick Action Bar */
+        .tac-quick-actions {
+            display: flex;
+            gap: var(--space-xs);
+            padding: var(--space-xs);
+            background: var(--bg-secondary);
+            border-radius: 4px;
+        }
+        
+        .tac-quick-btn {
+            padding: var(--space-xs) var(--space-sm);
+            font-size: 0.625rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 3px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        
+        .tac-quick-btn:hover {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+    </style>
+</head>
+<body>
+    <div class="tac-app">
+        <!-- Header -->
+        <header class="tac-header">
+            <div class="tac-header-left">
+                <div class="tac-logo">
+                    <div class="tac-logo-icon">◈</div>
+                    <span>Overwatch</span>
+                </div>
+                <span class="tac-version">v0.2.0</span>
+            </div>
+            <div class="tac-header-right">
+                <select class="tac-select" id="transportSelect" style="width: 140px; font-size: 0.75rem;">
+                    <option value="">NO TRANSPORT</option>
+                    <option value="reticulum">RETICULUM</option>
+                    <option value="meshtastic">MESHTASTIC</option>
+                    <option value="clipboard">CLIPBOARD</option>
+                </select>
+                <div class="tac-status">
+                    <span class="tac-status-dot" id="statusDot"></span>
+                    <span class="tac-status-text" id="statusText">INITIALIZING...</span>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Main Container -->
+        <div class="tac-container">
+            <!-- Sidebar -->
+            <nav class="tac-sidebar">
+                <div class="tac-nav-section">Operations</div>
+                <div class="tac-nav-item active" data-view="packets" data-key="1">
+                    <span class="tac-nav-icon">◫</span>
+                    <span>Packets</span>
+                    <span class="tac-nav-shortcut">⌘1</span>
+                </div>
+                <div class="tac-nav-item" data-view="map" data-key="2">
+                    <span class="tac-nav-icon">◈</span>
+                    <span>Tactical Map</span>
+                    <span class="tac-nav-shortcut">⌘2</span>
+                </div>
+                <div class="tac-nav-item" data-view="sdr" data-key="3">
+                    <span class="tac-nav-icon">◎</span>
+                    <span>SDR / SIGINT</span>
+                    <span class="tac-nav-shortcut">⌘3</span>
+                </div>
+                
+                <div class="tac-nav-section">Assets</div>
+                <div class="tac-nav-item" data-view="squads" data-key="4">
+                    <span class="tac-nav-icon">◉</span>
+                    <span>Squads</span>
+                    <span class="tac-nav-shortcut">⌘4</span>
+                </div>
+                <div class="tac-nav-item" data-view="entities" data-key="5">
+                    <span class="tac-nav-icon">⬡</span>
+                    <span>Entities</span>
+                    <span class="tac-nav-shortcut">⌘5</span>
+                </div>
+                <div class="tac-nav-item" data-view="satcom" data-key="6">
+                    <span class="tac-nav-icon">◐</span>
+                    <span>SATCOM</span>
+                    <span class="tac-nav-shortcut">⌘6</span>
+                </div>
+                
+                <div class="tac-nav-section">Systems</div>
+                <div class="tac-nav-item" data-view="zones" data-key="7">
+                    <span class="tac-nav-icon">▣</span>
+                    <span>Zones</span>
+                    <span class="tac-nav-shortcut">⌘7</span>
+                </div>
+                <div class="tac-nav-item" data-view="atak" data-key="8">
+                    <span class="tac-nav-icon">◊</span>
+                    <span>ATAK / CoT</span>
+                    <span class="tac-nav-shortcut">⌘8</span>
+                </div>
+                <div class="tac-nav-item" data-view="settings" data-key="9">
+                    <span class="tac-nav-icon">⚙</span>
+                    <span>Settings</span>
+                    <span class="tac-nav-shortcut">⌘9</span>
+                </div>
+            </nav>
+            
+            <!-- Main Content -->
+            <main class="tac-main">
+                <!-- Packets View -->
+                <div class="tac-view active" id="view-packets">
+                    <div class="tac-panel" style="margin-bottom: var(--space-md);">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Create Packet</span>
+                            <button class="tac-btn tac-btn-primary" onclick="showPacketModal()">
+                                <span>+</span> NEW PACKET
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Recent Packets</span>
+                            <div class="tac-quick-actions">
+                                <button class="tac-quick-btn" onclick="filterPackets('all')">ALL</button>
+                                <button class="tac-quick-btn" onclick="filterPackets('sitrep')">SITREP</button>
+                                <button class="tac-quick-btn" onclick="filterPackets('task')">TASK</button>
+                                <button class="tac-quick-btn" onclick="filterPackets('contact')">CONTACT</button>
+                            </div>
+                        </div>
+                        <div class="tac-panel-body" id="packetList">
+                            <!-- Packets rendered here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Map View -->
+                <div class="tac-view" id="view-map">
+                    <div class="tac-map-container" id="map"></div>
+                    <div class="tac-map-overlay">
+                        <div class="tac-layer-group">
+                            <button class="tac-layer-btn active" onclick="setMapStyle('dark')">DARK</button>
+                            <button class="tac-layer-btn" onclick="setMapStyle('satellite')">SAT</button>
+                            <button class="tac-layer-btn" onclick="setMapStyle('terrain')">TER</button>
+                        </div>
+                        <div style="height: var(--space-xs);"></div>
+                        <div class="tac-layer-group">
+                            <button class="tac-layer-btn active" onclick="toggleLayer('units')">UNITS</button>
+                            <button class="tac-layer-btn active" onclick="toggleLayer('zones')">ZONES</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('adsb')">ADS-B</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('ais')">AIS</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- SDR View -->
+                <div class="tac-view" id="view-sdr">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">SDR Receivers</span>
+                        </div>
+                        <div class="tac-panel-body" id="sdrPanel">
+                            <!-- SDR cards rendered here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Squads View -->
+                <div class="tac-view" id="view-squads">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Squad Management</span>
+                            <button class="tac-btn tac-btn-primary" onclick="showSquadModal()">
+                                <span>+</span> NEW SQUAD
+                            </button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div class="tac-grid" id="squadGrid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));">
+                                <!-- Squads rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Entities View -->
+                <div class="tac-view" id="view-entities">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Tracked Entities</span>
+                            <div class="tac-quick-actions">
+                                <button class="tac-quick-btn" onclick="filterEntities('all')">ALL</button>
+                                <button class="tac-quick-btn" onclick="filterEntities('friendly')">FRIENDLY</button>
+                                <button class="tac-quick-btn" onclick="filterEntities('hostile')">HOSTILE</button>
+                                <button class="tac-quick-btn" onclick="filterEntities('neutral')">NEUTRAL</button>
+                            </div>
+                        </div>
+                        <div class="tac-panel-body" id="entityList">
+                            <!-- Entities rendered here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- SATCOM View -->
+                <div class="tac-view" id="view-satcom">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Satellite Tracking</span>
+                            <button class="tac-btn tac-btn-secondary" onclick="loadTLEs()">LOAD TLEs</button>
+                        </div>
+                        <div class="tac-panel-body" id="satList">
+                            <!-- Satellites rendered here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Zones View -->
+                <div class="tac-view" id="view-zones">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Tactical Zones</span>
+                            <button class="tac-btn tac-btn-primary" onclick="showZoneModal()">
+                                <span>+</span> NEW ZONE
+                            </button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div class="tac-layer-group" style="margin-bottom: var(--space-md);">
+                                <button class="tac-layer-btn" style="border-color: var(--tac-friendly); color: var(--tac-friendly);">FRIENDLY</button>
+                                <button class="tac-layer-btn" style="border-color: var(--tac-hostile); color: var(--tac-hostile);">HOSTILE</button>
+                                <button class="tac-layer-btn" style="border-color: var(--tac-neutral); color: var(--tac-neutral);">NEUTRAL</button>
+                                <button class="tac-layer-btn" style="border-color: var(--tac-unknown); color: var(--tac-unknown);">UNKNOWN</button>
+                            </div>
+                            <div id="zoneList"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ATAK View -->
+                <div class="tac-view" id="view-atak">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">ATAK / CoT Integration</span>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div class="tac-form-group">
+                                <button class="tac-btn tac-btn-secondary" onclick="importKML()">IMPORT KML/KMZ</button>
+                                <button class="tac-btn tac-btn-secondary" onclick="exportKML()">EXPORT KML</button>
+                            </div>
+                            <div class="tac-form-group">
+                                <label class="tac-label">CoT Bridge Status</label>
+                                <div style="display: flex; align-items: center; gap: var(--space-sm);">
+                                    <span class="tac-status-dot offline"></span>
+                                    <span style="font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-secondary);">DISCONNECTED</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Settings View -->
+                <div class="tac-view" id="view-settings">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">System Configuration</span>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div class="tac-form-group">
+                                <label class="tac-label">Callsign</label>
+                                <input type="text" class="tac-input" id="myCallsign" value="ALPHA-1" placeholder="ENTER CALLSIGN">
+                            </div>
+                            <div class="tac-form-group">
+                                <label class="tac-label">Encryption Mode</label>
+                                <select class="tac-select" id="encryptionMode">
+                                    <option value="clear">CLEAR (NO ENCRYPTION)</option>
+                                    <option value="secure">SECURE (TEAM KEY)</option>
+                                </select>
+                            </div>
+                            <div class="tac-form-group" id="keyGroup" style="display: none;">
+                                <label class="tac-label">Team Key</label>
+                                <input type="password" class="tac-input" id="teamKey" placeholder="ENTER TEAM KEY">
+                            </div>
+                            <div class="tac-form-group">
+                                <button class="tac-btn tac-btn-secondary" onclick="exportData()">EXPORT DATA</button>
+                                <button class="tac-btn tac-btn-secondary" onclick="importData()">IMPORT DATA</button>
+                                <button class="tac-btn tac-btn-danger" onclick="clearData()">CLEAR ALL</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    
+    <!-- New Packet Modal -->
+    <div class="tac-modal" id="packetModal">
+        <div class="tac-modal-content">
+            <div class="tac-modal-header">
+                <span class="tac-modal-title">Create Packet</span>
+                <button class="tac-modal-close" onclick="hideModal('packetModal')">&times;</button>
+            </div>
+            <div class="tac-modal-body">
+                <form id="packetForm" onsubmit="createPacket(event)">
+                    <div class="tac-form-group">
+                        <label class="tac-label">Type</label>
+                        <select class="tac-select" id="packetType" required>
+                            <option value="SITREP">SITREP - Situation Report</option>
+                            <option value="TASK">TASK - Task Assignment</option>
+                            <option value="CHECKIN">CHECKIN - Location/Status</option>
+                            <option value="CONTACT">CONTACT - Contact Report</option>
+                            <option value="RESOURCE">RESOURCE - Resource Request</option>
+                            <option value="ASSET">ASSET - Asset Status</option>
+                            <option value="ZONE">ZONE - Zone Definition</option>
+                            <option value="MISSION">MISSION - Mission Brief</option>
+                            <option value="EVENT">EVENT - Event Log</option>
+                        </select>
+                    </div>
+                    <div class="tac-form-group">
+                        <label class="tac-label">Priority</label>
+                        <select class="tac-select" id="packetPriority">
+                            <option value="ROUTINE">ROUTINE</option>
+                            <option value="PRIORITY">PRIORITY</option>
+                            <option value="URGENT">URGENT</option>
+                            <option value="FLASH">FLASH</option>
+                        </select>
+                    </div>
+                    <div class="tac-form-group">
+                        <label class="tac-label">To</label>
+                        <input type="text" class="tac-input" id="packetTo" value="ALL" placeholder="RECIPIENT">
+                    </div>
+                    <div class="tac-form-group">
+                        <label class="tac-label">Content</label>
+                        <textarea class="tac-textarea" id="packetContent" placeholder="ENTER PACKET CONTENT..." required></textarea>
+                    </div>
+                    <button type="submit" class="tac-btn tac-btn-primary" style="width: 100%;">CREATE PACKET</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- New Squad Modal -->
+    <div class="tac-modal" id="squadModal">
+        <div class="tac-modal-content">
+            <div class="tac-modal-header">
+                <span class="tac-modal-title">Create Squad</span>
+                <button class="tac-modal-close" onclick="hideModal('squadModal')">&times;</button>
+            </div>
+            <div class="tac-modal-body">
+                <form id="squadForm" onsubmit="createSquad(event)">
+                    <div class="tac-form-group">
+                        <label class="tac-label">Squad Name</label>
+                        <input type="text" class="tac-input" id="squadName" placeholder="ALPHA" required>
+                    </div>
+                    <div class="tac-form-group">
+                        <label class="tac-label">Members (callsign | role)</label>
+                        <textarea class="tac-textarea" id="squadMembers" placeholder="ALPHA-1 | TEAM LEAD
+ALPHA-2 | POINT
+ALPHA-3 | REAR"></textarea>
+                    </div>
+                    <button type="submit" class="tac-btn tac-btn-primary" style="width: 100%;">CREATE SQUAD</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // State
+        let map = null;
+        let myLocationMarker = null;
+        let myCallsign = 'ALPHA-1';
+        let packets = [];
+        let squads = [
+            { name: 'ALPHA', members: [{ callsign: 'ALPHA-1', role: 'TEAM LEAD' }, { callsign: 'ALPHA-2', role: 'POINT' }, { callsign: 'ALPHA-3', role: 'REAR' }] },
+            { name: 'BRAVO', members: [{ callsign: 'BRAVO-1', role: 'TEAM LEAD' }, { callsign: 'BRAVO-2', role: 'MEDIC' }] }
+        ];
+        let zones = [];
+        let sdrActive = { adsb: false, ais: false, satcom: false };
+        
+        // Map styles
+        const mapStyles = {
+            dark: {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                attribution: '© CartoDB'
+            },
+            satellite: {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri'
+            },
+            terrain: {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                attribution: '© OpenTopoMap'
+            }
+        };
+        
+        let currentStyle = 'dark';
+        
+        // Navigation
+        document.querySelectorAll('.tac-nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const view = item.dataset.view;
+                
+                document.querySelectorAll('.tac-nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                document.querySelectorAll('.tac-view').forEach(m => m.classList.remove('active'));
+                document.getElementById('view-' + view).classList.add('active');
+                
+                if (view === 'map' && !map) {
+                    setTimeout(initMap, 100);
+                }
+            });
+        });
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.metaKey || e.ctrlKey) {
+                const key = e.key;
+                const navItem = document.querySelector(`.tac-nav-item[data-key="${key}"]`);
+                if (navItem) {
+                    e.preventDefault();
+                    navItem.click();
+                }
+            }
+        });
+        
+        // Map functions
+        function initMap() {
+            map = L.map('map').setView([34.0522, -118.2437], 10);
+            L.tileLayer(mapStyles.dark.url, {
+                attribution: mapStyles.dark.attribution,
+                maxZoom: 19
+            }).addTo(map);
+        }
+        
+        function setMapStyle(style) {
+            currentStyle = style;
+            document.querySelectorAll('.tac-layer-group:first-child .tac-layer-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.textContent.toLowerCase().includes(style.substring(0, 3))) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            if (map) {
+                map.eachLayer(layer => {
+                    if (layer instanceof L.TileLayer) {
+                        map.removeLayer(layer);
+                    }
+                });
+                L.tileLayer(mapStyles[style].url, {
+                    attribution: mapStyles[style].attribution,
+                    maxZoom: 19
+                }).addTo(map);
+            }
+        }
+        
+        function toggleLayer(layer) {
+            event.target.classList.toggle('active');
+        }
+        
+        // GPS tracking
+        function initGPS() {
+            if ('geolocation' in navigator) {
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude, accuracy } = position.coords;
+                        updateMyLocation(latitude, longitude, accuracy);
+                    },
+                    (error) => {
+                        console.error('GPS Error:', error.message);
+                        document.getElementById('statusDot').classList.add('offline');
+                        document.getElementById('statusText').textContent = 'GPS OFFLINE';
+                    },
+                    { enableHighAccuracy: true, maximumAge: 10000 }
+                );
+            }
+        }
+        
+        function toMGRS(lat, lon) {
+            const zone = Math.floor((lon + 180) / 6) + 1;
+            const letter = String.fromCharCode(65 + Math.floor((lat + 80) / 8));
+            const easting = Math.floor((lon % 6 + 6) % 6 * 100000 + 500000);
+            const northing = Math.floor((lat % 8 + 8) % 8 * 100000 + 500000);
+            return `${zone}${letter} ${easting.toString().slice(-5)} ${northing.toString().slice(-5)}`;
+        }
+        
+        function updateMyLocation(lat, lon, accuracy) {
+            if (!map) return;
+            
+            const gridCoords = toMGRS(lat, lon);
+            const myIcon = L.divIcon({
+                className: 'my-location-marker',
+                html: `<div style="width:20px;height:20px;background:var(--accent-cyan);border:3px solid white;border-radius:50%;box-shadow:0 0 15px var(--accent-cyan);position:relative;">
+                    <div style="position:absolute;width:40px;height:40px;background:rgba(0,212,255,0.3);border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);animation:pulse 2s infinite;"></div>
+                </div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            
+            if (myLocationMarker) {
+                myLocationMarker.setLatLng([lat, lon]);
+            } else {
+                myLocationMarker = L.marker([lat, lon], { icon: myIcon, title: myCallsign })
+                    .addTo(map)
+                    .bindPopup(`<strong>${myCallsign}</strong><br>${gridCoords}`);
+                map.setView([lat, lon], 14);
+            }
+            
+            document.getElementById('statusDot').classList.remove('offline');
+            document.getElementById('statusText').innerHTML = `<span class="tac-status-value">${myCallsign}</span> • ${gridCoords}`;
+        }
+        
+        // Modal functions
+        function showPacketModal() {
+            document.getElementById('packetModal').classList.add('active');
+        }
+        
+        function showSquadModal() {
+            document.getElementById('squadModal').classList.add('active');
+        }
+        
+        function hideModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+        
+        // Packet functions
+        function createPacket(e) {
+            e.preventDefault();
+            const type = document.getElementById('packetType').value;
+            const priority = document.getElementById('packetPriority').value;
+            const to = document.getElementById('packetTo').value;
+            const content = document.getElementById('packetContent').value;
+            const from = document.getElementById('myCallsign').value || 'ME';
+            
+            const packet = {
+                id: Date.now(),
+                type,
+                priority,
+                from,
+                to,
+                content,
+                timestamp: new Date().toISOString()
+            };
+            
+            packets.unshift(packet);
+            renderPackets();
+            hideModal('packetModal');
+            document.getElementById('packetForm').reset();
+        }
+        
+        function renderPackets() {
+            const list = document.getElementById('packetList');
+            if (packets.length === 0) {
+                list.innerHTML = '<div style="text-align: center; padding: var(--space-xl); color: var(--text-muted);">NO PACKETS</div>';
+                return;
+            }
+            
+            const priorityClass = {
+                'ROUTINE': 'tac-priority-routine',
+                'PRIORITY': 'tac-priority-priority',
+                'URGENT': 'tac-priority-urgent',
+                'FLASH': 'tac-priority-flash'
+            };
+            
+            const typeColor = {
+                'SITREP': 'var(--accent-cyan)',
+                'TASK': 'var(--accent-green)',
+                'CHECKIN': '#4287f5',
+                'CONTACT': 'var(--accent-red)',
+                'RESOURCE': '#9f7aea',
+                'ASSET': '#38b2ac',
+                'ZONE': 'var(--accent-orange)',
+                'MISSION': '#fc8181',
+                'EVENT': '#63b3ed'
+            };
+            
+            list.innerHTML = packets.map(p => `
+                <div class="tac-packet tac-type-${p.type.toLowerCase()}" style="border-left-color: ${typeColor[p.type] || 'var(--accent-cyan)'};">
+                    <div>
+                        <span class="tac-packet-type" style="color: ${typeColor[p.type] || 'var(--accent-cyan)'};">${p.type}</span>
+                        <span class="tac-priority ${priorityClass[p.priority]}">${p.priority}</span>
+                    </div>
+                    <div class="tac-packet-content">
+                        <div class="tac-packet-text">${p.content}</div>
+                        <div class="tac-packet-meta">FROM: ${p.from} | TO: ${p.to} | ${new Date(p.timestamp).toLocaleTimeString()}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function filterPackets(type) {
+            // Filter implementation
+            console.log('Filter packets:', type);
+        }
+        
+        // Squad functions
+        function createSquad(e) {
+            e.preventDefault();
+            const name = document.getElementById('squadName').value.toUpperCase();
+            const membersText = document.getElementById('squadMembers').value;
+            
+            const members = membersText.split('\n').filter(line => line.trim()).map(line => {
+                const [callsign, role] = line.split('|').map(s => s.trim().toUpperCase());
+                return { callsign: callsign || 'UNKNOWN', role: role || 'MEMBER' };
+            });
+            
+            squads.push({ name, members });
+            renderSquads();
+            hideModal('squadModal');
+            document.getElementById('squadForm').reset();
+        }
+        
+        function renderSquads() {
+            const grid = document.getElementById('squadGrid');
+            grid.innerHTML = squads.map((squad, index) => `
+                <div class="tac-squad">
+                    <div class="tac-squad-header">
+                        <span class="tac-squad-name">${squad.name}</span>
+                        <button class="tac-btn tac-btn-sm tac-btn-danger" onclick="deleteSquad(${index})">✕</button>
+                    </div>
+                    <div class="tac-squad-members">
+                        ${squad.members.map(m => `
+                            <div class="tac-squad-member">
+                                <span class="tac-squad-callsign">${m.callsign}</span>
+                                <span class="tac-squad-role">${m.role}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function deleteSquad(index) {
+            if (confirm('DELETE SQUAD?')) {
+                squads.splice(index, 1);
+                renderSquads();
+            }
+        }
+        
+        // SDR functions
+        function renderSDR() {
+            const panel = document.getElementById('sdrPanel');
+            panel.innerHTML = `
+                <div class="tac-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-md);">
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">ADS-B (1090 MHz)</span>
+                            <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleSDR('adsb')">START</button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-md); text-align: center;">
+                                <div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">0</div>
+                                    <div class="tac-label">AIRCRAFT</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">--</div>
+                                    <div class="tac-label">MAX RANGE</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">AIS (162 MHz)</span>
+                            <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleSDR('ais')">START</button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-md); text-align: center;">
+                                <div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">0</div>
+                                    <div class="tac-label">SHIPS</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">--</div>
+                                    <div class="tac-label">MAX RANGE</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function toggleSDR(type) {
+            alert('SDR REQUIRES HARDWARE');
+        }
+        
+        // Entity functions
+        function renderEntities() {
+            const list = document.getElementById('entityList');
+            const entities = [
+                { name: 'ALPHA-1', type: 'INFANTRY', affiliation: 'friendly', coords: '11SNU 12345 67890' },
+                { name: 'BRAVO-1', type: 'ARMOR', affiliation: 'friendly', coords: '11SNU 12350 67895' },
+                { name: 'UNKNOWN-1', type: 'AIR', affiliation: 'unknown', coords: '11SNU 12400 67900' }
+            ];
+            
+            list.innerHTML = entities.map(e => `
+                <div class="tac-entity">
+                    <div class="tac-symbol tac-symbol-${e.affiliation}">${e.type[0]}</div>
+                    <div class="tac-entity-info">
+                        <div class="tac-entity-name">${e.name}</div>
+                        <div class="tac-entity-meta">${e.type}</div>
+                    </div>
+                    <div class="tac-entity-coords">${e.coords}</div>
+                </div>
+            `).join('');
+        }
+        
+        function filterEntities(type) {
+            console.log('Filter entities:', type);
+        }
+        
+        // SATCOM functions
+        function renderSATCOM() {
+            const list = document.getElementById('satList');
+            const sats = [
+                { name: 'ISS', elev: '45°', az: '180°', status: 'VISIBLE' },
+                { name: 'NOAA 19', elev: '12°', az: '270°', status: 'VISIBLE' },
+                { name: 'AO-91', elev: '--', az: '--', status: 'AOS 23MIN' }
+            ];
+            
+            list.innerHTML = sats.map(s => `
+                <div class="tac-entity">
+                    <div class="tac-symbol tac-symbol-neutral">◐</div>
+                    <div class="tac-entity-info">
+                        <div class="tac-entity-name">${s.name}</div>
+                        <div class="tac-entity-meta">${s.status}</div>
+                    </div>
+                    <div class="tac-entity-coords">${s.elev} ${s.az}</div>
+                </div>
+            `).join('');
+        }
+        
+        function loadTLEs() {
+            alert('TLE LOADING');
+        }
+        
+        // Zone functions
+        function renderZones() {
+            const list = document.getElementById('zoneList');
+            list.innerHTML = '<div style="text-align: center; padding: var(--space-xl); color: var(--text-muted);">NO ZONES DEFINED</div>';
+        }
+        
+        function showZoneModal() {
+            alert('ZONE EDITOR');
+        }
+        
+        // ATAK functions
+        function importKML() {
+            alert('KML IMPORT');
+        }
+        
+        function exportKML() {
+            alert('KML EXPORT');
+        }
+        
+        // Settings functions
+        function exportData() {
+            const data = { packets, squads, zones };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'overwatch-data.json';
+            a.click();
+        }
+        
+        function importData() {
+            alert('IMPORT');
+        }
+        
+        function clearData() {
+            if (confirm('CLEAR ALL DATA?')) {
+                packets = [];
+                squads = [];
+                zones = [];
+                renderPackets();
+                renderSquads();
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('encryptionMode').addEventListener('change', (e) => {
+            document.getElementById('keyGroup').style.display = e.target.value === 'secure' ? 'block' : 'none';
+        });
+        
+        document.getElementById('myCallsign').addEventListener('input', (e) => {
+            myCallsign = e.target.value.toUpperCase() || 'ALPHA-1';
+            if (myLocationMarker) {
+                myLocationMarker.setTitle(myCallsign);
+            }
+        });
+        
+        // Close modals on outside click
+        document.querySelectorAll('.tac-modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.remove('active');
+                }
+            });
+        });
+        
+        // Initialize
+        renderPackets();
+        renderSquads();
+        renderSDR();
+        renderEntities();
+        renderSATCOM();
+        renderZones();
+        initGPS();
+        
+        console.log('Overwatch v0.2.0 - Tactical UI Loaded');
+    </script>
+</body>
+</html>
