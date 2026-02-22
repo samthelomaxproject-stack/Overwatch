@@ -807,10 +807,30 @@ ALPHA-3 | REAR"></textarea>
         
         // Check if Tauri is available
         let tauriAvailable = false;
+        let tauriListen = null;
         try {
             tauriAvailable = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core;
+            tauriListen = window.__TAURI__.event?.listen;
         } catch (e) {
             tauriAvailable = false;
+        }
+        
+        // Listen for native location updates from Rust
+        if (tauriAvailable && tauriListen) {
+            tauriListen('location-update', (event) => {
+                const [lat, lon, accuracy] = event.payload;
+                console.log('Native location update:', lat, lon, accuracy);
+                updateMyLocation(lat, lon, accuracy);
+                gpsPermissionState = 'granted';
+                updateGPSStatus();
+            });
+            
+            tauriListen('permission-change', (event) => {
+                const granted = event.payload;
+                console.log('Permission changed:', granted);
+                gpsPermissionState = granted ? 'granted' : 'denied';
+                updateGPSStatus();
+            });
         }
         
         async function requestLocationPermission() {
