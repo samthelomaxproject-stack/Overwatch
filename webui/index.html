@@ -1050,8 +1050,6 @@
     <script>
         // State
         let map = null;
-        let myLocationMarker = null;
-        let myCallsign = 'ALPHA-1';
         let packets = [];
         let squads = [
             { name: 'ALPHA', members: [{ callsign: 'ALPHA-1', role: 'Team Lead' }, { callsign: 'ALPHA-2', role: 'Point' }, { callsign: 'ALPHA-3', role: 'Rear' }] },
@@ -1059,68 +1057,6 @@
         ];
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
-        
-        // GPS tracking - get device location
-        function initGPS() {
-            if ('geolocation' in navigator) {
-                navigator.geolocation.watchPosition(
-                    (position) => {
-                        const { latitude, longitude, accuracy } = position.coords;
-                        updateMyLocation(latitude, longitude, accuracy);
-                    },
-                    (error) => {
-                        console.error('GPS Error:', error.message);
-                        document.getElementById('statusDot').classList.add('offline');
-                        document.getElementById('statusText').textContent = 'GPS Offline';
-                    },
-                    { enableHighAccuracy: true, maximumAge: 10000 }
-                );
-            } else {
-                console.warn('Geolocation not supported');
-            }
-        }
-        
-        // Convert lat/lon to MGRS grid coordinates
-        function toMGRS(lat, lon) {
-            // Simple grid zone representation
-            const zone = Math.floor((lon + 180) / 6) + 1;
-            const letter = String.fromCharCode(65 + Math.floor((lat + 80) / 8));
-            const easting = Math.floor((lon % 6 + 6) % 6 * 100000 + 500000);
-            const northing = Math.floor((lat % 8 + 8) % 8 * 100000 + 500000);
-            return `${zone}${letter} ${easting.toString().slice(-5)} ${northing.toString().slice(-5)}`;
-        }
-        
-        // Update my location on the map
-        function updateMyLocation(lat, lon, accuracy) {
-            if (!map) return;
-            
-            const gridCoords = toMGRS(lat, lon);
-            const displayCoords = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-            
-            // Create pulsing marker for my location
-            const myIcon = L.divIcon({
-                className: 'my-location-marker',
-                html: `<div style="width:20px;height:20px;background:#4299e1;border:3px solid white;border-radius:50%;box-shadow:0 0 10px rgba(66,153,225,0.8);position:relative;">
-                    <div style="position:absolute;width:40px;height:40px;background:rgba(66,153,225,0.3);border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);animation:pulse 2s infinite;"></div>
-                </div>`,
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
-            });
-            
-            if (myLocationMarker) {
-                myLocationMarker.setLatLng([lat, lon]);
-                myLocationMarker.setPopupContent(`<strong>${myCallsign}</strong><br>${gridCoords}<br>±${Math.round(accuracy)}m`);
-            } else {
-                myLocationMarker = L.marker([lat, lon], { icon: myIcon, title: myCallsign })
-                    .addTo(map)
-                    .bindPopup(`<strong>${myCallsign}</strong><br>${gridCoords}<br>±${Math.round(accuracy)}m`);
-                map.setView([lat, lon], 14);
-            }
-            
-            // Update status bar
-            document.getElementById('statusDot').classList.remove('offline');
-            document.getElementById('statusText').textContent = `${myCallsign} • ${gridCoords}`;
-        }
         
         // Map styles
         const mapStyles = {
@@ -1346,22 +1282,6 @@
         }
         
         // Settings
-        document.getElementById('myCallsign').addEventListener('input', (e) => {
-            myCallsign = e.target.value || 'ALPHA-1';
-            // Update marker if it exists
-            if (myLocationMarker) {
-                myLocationMarker.setTitle(myCallsign);
-                const pos = myLocationMarker.getLatLng();
-                const gridCoords = toMGRS(pos.lat, pos.lng);
-                myLocationMarker.setPopupContent(`<strong>${myCallsign}</strong><br>${gridCoords}<br>Click for details`);
-            }
-            // Update status bar
-            const statusText = document.getElementById('statusText').textContent;
-            if (statusText.includes('•')) {
-                document.getElementById('statusText').textContent = `${myCallsign} • ${statusText.split('• ')[1]}`;
-            }
-        });
-        
         document.getElementById('encryptionMode').addEventListener('change', (e) => {
             document.getElementById('keyGroup').style.display = 
                 e.target.value === 'secure' ? 'block' : 'none';
@@ -1402,7 +1322,6 @@
         
         // Initialize
         renderSquads();
-        initGPS();
         console.log('Overwatch v0.1.1 loaded');
     </script>
 </body>
