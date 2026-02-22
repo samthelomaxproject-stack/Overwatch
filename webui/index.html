@@ -739,6 +739,18 @@ ALPHA-3 | REAR"></textarea>
         let gpsPermissionState = 'prompt';
         
         async function checkLocationPermission() {
+            // First check if we're in Tauri and can use native location
+            if (isTauri) {
+                try {
+                    const status = await window.__TAURI__.core.invoke('get_macos_location_status');
+                    console.log('Native location status:', status);
+                    return status === 'authorized_when_in_use' || status === 'authorized_always' ? 'granted' : 'prompt';
+                } catch (e) {
+                    console.log('Native location check failed:', e);
+                }
+            }
+            
+            // Fall back to web permission API
             if (!('permissions' in navigator)) {
                 return 'prompt';
             }
@@ -785,8 +797,13 @@ ALPHA-3 | REAR"></textarea>
             }
         }
         
-        // Check if running in Tauri
-        const isTauri = window.__TAURI__ !== undefined;
+        // Check if running in Tauri - safely
+        let isTauri = false;
+        try {
+            isTauri = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__ !== null;
+        } catch (e) {
+            isTauri = false;
+        }
         
         async function requestLocationPermission() {
             // Try native macOS location first (if in Tauri)
@@ -861,12 +878,23 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function initGPS() {
+            // Set a timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                console.log('GPS init timeout - continuing without GPS');
+                document.getElementById('statusText').textContent = 'GPS UNAVAILABLE';
+            }, 3000);
+            
             checkLocationPermission().then(state => {
+                clearTimeout(timeout);
                 if (state === 'granted') {
                     startGPSTracking();
                 } else {
                     updateGPSStatus();
                 }
+            }).catch(err => {
+                clearTimeout(timeout);
+                console.error('GPS permission check failed:', err);
+                document.getElementById('statusText').textContent = 'GPS ERROR';
             });
         }
         
@@ -1195,16 +1223,30 @@ ALPHA-3 | REAR"></textarea>
             });
         });
         
-        // Initialize
-        renderPackets();
-        renderSquads();
-        renderSDR();
-        renderEntities();
-        renderSATCOM();
-        renderZones();
-        initGPS();
-        
-        console.log('Overwatch v0.2.0 - Tactical UI Loaded');
+        // Initialize - with error handling
+        try {
+            renderPackets();
+            renderSquads();
+            renderSDR();
+            renderEntities();
+            renderSATCOM();
+            renderZones();
+            
+            // Initialize GPS after a short delay to let UI render first
+            setTimeout(() => {
+                try {
+                    initGPS();
+                } catch (e) {
+                    console.error('GPS init error:', e);
+                    document.getElementById('statusText').textContent = 'GPS ERROR';
+                }
+            }, 100);
+            
+            console.log('Overwatch v0.2.0 - Tactical UI Loaded');
+        } catch (e) {
+            console.error('Initialization error:', e);
+            alert('Error initializing Overwatch. Please restart the app.');
+        }
     </script>
 </body>
 </html>
