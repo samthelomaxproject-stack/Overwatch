@@ -739,6 +739,23 @@ ALPHA-3 | REAR"></textarea>
         let gpsPermissionState = 'prompt';
         
         async function checkLocationPermission() {
+            // Try native Tauri location first
+            if (enableNativeLocation && tauriAvailable) {
+                try {
+                    const status = await window.__TAURI__.core.invoke('get_location_status');
+                    console.log('Native location status:', status);
+                    if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                        return 'granted';
+                    } else if (status === 'denied') {
+                        return 'denied';
+                    }
+                    return 'prompt';
+                } catch (e) {
+                    console.log('Native location check failed:', e);
+                }
+            }
+            
+            // Fall back to web permission API
             if (!('permissions' in navigator)) {
                 return 'prompt';
             }
@@ -757,7 +774,7 @@ ALPHA-3 | REAR"></textarea>
                 
                 return result.state;
             } catch (e) {
-                console.log('Permission API not supported, trying geolocation directly');
+                console.log('Permission API not supported');
                 return 'prompt';
             }
         }
@@ -785,24 +802,33 @@ ALPHA-3 | REAR"></textarea>
             }
         }
         
-        // Check if running in Tauri
-        const isTauri = window.__TAURI__ !== undefined;
+        // Use native Tauri location when available
+        const enableNativeLocation = true;
+        
+        // Check if Tauri is available
+        let tauriAvailable = false;
+        try {
+            tauriAvailable = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core;
+        } catch (e) {
+            tauriAvailable = false;
+        }
         
         async function requestLocationPermission() {
-            // Try native macOS location first (if in Tauri)
-            if (isTauri && window.__TAURI__.core) {
+            // Try native Tauri location first
+            if (enableNativeLocation && tauriAvailable) {
                 try {
-                    const result = await window.__TAURI__.core.invoke('request_macos_location_permission');
-                    console.log('Native location permission requested:', result);
-                    // Wait a moment for user to respond to dialog, then check status
+                    await window.__TAURI__.core.invoke('request_location');
+                    console.log('Native location requested');
+                    
+                    // Check status after a delay
                     setTimeout(async () => {
-                        const status = await window.__TAURI__.core.invoke('get_macos_location_status');
-                        console.log('Location status:', status);
+                        const status = await window.__TAURI__.core.invoke('get_location_status');
+                        console.log('Location status after request:', status);
                         if (status === 'authorized_when_in_use' || status === 'authorized_always') {
                             gpsPermissionState = 'granted';
                             updateGPSStatus();
                             startGPSTracking();
-                        } else if (status === 'denied' || status === 'restricted') {
+                        } else if (status === 'denied') {
                             gpsPermissionState = 'denied';
                             updateGPSStatus();
                             alert('Location access denied.\n\nTo enable GPS:\n1. Open System Settings\n2. Go to Privacy & Security → Location Services\n3. Find Overwatch in the list\n4. Turn ON the toggle');
@@ -810,11 +836,11 @@ ALPHA-3 | REAR"></textarea>
                     }, 2000);
                     return;
                 } catch (e) {
-                    console.log('Native location failed, falling back to web API:', e);
+                    console.log('Native location request failed:', e);
                 }
             }
             
-            // Fallback to web geolocation API
+            // Fall back to web geolocation API
             if ('geolocation' in navigator) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
@@ -861,12 +887,23 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function initGPS() {
+            // Set a timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                console.log('GPS init timeout - continuing without GPS');
+                document.getElementById('statusText').textContent = 'GPS UNAVAILABLE';
+            }, 3000);
+            
             checkLocationPermission().then(state => {
+                clearTimeout(timeout);
                 if (state === 'granted') {
                     startGPSTracking();
                 } else {
                     updateGPSStatus();
                 }
+            }).catch(err => {
+                clearTimeout(timeout);
+                console.error('GPS permission check failed:', err);
+                document.getElementById('statusText').textContent = 'GPS ERROR';
             });
         }
         
@@ -1195,16 +1232,30 @@ ALPHA-3 | REAR"></textarea>
             });
         });
         
-        // Initialize
-        renderPackets();
-        renderSquads();
-        renderSDR();
-        renderEntities();
-        renderSATCOM();
-        renderZones();
-        initGPS();
-        
-        console.log('Overwatch v0.2.0 - Tactical UI Loaded');
+        // Initialize - with error handling
+        try {
+            renderPackets();
+            renderSquads();
+            renderSDR();
+            renderEntities();
+            renderSATCOM();
+            renderZones();
+            
+            // Initialize GPS after a short delay to let UI render first
+            setTimeout(() => {
+                try {
+                    initGPS();
+                } catch (e) {
+                    console.error('GPS init error:', e);
+                    document.getElementById('statusText').textContent = 'GPS ERROR';
+                }
+            }, 100);
+            
+            console.log('Overwatch v0.2.0 - Tactical UI Loaded');
+        } catch (e) {
+            console.error('Initialization error:', e);
+            alert('Error initializing Overwatch. Please restart the app.');
+        }
     </script>
 </body>
 </html>

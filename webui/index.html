@@ -739,12 +739,17 @@ ALPHA-3 | REAR"></textarea>
         let gpsPermissionState = 'prompt';
         
         async function checkLocationPermission() {
-            // First check if we're in Tauri and can use native location
-            if (isTauri) {
+            // Try native Tauri location first
+            if (enableNativeLocation && tauriAvailable) {
                 try {
-                    const status = await window.__TAURI__.core.invoke('get_macos_location_status');
+                    const status = await window.__TAURI__.core.invoke('get_location_status');
                     console.log('Native location status:', status);
-                    return status === 'authorized_when_in_use' || status === 'authorized_always' ? 'granted' : 'prompt';
+                    if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                        return 'granted';
+                    } else if (status === 'denied') {
+                        return 'denied';
+                    }
+                    return 'prompt';
                 } catch (e) {
                     console.log('Native location check failed:', e);
                 }
@@ -769,7 +774,7 @@ ALPHA-3 | REAR"></textarea>
                 
                 return result.state;
             } catch (e) {
-                console.log('Permission API not supported, trying geolocation directly');
+                console.log('Permission API not supported');
                 return 'prompt';
             }
         }
@@ -797,29 +802,33 @@ ALPHA-3 | REAR"></textarea>
             }
         }
         
-        // Check if running in Tauri - safely
-        let isTauri = false;
+        // Use native Tauri location when available
+        const enableNativeLocation = true;
+        
+        // Check if Tauri is available
+        let tauriAvailable = false;
         try {
-            isTauri = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__ !== null;
+            tauriAvailable = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core;
         } catch (e) {
-            isTauri = false;
+            tauriAvailable = false;
         }
         
         async function requestLocationPermission() {
-            // Try native macOS location first (if in Tauri)
-            if (isTauri && window.__TAURI__.core) {
+            // Try native Tauri location first
+            if (enableNativeLocation && tauriAvailable) {
                 try {
-                    const result = await window.__TAURI__.core.invoke('request_macos_location_permission');
-                    console.log('Native location permission requested:', result);
-                    // Wait a moment for user to respond to dialog, then check status
+                    await window.__TAURI__.core.invoke('request_location');
+                    console.log('Native location requested');
+                    
+                    // Check status after a delay
                     setTimeout(async () => {
-                        const status = await window.__TAURI__.core.invoke('get_macos_location_status');
-                        console.log('Location status:', status);
+                        const status = await window.__TAURI__.core.invoke('get_location_status');
+                        console.log('Location status after request:', status);
                         if (status === 'authorized_when_in_use' || status === 'authorized_always') {
                             gpsPermissionState = 'granted';
                             updateGPSStatus();
                             startGPSTracking();
-                        } else if (status === 'denied' || status === 'restricted') {
+                        } else if (status === 'denied') {
                             gpsPermissionState = 'denied';
                             updateGPSStatus();
                             alert('Location access denied.\n\nTo enable GPS:\n1. Open System Settings\n2. Go to Privacy & Security → Location Services\n3. Find Overwatch in the list\n4. Turn ON the toggle');
@@ -827,11 +836,11 @@ ALPHA-3 | REAR"></textarea>
                     }, 2000);
                     return;
                 } catch (e) {
-                    console.log('Native location failed, falling back to web API:', e);
+                    console.log('Native location request failed:', e);
                 }
             }
             
-            // Fallback to web geolocation API
+            // Fall back to web geolocation API
             if ('geolocation' in navigator) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
