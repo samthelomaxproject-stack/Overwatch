@@ -538,6 +538,14 @@
                                 <input type="text" class="tac-input" id="myCallsign" value="ALPHA-1" placeholder="ENTER CALLSIGN">
                             </div>
                             <div class="tac-form-group">
+                                <label class="tac-label">GPS Location</label>
+                                <div style="display: flex; align-items: center; gap: var(--space-sm);">
+                                    <span class="tac-status-dot offline" id="settingsGPSDot"></span>
+                                    <span id="settingsGPSText" style="font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-secondary);">GPS OFFLINE</span>
+                                </div>
+                                <button class="tac-btn tac-btn-primary" onclick="requestLocationPermission()" style="margin-top: var(--space-sm);">ENABLE GPS</button>
+                            </div>
+                            <div class="tac-form-group">
                                 <label class="tac-label">Encryption Mode</label>
                                 <select class="tac-select" id="encryptionMode">
                                     <option value="clear">CLEAR (NO ENCRYPTION)</option>
@@ -727,22 +735,139 @@ ALPHA-3 | REAR"></textarea>
             event.target.classList.toggle('active');
         }
         
-        // GPS tracking
-        function initGPS() {
+        // GPS tracking with permission handling
+        let gpsPermissionState = 'prompt';
+        
+        async function checkLocationPermission() {
+            if (!('permissions' in navigator)) {
+                return 'prompt';
+            }
+            
+            try {
+                const result = await navigator.permissions.query({ name: 'geolocation' });
+                gpsPermissionState = result.state;
+                
+                result.addEventListener('change', () => {
+                    gpsPermissionState = result.state;
+                    updateGPSStatus();
+                    if (result.state === 'granted') {
+                        startGPSTracking();
+                    }
+                });
+                
+                return result.state;
+            } catch (e) {
+                console.log('Permission API not supported, trying geolocation directly');
+                return 'prompt';
+            }
+        }
+        
+        function updateGPSStatus() {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            const settingsDot = document.getElementById('settingsGPSDot');
+            const settingsText = document.getElementById('settingsGPSText');
+            
+            if (gpsPermissionState === 'denied') {
+                dot.classList.add('offline');
+                text.innerHTML = '<span class="tac-status-value">GPS DENIED</span>';
+                if (settingsDot) settingsDot.classList.add('offline');
+                if (settingsText) settingsText.textContent = 'GPS DENIED - CHECK SYSTEM SETTINGS';
+            } else if (gpsPermissionState === 'prompt') {
+                dot.classList.add('offline');
+                text.innerHTML = '<span class="tac-status-value">GPS OFFLINE</span>';
+                if (settingsDot) settingsDot.classList.add('offline');
+                if (settingsText) settingsText.textContent = 'GPS OFFLINE - CLICK ENABLE BELOW';
+            } else if (gpsPermissionState === 'granted') {
+                dot.classList.remove('offline');
+                if (settingsDot) settingsDot.classList.remove('offline');
+                if (settingsText) settingsText.textContent = 'GPS ACTIVE';
+            }
+        }
+        
+        // Check if running in Tauri
+        const isTauri = window.__TAURI__ !== undefined;
+        
+        async function requestLocationPermission() {
+            // Try native macOS location first (if in Tauri)
+            if (isTauri && window.__TAURI__.core) {
+                try {
+                    const result = await window.__TAURI__.core.invoke('request_macos_location_permission');
+                    console.log('Native location permission requested:', result);
+                    // Wait a moment for user to respond to dialog, then check status
+                    setTimeout(async () => {
+                        const status = await window.__TAURI__.core.invoke('get_macos_location_status');
+                        console.log('Location status:', status);
+                        if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                            gpsPermissionState = 'granted';
+                            updateGPSStatus();
+                            startGPSTracking();
+                        } else if (status === 'denied' || status === 'restricted') {
+                            gpsPermissionState = 'denied';
+                            updateGPSStatus();
+                            alert('Location access denied.\n\nTo enable GPS:\n1. Open System Settings\n2. Go to Privacy & Security → Location Services\n3. Find Overwatch in the list\n4. Turn ON the toggle');
+                        }
+                    }, 2000);
+                    return;
+                } catch (e) {
+                    console.log('Native location failed, falling back to web API:', e);
+                }
+            }
+            
+            // Fallback to web geolocation API
             if ('geolocation' in navigator) {
-                navigator.geolocation.watchPosition(
+                navigator.geolocation.getCurrentPosition(
                     (position) => {
-                        const { latitude, longitude, accuracy } = position.coords;
-                        updateMyLocation(latitude, longitude, accuracy);
+                        console.log('Location permission granted');
+                        gpsPermissionState = 'granted';
+                        updateGPSStatus();
+                        startGPSTracking();
                     },
                     (error) => {
-                        console.error('GPS Error:', error.message);
-                        document.getElementById('statusDot').classList.add('offline');
-                        document.getElementById('statusText').textContent = 'GPS OFFLINE';
+                        console.error('Location permission error:', error);
+                        if (error.code === 1) {
+                            gpsPermissionState = 'denied';
+                            alert('Location access denied.\n\nTo enable GPS:\n1. Open System Settings\n2. Go to Privacy & Security → Location Services\n3. Find Overwatch in the list\n4. Turn ON the toggle');
+                        } else {
+                            alert('GPS Error: ' + error.message);
+                        }
+                        updateGPSStatus();
                     },
-                    { enableHighAccuracy: true, maximumAge: 10000 }
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                 );
+            } else {
+                alert('Geolocation is not supported in this browser.');
             }
+        }
+        
+        function startGPSTracking() {
+            if (!('geolocation' in navigator)) {
+                document.getElementById('statusText').textContent = 'GPS NOT SUPPORTED';
+                return;
+            }
+            
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const { latitude, longitude, accuracy } = position.coords;
+                    updateMyLocation(latitude, longitude, accuracy);
+                },
+                (error) => {
+                    console.error('GPS Error:', error.message);
+                    document.getElementById('statusDot').classList.add('offline');
+                    document.getElementById('statusText').textContent = 'GPS ERROR';
+                },
+                { enableHighAccuracy: true, maximumAge: 10000 }
+            );
+        }
+        
+        function initGPS() {
+            checkLocationPermission().then(state => {
+                if (state === 'granted') {
+                    startGPSTracking();
+                } else {
+                    updateGPSStatus();
+                }
+            });
         }
         
         function toMGRS(lat, lon) {

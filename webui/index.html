@@ -785,7 +785,36 @@ ALPHA-3 | REAR"></textarea>
             }
         }
         
-        function requestLocationPermission() {
+        // Check if running in Tauri
+        const isTauri = window.__TAURI__ !== undefined;
+        
+        async function requestLocationPermission() {
+            // Try native macOS location first (if in Tauri)
+            if (isTauri && window.__TAURI__.core) {
+                try {
+                    const result = await window.__TAURI__.core.invoke('request_macos_location_permission');
+                    console.log('Native location permission requested:', result);
+                    // Wait a moment for user to respond to dialog, then check status
+                    setTimeout(async () => {
+                        const status = await window.__TAURI__.core.invoke('get_macos_location_status');
+                        console.log('Location status:', status);
+                        if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                            gpsPermissionState = 'granted';
+                            updateGPSStatus();
+                            startGPSTracking();
+                        } else if (status === 'denied' || status === 'restricted') {
+                            gpsPermissionState = 'denied';
+                            updateGPSStatus();
+                            alert('Location access denied.\n\nTo enable GPS:\n1. Open System Settings\n2. Go to Privacy & Security → Location Services\n3. Find Overwatch in the list\n4. Turn ON the toggle');
+                        }
+                    }, 2000);
+                    return;
+                } catch (e) {
+                    console.log('Native location failed, falling back to web API:', e);
+                }
+            }
+            
+            // Fallback to web geolocation API
             if ('geolocation' in navigator) {
                 navigator.geolocation.getCurrentPosition(
                     (position) => {

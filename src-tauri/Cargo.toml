@@ -24,5 +24,8 @@ log = "0.4"
 tauri = { version = "2.10.0", features = [] }
 tauri-plugin-log = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+
 # For mesh networking (future Reticulum integration)
 # rns = "0.9"  # Uncomment when ready
