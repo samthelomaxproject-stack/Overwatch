@@ -727,22 +727,95 @@ ALPHA-3 | REAR"></textarea>
             event.target.classList.toggle('active');
         }
         
-        // GPS tracking
-        function initGPS() {
+        // GPS tracking with permission handling
+        let gpsPermissionState = 'prompt';
+        
+        async function checkLocationPermission() {
+            if (!('permissions' in navigator)) {
+                return 'prompt';
+            }
+            
+            try {
+                const result = await navigator.permissions.query({ name: 'geolocation' });
+                gpsPermissionState = result.state;
+                
+                result.addEventListener('change', () => {
+                    gpsPermissionState = result.state;
+                    updateGPSStatus();
+                    if (result.state === 'granted') {
+                        startGPSTracking();
+                    }
+                });
+                
+                return result.state;
+            } catch (e) {
+                console.log('Permission API not supported, trying geolocation directly');
+                return 'prompt';
+            }
+        }
+        
+        function updateGPSStatus() {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            
+            if (gpsPermissionState === 'denied') {
+                dot.classList.add('offline');
+                text.innerHTML = '<span class="tac-status-value">GPS DENIED</span> • <a href="#" onclick="requestLocationPermission()" style="color: var(--accent-orange);">CLICK TO ENABLE</a>';
+            } else if (gpsPermissionState === 'prompt') {
+                dot.classList.add('offline');
+                text.innerHTML = '<span class="tac-status-value">GPS</span> • <a href="#" onclick="requestLocationPermission()" style="color: var(--accent-cyan);">CLICK TO ENABLE</a>';
+            }
+        }
+        
+        function requestLocationPermission() {
             if ('geolocation' in navigator) {
-                navigator.geolocation.watchPosition(
+                navigator.geolocation.getCurrentPosition(
                     (position) => {
-                        const { latitude, longitude, accuracy } = position.coords;
-                        updateMyLocation(latitude, longitude, accuracy);
+                        console.log('Location permission granted');
+                        gpsPermissionState = 'granted';
+                        startGPSTracking();
                     },
                     (error) => {
-                        console.error('GPS Error:', error.message);
-                        document.getElementById('statusDot').classList.add('offline');
-                        document.getElementById('statusText').textContent = 'GPS OFFLINE';
+                        console.error('Location permission error:', error);
+                        if (error.code === 1) {
+                            gpsPermissionState = 'denied';
+                            alert('Location access denied.\n\nTo enable:\n1. Open System Settings\n2. Go to Privacy & Security → Location Services\n3. Find and enable Overwatch');
+                        }
+                        updateGPSStatus();
                     },
-                    { enableHighAccuracy: true, maximumAge: 10000 }
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                 );
             }
+        }
+        
+        function startGPSTracking() {
+            if (!('geolocation' in navigator)) {
+                document.getElementById('statusText').textContent = 'GPS NOT SUPPORTED';
+                return;
+            }
+            
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const { latitude, longitude, accuracy } = position.coords;
+                    updateMyLocation(latitude, longitude, accuracy);
+                },
+                (error) => {
+                    console.error('GPS Error:', error.message);
+                    document.getElementById('statusDot').classList.add('offline');
+                    document.getElementById('statusText').textContent = 'GPS ERROR';
+                },
+                { enableHighAccuracy: true, maximumAge: 10000 }
+            );
+        }
+        
+        function initGPS() {
+            checkLocationPermission().then(state => {
+                if (state === 'granted') {
+                    startGPSTracking();
+                } else {
+                    updateGPSStatus();
+                }
+            });
         }
         
         function toMGRS(lat, lon) {
