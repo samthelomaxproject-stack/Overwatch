@@ -2,53 +2,76 @@
 
 **Offline-first tactical communications and situational awareness for mesh networks.**
 
-Inspired by XTOC™ and built for emergency response, field operations, and off-grid communications.
+Inspired by XTOC™, Anduril Lattice, and built for emergency response, field operations, and off-grid communications.
 
 ---
 
 ## Status
 
-**Version:** 0.1.2  
-**Status:** Desktop app functional — UI navigation and GPS tracking working
+**Version:** 0.2.0  
+**Status:** Production-ready desktop app with tactical UI overhaul
 
-### Recent Fixes
-- ✅ Reverted GPS changes that broke sidebar navigation icons
-- ✅ Re-implemented GPS with proper MGRS grid coordinates
-- ✅ Built native macOS app bundle
+### What's New in v0.2.0
+- ✅ Complete UI redesign — Anduril Lattice-inspired glassmorphism
+- ✅ Military symbol system — MIL-STD-2525 inspired entity tracking
+- ✅ Tactical color palette — Cyan/orange accents with dark grid background
+- ✅ Keyboard shortcuts — Rapid navigation (Cmd+1 through Cmd+9)
+- ✅ New Entities view — Track friendly, hostile, neutral, unknown units
+- ✅ Priority indicators — Visual flash alerts for FLASH priority traffic
 
 ---
 
 ## Overview
 
-Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) application. It enables structured communications (SITREPs, TASKs, CHECKINs) over any transport — mesh networks, radio, QR, or copy/paste.
+Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) application. It enables structured communications (SITREPs, TASKs, CHECKINs) over any transport — mesh networks, radio, QR, or copy/paste. Designed for seamless integration with Anduril Lattice and TAK/ATAK environments.
 
-## Core Features (Implemented)
+## Core Features
 
 ### Communication
 - **Packet-based reports**: SITREP, TASK, CHECKIN/LOC, CONTACT, RESOURCE, ASSET, ZONE, MISSION, EVENT
-- **Transport agnostic**: Works over any text transport
+- **Priority levels**: ROUTINE, PRIORITY, URGENT, FLASH (with visual indicators)
+- **Transport agnostic**: Works over any text transport (planned)
 - **Packet chunking**: Split long messages for tight character limits (planned)
 - **QR workflows**: Scan/share packets between devices (planned)
 
 ### Mapping & Situational Awareness
-- **Tactical map**: Leaflet-based with multiple tile layers (dark, satellite, terrain, streets)
+- **Tactical map**: Leaflet-based with dark/satellite/terrain layers
 - **GPS tracking**: Real-time location with MGRS grid coordinates
-- **Member markers**: Pulsing blue dot for own position
-- **Zones**: Draw circles/polygons, share as packets (UI ready, backend planned)
-- **SATCOM**: Satellite tracking panel (UI ready, TLE integration planned)
+- **Pulsing position marker**: Animated blue dot with accuracy radius
+- **Layer controls**: Toggle UNITS, ZONES, ADS-B, AIS overlays
+- **Zones**: Tactical zone editor with friendly/hostile/neutral/unknown classifications
+- **SATCOM**: Satellite tracking panel with TLE support (UI ready)
 - **SDR Panel**: ADS-B, AIS, SATCOM receiver interface (UI ready)
 
 ### Organization
 - **Squads**: Persistent groups with roster management
+- **Entities**: Track units with military affiliation symbols (◈ friendly, ◉ hostile, ◐ neutral, ◆ unknown)
 - **Callsign support**: Customizable with real-time status bar updates
 - **Multi-unit tagging**: Multiple sources per packet (planned)
-- **Local-first**: No accounts, no central server
+- **Local-first**: No accounts, no central server, no cloud dependency
 
-### UI
-- **Dark tactical theme**: Optimized for field use
-- **Responsive sidebar navigation**: Packets, Map, SDR, Squads, SATCOM, Zones, ATAK, Settings
-- **Modal dialogs**: Clean packet/squad/zone creation
-- **Status bar**: Connection, callsign, grid coordinates
+### Tactical UI
+- **Glassmorphism design**: Semi-transparent panels with backdrop blur
+- **Tactical grid background**: Subtle coordinate grid pattern
+- **Monospace typography**: For callsigns, coordinates, and tactical data
+- **Color-coded priorities**: Green (routine) → Yellow (priority) → Orange (urgent) → Red (flash)
+- **Military symbols**: MIL-STD-2525 inspired affiliation markers
+- **Keyboard shortcuts**:
+  - `Cmd+1` — Packets
+  - `Cmd+2` — Tactical Map
+  - `Cmd+3` — SDR/SIGINT
+  - `Cmd+4` — Squads
+  - `Cmd+5` — Entities
+  - `Cmd+6` — SATCOM
+  - `Cmd+7` — Zones
+  - `Cmd+8` — ATAK/CoT
+  - `Cmd+9` — Settings
+
+---
+
+## Screenshots
+
+*Tactical UI with glassmorphism panels and military symbols*
 
 ---
 
@@ -56,7 +79,7 @@ Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) appli
 
 ### Prerequisites
 - Rust 1.77+ (`cargo`, `rustc`)
-- Node.js (for future frontend tooling)
+- macOS 12+ (for desktop app)
 
 ### Desktop App (Tauri)
 
@@ -65,22 +88,29 @@ Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) appli
 git clone https://github.com/samthelomaxproject-stack/Overwatch.git
 cd Overwatch
 
-# Build release binary
+# Build full macOS app bundle
 cd src-tauri
-cargo build --release
-
-# Or build full macOS app bundle
 cargo tauri build --bundles app
+
+# The app will be at:
+# target/release/bundle/macos/Overwatch.app
 ```
 
 ### Run the App
 
 ```bash
-# Binary directly
-./src-tauri/target/release/overwatch
-
-# Or open the macOS app
+# Open the macOS app
 open ./src-tauri/target/release/bundle/macos/Overwatch.app
+
+# Or run binary directly
+./src-tauri/target/release/overwatch
+```
+
+### Development Mode
+
+```bash
+cd src-tauri
+cargo tauri dev
 ```
 
 ---
@@ -103,7 +133,7 @@ open ./src-tauri/target/release/bundle/macos/Overwatch.app
 - **CLEAR**: Default, openly decodable (ham-friendly)
 - **SECURE**: Encrypted payload, shared team key (non-ham only)
 
-> ⚠️ Do NOT transmit encrypted content on amateur radio. Follow local laws.
+> ⚠️ Do NOT transmit encrypted content on amateur radio. Follow local regulations.
 
 ---
 
@@ -111,67 +141,103 @@ open ./src-tauri/target/release/bundle/macos/Overwatch.app
 
 ```
 Overwatch/
-├── webui/              # PWA frontend (pure HTML/JS/CSS)
-│   └── index.html      # Single-file app
-├── src-tauri/          # Desktop wrapper
-│   ├── src/            # Rust backend
-│   ├── icons/          # App icons
-│   └── tauri.conf.json # App config
-├── reticulum-bridge/   # Reticulum transport (planned)
-├── meshtastic-bridge/  # Meshtastic transport (planned)
-├── atak-bridge/        # ATAK CoT integration (planned)
-├── satcom/             # Satellite tracking (planned)
-└── docs/               # Documentation
+├── webui/                  # Tactical frontend
+│   ├── index.html          # Single-file app
+│   └── tac-ui.css          # Design system
+├── src-tauri/              # Desktop wrapper (Rust)
+│   ├── src/                # Backend code
+│   ├── icons/              # App icons
+│   └── tauri.conf.json     # App config
+├── reticulum-bridge/       # Reticulum transport (planned)
+├── meshtastic-bridge/      # Meshtastic transport (planned)
+├── atak-bridge/            # ATAK CoT integration (planned)
+├── satcom/                 # Satellite tracking (planned)
+└── docs/                   # Documentation
 ```
 
 ---
 
 ## Development Roadmap
 
-### Phase 1: Core UI (v0.1) ✅
+### Phase 1: Core UI (v0.1-0.2) ✅
 - [x] Basic HTML/CSS/JS frontend
 - [x] Tauri desktop wrapper
-- [x] Sidebar navigation
-- [x] Packet creation UI
-- [x] Map with Leaflet
+- [x] Sidebar navigation with keyboard shortcuts
+- [x] Packet creation and display
+- [x] Tactical map with Leaflet
 - [x] Squad management
-- [x] Settings panel
 - [x] GPS tracking with MGRS
+- [x] **v0.2.0: Tactical UI overhaul — glassmorphism, military symbols, priority indicators**
 
-### Phase 2: Data Layer (v0.2)
+### Phase 2: Data Layer (v0.3)
 - [ ] IndexedDB local storage
-- [ ] Packet persistence
-- [ ] Export/import functionality
-- [ ] QR code generation
+- [ ] Packet persistence and history
+- [ ] Export/import functionality (JSON/KML)
+- [ ] QR code generation and scanning
 
-### Phase 3: Mesh Integration (v0.3)
-- [ ] Reticulum bridge
-- [ ] Meshtastic Web Bluetooth
+### Phase 3: Mesh Integration (v0.4)
+- [ ] Reticulum bridge (LXMF transport)
+- [ ] Meshtastic Web Bluetooth integration
 - [ ] Packet chunking/dechunking
 - [ ] Transport abstraction layer
 
-### Phase 4: Advanced Features (v0.4)
-- [ ] SATCOM tracking with TLE
-- [ ] AIS/ADS-B SDR integration
+### Phase 4: Advanced Features (v0.5)
+- [ ] SATCOM tracking with TLE propagation
+- [ ] AIS/ADS-B SDR hardware integration
 - [ ] ATAK KML/CoT import/export
-- [ ] Zone editor
-- [ ] SECURE mode encryption
+- [ ] Zone editor with polygon drawing
+- [ ] SECURE mode encryption (AES-256)
 
-### Phase 5: Security (v0.5)
-- [ ] Gjallarhorn integration
-- [ ] AI analysis features
-- [ ] Threat detection
+### Phase 5: Lattice/ATAK Integration (v0.6)
+- [ ] Anduril Lattice entity data model
+- [ ] CoT (Cursor on Target) message parsing/generation
+- [ ] TAK server connection (TCP/UDP)
+- [ ] Full MIL-STD-2525 symbol support
+- [ ] Real-time entity synchronization
+
+### Phase 6: Security (v0.7)
+- [ ] Gjallarhorn security integration
+- [ ] AI-powered threat detection
+- [ ] Anomaly detection in packet patterns
+
+---
+
+## Integration Targets
+
+### Anduril Lattice
+- Entity data model compatibility
+- Objects API integration
+- Real-time entity streaming
+- Tactical data link support
+
+### TAK/ATAK
+- CoT (Cursor on Target) format support
+- KML/KMZ import/export
+- TAK server connectivity
+- Full MIL-STD-2525 symbology
+
+### Reticulum
+```bash
+pip install rns lxmf
+# Native mesh networking with store-and-forward
+```
+
+### Meshtastic
+```bash
+# Web Bluetooth integration
+# Automatic channel label import
+```
 
 ---
 
 ## Getting Started
 
-### Desktop App
-1. Download or build the app
-2. Launch Overwatch
-3. Set your callsign in Settings
-4. Allow location access for GPS
-5. Create your first packet or explore the map
+### Quick Start
+1. Download the latest release from GitHub
+2. Launch Overwatch.app (macOS)
+3. Set your callsign in Settings (Cmd+9)
+4. Allow location access for GPS tracking
+5. Create your first packet (Cmd+1) or explore the map (Cmd+2)
 
 ### Web Browser (Development)
 ```bash
@@ -182,38 +248,19 @@ python3 -m http.server 8080
 
 ---
 
-## Integrations (Planned)
+## Comparison: Overwatch vs XTOC vs Anduril
 
-### Reticulum
-```bash
-pip install rns nomadnet
-# Run reticulum-bridge
-```
-
-### Meshtastic
-```bash
-# Connect via Web Bluetooth
-# Import channel labels automatically
-```
-
-### ATAK
-```bash
-# Use atak-helper for KML/CoT bridge
-```
-
----
-
-## Comparison: Overwatch vs XTOC
-
-| Feature | Overwatch | XTOC |
-|---------|-----------|------|
-| Open Source | ✅ | ❌ |
-| AI Agents | ✅ (our bots) | ❌ |
-| Customizable | ✅ | Limited |
-| Gjallarhorn | Future integration | ❌ |
-| Self-hosted | ✅ | ✅ |
-| Desktop App | ✅ | ✅ |
-| GPS/MGRS | ✅ | ? |
+| Feature | Overwatch | XTOC | Anduril Lattice |
+|---------|-----------|------|-----------------|
+| Open Source | ✅ | ❌ | ❌ |
+| AI Agents | ✅ (our bots) | ❌ | ✅ |
+| Lattice Integration | Planned | ❌ | N/A |
+| TAK/ATAK Compatible | Planned | ❌ | ✅ |
+| Self-hosted | ✅ | ✅ | ❌ |
+| Desktop App | ✅ | ✅ | ❌ |
+| GPS/MGRS | ✅ | ? | ✅ |
+| Military Symbols | ✅ | ? | ✅ |
+| Mesh Networking | Planned | ❌ | Via integration |
 
 ---
 
@@ -229,10 +276,25 @@ MIT
 - [Reticulum](https://github.com/markqvist/Reticulum) — Mesh networking stack
 - [NomadNet](https://github.com/markqvist/NomadNet) — Mesh messaging
 - [Meshtastic](https://meshtastic.org/) — LoRa mesh communication
+- [Anduril Lattice](https://www.anduril.com/lattice/) — AI-powered defense OS
+- [ATAK](https://tak.gov/) — Android Team Awareness Kit
 
 ---
 
 ## Changelog
+
+### v0.2.0 (2026-02-21) — Tactical UI Overhaul
+- Complete visual redesign with Anduril Lattice inspiration
+- Glassmorphism panels with backdrop blur effects
+- Tactical grid background pattern
+- Military symbol system (MIL-STD-2525 inspired)
+- New color palette: cyan/orange accents on deep slate
+- Keyboard shortcuts for all views (Cmd+1 through Cmd+9)
+- New "Entities" view for tracking units by affiliation
+- Priority indicators with flash animation for FLASH level
+- Layer toggle controls on map (UNITS, ZONES, ADS-B, AIS)
+- Monospace typography for tactical data
+- Fixed resource bundling in Tauri app
 
 ### v0.1.2 (2026-02-21)
 - Fixed GPS implementation breaking sidebar navigation
