@@ -116,6 +116,10 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                     match port.read(&mut byte) {
                         Ok(1) => {
                             let b = byte[0];
+                            // Debug: log every byte received occasionally
+                            if b == START_BYTE {
+                                let _ = app_handle.emit("meshtastic-debug", "START_BYTE received");
+                            }
                             
                             if !in_packet {
                                 if b == START_BYTE {
@@ -143,8 +147,15 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                                     packet_buffer.push(b);
                                     if packet_buffer.len() >= packet_len {
                                         // Parse packet
-                                        if let Ok(from_radio) = FromRadio::decode(&packet_buffer[..]) {
-                                            handle_from_radio(&app_handle, &state_clone, from_radio);
+                                        match FromRadio::decode(&packet_buffer[..]) {
+                                            Ok(from_radio) => {
+                                                eprintln!("Packet decoded successfully");
+                                                handle_from_radio(&app_handle, &state_clone, from_radio);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Failed to decode packet: {}", e);
+                                                let _ = app_handle.emit("meshtastic-debug", format!("Decode error: {}", e));
+                                            }
                                         }
                                         in_packet = false;
                                     }
@@ -195,8 +206,12 @@ fn send_protobuf<W: Write>(writer: &mut W, msg: ToRadio) -> Result<(), String> {
 fn handle_from_radio(app_handle: &tauri::AppHandle, state: &Arc<MeshtasticState>, from_radio: FromRadio) {
     use meshtastic_proto::from_radio::PayloadVariant;
     
+    let _ = app_handle.emit("meshtastic-debug", "handle_from_radio called");
+    
     match from_radio.payload_variant {
         Some(PayloadVariant::Packet(packet)) => {
+            eprintln!("Received packet from node {}", packet.from);
+            let _ = app_handle.emit("meshtastic-debug", format!("Packet from node {}", packet.from));
             handle_mesh_packet(app_handle, state, packet);
         }
         Some(PayloadVariant::Heartbeat(_)) => {

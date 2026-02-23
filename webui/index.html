@@ -1849,6 +1849,10 @@ ALPHA-3 | REAR"></textarea>
             tauriListen('meshtastic-error', (event) => {
                 debugLog('Meshtastic error: ' + event.payload);
             });
+            
+            tauriListen('meshtastic-debug', (event) => {
+                debugLog('Meshtastic: ' + event.payload);
+            });
         }
         
         // Entity functions
