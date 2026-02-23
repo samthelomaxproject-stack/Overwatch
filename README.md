@@ -18,6 +18,9 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 - ✅ Keyboard shortcuts — Rapid navigation (Cmd+1 through Cmd+9)
 - ✅ New Entities view — Track friendly, hostile, neutral, unknown units
 - ✅ Priority indicators — Visual flash alerts for FLASH priority traffic
+- ✅ Native GPS integration — macOS CoreLocation with real-time position updates
+- ✅ MGRS grid coordinates — Military grid reference system display
+- ✅ Pulsing location marker — Animated position indicator on tactical map
 
 ---
 
@@ -36,8 +39,10 @@ Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) appli
 
 ### Mapping & Situational Awareness
 - **Tactical map**: Leaflet-based with dark/satellite/terrain layers
-- **GPS tracking**: Real-time location with MGRS grid coordinates
-- **Pulsing position marker**: Animated blue dot with accuracy radius
+- **Native GPS tracking**: macOS CoreLocation integration with real-time position updates
+- **MGRS grid coordinates**: Military Grid Reference System display
+- **Pulsing position marker**: Animated cyan dot with accuracy radius and popup info
+- **Callsign display**: Your callsign shown on map marker and status bar
 - **Layer controls**: Toggle UNITS, ZONES, ADS-B, AIS overlays
 - **Zones**: Tactical zone editor with friendly/hostile/neutral/unknown classifications
 - **SATCOM**: Satellite tracking panel with TLE support (UI ready)
@@ -283,7 +288,7 @@ MIT
 
 ## Changelog
 
-### v0.2.0 (2026-02-21) — Tactical UI Overhaul
+### v0.2.0 (2026-02-22) — Tactical UI Overhaul + Native GPS
 - Complete visual redesign with Anduril Lattice inspiration
 - Glassmorphism panels with backdrop blur effects
 - Tactical grid background pattern
@@ -294,6 +299,11 @@ MIT
 - Priority indicators with flash animation for FLASH level
 - Layer toggle controls on map (UNITS, ZONES, ADS-B, AIS)
 - Monospace typography for tactical data
+- **Native GPS integration**: macOS CoreLocation with Rust/Objective-C bridge
+- **Real-time position updates**: Polling-based location with event emission
+- **MGRS grid display**: Military coordinates in status bar and map popup
+- **Pulsing location marker**: Animated cyan dot on tactical map
+- Fixed Tauri API injection with `withGlobalTauri: true`
 - Fixed resource bundling in Tauri app
 
 ### v0.1.2 (2026-02-21)

@@ -319,6 +319,11 @@
             </div>
         </header>
         
+        <!-- Debug Panel -->
+        <div id="debugPanel" style="background: #1a1a2e; color: #00ff00; padding: 10px; font-family: monospace; font-size: 11px; max-height: 150px; overflow-y: auto; border-bottom: 1px solid #333;">
+            <div>Debug Output:</div>
+        </div>
+        
         <!-- Main Container -->
         <div class="tac-container">
             <!-- Sidebar -->
@@ -735,20 +740,37 @@ ALPHA-3 | REAR"></textarea>
             event.target.classList.toggle('active');
         }
         
+        // Debug logging to visible panel
+        function debugLog(msg) {
+            const panel = document.getElementById('debugPanel');
+            if (panel) {
+                const line = document.createElement('div');
+                line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                panel.appendChild(line);
+                panel.scrollTop = panel.scrollHeight;
+            }
+            console.log(msg);
+        }
+
         // GPS tracking with permission handling
         let gpsPermissionState = 'prompt';
         
         async function checkLocationPermission() {
+            const tauriAvailable = checkTauriAvailable();
+            debugLog('checkLocationPermission called, tauriAvailable: ' + tauriAvailable);
             // Try native Tauri location first
-            if (enableNativeLocation && tauriAvailable) {
+            if (tauriAvailable) {
                 try {
-                    const status = await window.__TAURI__.core.invoke('get_location_status');
+                    const status = await window.__TAURI__.core.invoke('check_location_permission');
                     console.log('Native location status:', status);
                     if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                        console.log('Native says GRANTED');
                         return 'granted';
                     } else if (status === 'denied') {
+                        console.log('Native says DENIED');
                         return 'denied';
                     }
+                    console.log('Native says PROMPT (not_determined)');
                     return 'prompt';
                 } catch (e) {
                     console.log('Native location check failed:', e);
@@ -756,12 +778,14 @@ ALPHA-3 | REAR"></textarea>
             }
             
             // Fall back to web permission API
+            console.log('Falling back to web geolocation API');
             if (!('permissions' in navigator)) {
                 return 'prompt';
             }
             
             try {
                 const result = await navigator.permissions.query({ name: 'geolocation' });
+                console.log('Web geolocation permission state:', result.state);
                 gpsPermissionState = result.state;
                 
                 result.addEventListener('change', () => {
@@ -780,74 +804,117 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function updateGPSStatus() {
+            console.log('updateGPSStatus called, gpsPermissionState =', gpsPermissionState);
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
             const settingsDot = document.getElementById('settingsGPSDot');
             const settingsText = document.getElementById('settingsGPSText');
             
             if (gpsPermissionState === 'denied') {
+                console.log('Setting UI to DENIED');
                 dot.classList.add('offline');
                 text.innerHTML = '<span class="tac-status-value">GPS DENIED</span>';
                 if (settingsDot) settingsDot.classList.add('offline');
                 if (settingsText) settingsText.textContent = 'GPS DENIED - CHECK SYSTEM SETTINGS';
             } else if (gpsPermissionState === 'prompt') {
+                console.log('Setting UI to OFFLINE');
                 dot.classList.add('offline');
                 text.innerHTML = '<span class="tac-status-value">GPS OFFLINE</span>';
                 if (settingsDot) settingsDot.classList.add('offline');
                 if (settingsText) settingsText.textContent = 'GPS OFFLINE - CLICK ENABLE BELOW';
             } else if (gpsPermissionState === 'granted') {
+                console.log('Setting UI to ACTIVE');
                 dot.classList.remove('offline');
+                // When granted, status text will be updated by updateMyLocation with coordinates
+                // But set it here in case coordinates aren't ready yet
+                if (!text.innerHTML.includes('•')) {
+                    text.innerHTML = '<span class="tac-status-value">GPS ACTIVE</span>';
+                }
                 if (settingsDot) settingsDot.classList.remove('offline');
                 if (settingsText) settingsText.textContent = 'GPS ACTIVE';
             }
         }
         
-        // Use native Tauri location when available
-        const enableNativeLocation = true;
-        
-        // Check if Tauri is available
-        let tauriAvailable = false;
-        let tauriListen = null;
-        try {
-            tauriAvailable = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core;
-            tauriListen = window.__TAURI__.event?.listen;
-        } catch (e) {
-            tauriAvailable = false;
+        // Check if Tauri is available - call this function when needed
+        function checkTauriAvailable() {
+            try {
+                return typeof window.__TAURI__ !== 'undefined' && !!window.__TAURI__.core;
+            } catch (e) {
+                return false;
+            }
         }
         
-        // Listen for native location updates from Rust
-        if (tauriAvailable && tauriListen) {
-            tauriListen('location-update', (event) => {
-                const [lat, lon, accuracy] = event.payload;
-                console.log('Native location update:', lat, lon, accuracy);
-                updateMyLocation(lat, lon, accuracy);
-                gpsPermissionState = 'granted';
-                updateGPSStatus();
-            });
+        function getTauriListener() {
+            try {
+                return window.__TAURI__?.event?.listen;
+            } catch (e) {
+                return null;
+            }
+        }
+        
+        // Poll for Tauri availability - it might take time to inject
+        let tauriCheckCount = 0;
+        const tauriCheckInterval = setInterval(() => {
+            tauriCheckCount++;
+            const hasTauri = typeof window.__TAURI__ !== 'undefined';
             
-            tauriListen('permission-change', (event) => {
-                const granted = event.payload;
-                console.log('Permission changed:', granted);
-                gpsPermissionState = granted ? 'granted' : 'denied';
-                updateGPSStatus();
-            });
-        }
+            if (hasTauri) {
+                clearInterval(tauriCheckInterval);
+                debugLog('Tauri found after ' + tauriCheckCount + ' checks!');
+                debugLog('window.__TAURI__.core: ' + (typeof window.__TAURI__.core));
+                debugLog('window.__TAURI__.event: ' + (typeof window.__TAURI__.event));
+                
+                // Now set up listeners
+                const tauriListen = getTauriListener();
+                if (tauriListen) {
+                    debugLog('Setting up native listeners');
+                    
+                    tauriListen('location-update', (event) => {
+                        debugLog('Location update: ' + JSON.stringify(event.payload));
+                        const [lat, lon, accuracy] = event.payload;
+                        updateMyLocation(lat, lon, accuracy);
+                        gpsPermissionState = 'granted';
+                        updateGPSStatus();
+                    });
+                    
+                    tauriListen('permission-change', (event) => {
+                        debugLog('Permission change: ' + event.payload);
+                        gpsPermissionState = event.payload ? 'granted' : 'denied';
+                        updateGPSStatus();
+                    });
+                    
+                    debugLog('Listeners registered');
+                }
+                
+                // Also trigger GPS init if not already done
+                if (gpsPermissionState === 'prompt') {
+                    initGPS();
+                }
+            } else if (tauriCheckCount > 20) {
+                clearInterval(tauriCheckInterval);
+                debugLog('Tauri NOT found after 20 attempts');
+                debugLog('Protocol: ' + window.location.protocol);
+                debugLog('URL: ' + window.location.href);
+            }
+        }, 200);
         
         async function requestLocationPermission() {
             // Try native Tauri location first
-            if (enableNativeLocation && tauriAvailable) {
+            const tauriAvailable = checkTauriAvailable();
+            if (tauriAvailable) {
                 try {
-                    await window.__TAURI__.core.invoke('request_location');
+                    await window.__TAURI__.core.invoke('request_location_permission');
                     console.log('Native location requested');
                     
                     // Check status after a delay
                     setTimeout(async () => {
-                        const status = await window.__TAURI__.core.invoke('get_location_status');
+                        const status = await window.__TAURI__.core.invoke('check_location_permission');
                         console.log('Location status after request:', status);
                         if (status === 'authorized_when_in_use' || status === 'authorized_always') {
                             gpsPermissionState = 'granted';
                             updateGPSStatus();
-                            startGPSTracking();
+                            // Start getting location updates
+                            console.log('Permission granted, starting location tracking');
                         } else if (status === 'denied') {
                             gpsPermissionState = 'denied';
                             updateGPSStatus();
@@ -907,24 +974,80 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function initGPS() {
-            // Set a timeout to prevent hanging
-            const timeout = setTimeout(() => {
-                console.log('GPS init timeout - continuing without GPS');
-                document.getElementById('statusText').textContent = 'GPS UNAVAILABLE';
-            }, 3000);
+            const tauriAvailable = checkTauriAvailable();
+            debugLog('initGPS called, tauriAvailable: ' + tauriAvailable);
             
-            checkLocationPermission().then(state => {
-                clearTimeout(timeout);
+            // If Tauri native location is available, use it exclusively
+            if (tauriAvailable) {
+                debugLog('Using native location...');
+                // Poll for native location status
+                let pollCount = 0;
+                const pollInterval = setInterval(async () => {
+                    pollCount++;
+                    try {
+                        debugLog('Poll ' + pollCount + ': invoking check_location_permission');
+                        const status = await window.__TAURI__.core.invoke('check_location_permission');
+                        debugLog('Poll ' + pollCount + ': received status="' + status + '" type=' + typeof status);
+                        debugLog('Poll ' + pollCount + ': status==="authorized_always": ' + (status === 'authorized_always'));
+                        debugLog('Poll ' + pollCount + ': status==="authorized_when_in_use": ' + (status === 'authorized_when_in_use'));
+                        debugLog('Poll ' + pollCount + ': status==="denied": ' + (status === 'denied'));
+                        
+                        if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                            debugLog('MATCH! Setting to GRANTED');
+                            clearInterval(pollInterval);
+                            gpsPermissionState = 'granted';
+                            updateGPSStatus();
+                            // Get current location immediately
+                            try {
+                                const loc = await window.__TAURI__.core.invoke('get_current_location');
+                                debugLog('Got location: ' + JSON.stringify(loc));
+                                if (loc && loc[0] !== 0) {
+                                    updateMyLocation(loc[0], loc[1], loc[2]);
+                                }
+                            } catch (locErr) {
+                                debugLog('No location fix yet: ' + locErr);
+                            }
+                        } else if (status === 'denied') {
+                            debugLog('Status is DENIED');
+                            clearInterval(pollInterval);
+                            gpsPermissionState = 'denied';
+                            updateGPSStatus();
+                        } else if (pollCount > 20) {
+                            debugLog('Poll timeout, setting to PROMPT');
+                            clearInterval(pollInterval);
+                            gpsPermissionState = 'prompt';
+                            updateGPSStatus();
+                        } else {
+                            debugLog('Status "' + status + '" not matched, continuing...');
+                        }
+                    } catch (e) {
+                        debugLog('GPS poll ERROR: ' + e);
+                        if (pollCount > 5) {
+                            clearInterval(pollInterval);
+                            checkWebLocationPermission();
+                        }
+                    }
+                }, 500);
+            } else {
+                debugLog('Tauri NOT available, using web location');
+                checkWebLocationPermission();
+            }
+        }
+        
+        async function checkWebLocationPermission() {
+            console.log('checkWebLocationPermission called - THIS SHOULD NOT HAPPEN WHEN TAURI IS AVAILABLE');
+            try {
+                const state = await checkLocationPermission();
+                console.log('Web location permission result:', state);
                 if (state === 'granted') {
                     startGPSTracking();
                 } else {
                     updateGPSStatus();
                 }
-            }).catch(err => {
-                clearTimeout(timeout);
+            } catch (err) {
                 console.error('GPS permission check failed:', err);
                 document.getElementById('statusText').textContent = 'GPS ERROR';
-            });
+            }
         }
         
         function toMGRS(lat, lon) {
@@ -1261,15 +1384,33 @@ ALPHA-3 | REAR"></textarea>
             renderSATCOM();
             renderZones();
             
-            // Initialize GPS after a short delay to let UI render first
+            // IMMEDIATE GPS STATUS CHECK
+            if (tauriAvailable) {
+                window.__TAURI__.core.invoke('check_location_permission').then(status => {
+                    console.log('Immediate GPS status:', status);
+                    
+                    if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                        gpsPermissionState = 'granted';
+                        updateGPSStatus();
+                        // Also try to get location immediately
+                        window.__TAURI__.core.invoke('get_current_location').then(loc => {
+                            if (loc && loc[0] !== 0) {
+                                updateMyLocation(loc[0], loc[1], loc[2]);
+                            }
+                        }).catch(() => {});
+                    }
+                }).catch(e => {
+                    console.error('Immediate GPS check failed:', e);
+                });
+            }
+            
+            // Initialize map immediately so GPS can show location
             setTimeout(() => {
-                try {
-                    initGPS();
-                } catch (e) {
-                    console.error('GPS init error:', e);
-                    document.getElementById('statusText').textContent = 'GPS ERROR';
-                }
+                initMap();
+                debugLog('Map initialized');
             }, 100);
+            
+            debugLog('App initialized, waiting for Tauri...');
             
             console.log('Overwatch v0.2.0 - Tactical UI Loaded');
         } catch (e) {
