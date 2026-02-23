@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Overwatch | Tactical Operations Center</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <link rel="stylesheet" href="tac-ui.css">
     <style>
         /* Military Symbol System - MIL-STD-2525 Inspired */
@@ -412,12 +414,14 @@
                 <!-- Map View -->
                 <div class="tac-view" id="view-map">
                     <div class="tac-map-container" id="map"></div>
+                    <div id="cesiumContainer" style="display:none; width:100%; height:100%;"></div>
                     <div class="tac-map-overlay">
                         <div class="tac-layer-group">
                             <button class="tac-layer-btn active" onclick="setMapStyle('dark')">DARK</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('satellite')">SAT</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('hybrid')">HYB</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('terrain')">TER</button>
+                            <button class="tac-layer-btn" onclick="toggle3D()">3D</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group">
@@ -782,6 +786,97 @@ ALPHA-3 | REAR"></textarea>
         
         function toggleLayer(layer) {
             event.target.classList.toggle('active');
+        }
+        
+        // 3D Cesium View
+        let cesiumViewer = null;
+        let is3DMode = false;
+        
+        function toggle3D() {
+            const mapDiv = document.getElementById('map');
+            const cesiumDiv = document.getElementById('cesiumContainer');
+            
+            if (!is3DMode) {
+                // Switch to 3D
+                mapDiv.style.display = 'none';
+                cesiumDiv.style.display = 'block';
+                
+                if (!cesiumViewer) {
+                    // Initialize Cesium
+                    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE3Y2UyZC0zMDA0LTRkZTQtYjkwZi01M2Y4ZTI0N2I1Y2YiLCJpZCI6MjQ3MzM0LCJpYXQiOjE3MDI2NjQ5MTF9.qJO-cqZNmBqFeOw7x5Yj9eRh1GXq3vJ3U5ZfPvB_X-I';
+                    
+                    cesiumViewer = new Cesium.Viewer('cesiumContainer', {
+                        terrain: Cesium.Terrain.fromWorldTerrain(),
+                        imageryProvider: new Cesium.IonImageryProvider({ assetId: 2 }), // Bing Maps Aerial
+                        baseLayerPicker: true,
+                        geocoder: true,
+                        homeButton: true,
+                        sceneModePicker: true,
+                        navigationHelpButton: false,
+                        animation: false,
+                        timeline: false,
+                        fullscreenButton: false
+                    });
+                    
+                    // Style Cesium for tactical theme
+                    cesiumViewer.scene.globe.depthTestAgainstTerrain = true;
+                    cesiumViewer.scene.globe.enableLighting = true;
+                    
+                    debugLog('Cesium 3D initialized');
+                }
+                
+                // If we have location, fly there
+                if (lastKnownLocation) {
+                    cesiumViewer.camera.flyTo({
+                        destination: Cesium.Cartesian3.fromDegrees(
+                            lastKnownLocation.lon, 
+                            lastKnownLocation.lat, 
+                            5000 // 5km altitude
+                        ),
+                        orientation: {
+                            heading: Cesium.Math.toRadians(0.0),
+                            pitch: Cesium.Math.toRadians(-45.0),
+                            roll: 0.0
+                        }
+                    });
+                    
+                    // Add entity marker
+                    cesiumViewer.entities.add({
+                        position: Cesium.Cartesian3.fromDegrees(
+                            lastKnownLocation.lon, 
+                            lastKnownLocation.lat
+                        ),
+                        point: {
+                            pixelSize: 20,
+                            color: Cesium.Color.CYAN,
+                            outlineColor: Cesium.Color.WHITE,
+                            outlineWidth: 3,
+                            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+                        },
+                        label: {
+                            text: myCallsign,
+                            font: '14px monospace',
+                            fillColor: Cesium.Color.CYAN,
+                            outlineColor: Cesium.Color.BLACK,
+                            outlineWidth: 2,
+                            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                            pixelOffset: new Cesium.Cartesian2(0, -25)
+                        }
+                    });
+                }
+                
+                is3DMode = true;
+                event.target.classList.add('active');
+                debugLog('Switched to 3D view');
+            } else {
+                // Switch back to 2D
+                mapDiv.style.display = 'block';
+                cesiumDiv.style.display = 'none';
+                is3DMode = false;
+                event.target.classList.remove('active');
+                debugLog('Switched to 2D view');
+            }
         }
         
         // Debug logging to visible panel
