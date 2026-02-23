@@ -867,34 +867,6 @@ ALPHA-3 | REAR"></textarea>
                 });
                 
                 debugLog('Entity added');
-                    
-                    // Add entity marker
-                    cesiumViewer.entities.add({
-                        position: Cesium.Cartesian3.fromDegrees(
-                            lastKnownLocation.lon, 
-                            lastKnownLocation.lat
-                        ),
-                        point: {
-                            pixelSize: 20,
-                            color: Cesium.Color.CYAN,
-                            outlineColor: Cesium.Color.WHITE,
-                            outlineWidth: 3,
-                            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-                        },
-                        label: {
-                            text: myCallsign,
-                            font: '14px monospace',
-                            fillColor: Cesium.Color.CYAN,
-                            outlineColor: Cesium.Color.BLACK,
-                            outlineWidth: 2,
-                            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                            pixelOffset: new Cesium.Cartesian2(0, -25)
-                        }
-                    });
-                    
-                    debugLog('Entity added at location');
-                }
                 
                 is3DMode = true;
                 event.target.classList.add('active');
