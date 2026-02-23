@@ -85,10 +85,29 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
     thread::spawn(move || {
         eprintln!("Connecting to Meshtastic on port: {}", port_clone);
         
-        match serialport::new(&port_clone, 921600)
-            .timeout(Duration::from_millis(100))
-            .open() {
-            Ok(mut port) => {
+        // Try 921600 first (newer firmware), fall back to 115200 (older)
+        let baud_rates = [921600, 115200];
+        let mut port_result = None;
+        
+        for &baud in &baud_rates {
+            eprintln!("Trying baud rate: {}", baud);
+            match serialport::new(&port_clone, baud)
+                .timeout(Duration::from_millis(100))
+                .open() {
+                Ok(p) => {
+                    eprintln!("Opened port at {} baud", baud);
+                    let _ = app_handle.emit("meshtastic-debug", format!("Port opened at {} baud", baud));
+                    port_result = Some(p);
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Failed to open at {} baud: {}", baud, e);
+                }
+            }
+        }
+        
+        match port_result {
+            Some(mut port) => {
                 eprintln!("Serial port opened successfully");
                 let _ = app_handle.emit("meshtastic-status", "connected");
                 
@@ -194,9 +213,9 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                 eprintln!("Meshtastic disconnected - received {} packets", packets_received);
                 let _ = app_handle.emit("meshtastic-status", "disconnected");
             }
-            Err(e) => {
-                eprintln!("Failed to open serial port: {}", e);
-                let error_msg = format!("Failed to open port {}: {}", port_clone, e);
+            None => {
+                eprintln!("Failed to open serial port at any baud rate");
+                let error_msg = format!("Failed to open port {} at any baud rate (921600 or 115200)", port_clone);
                 let _ = app_handle.emit("meshtastic-error", error_msg.clone());
                 let _ = app_handle.emit("meshtastic-debug", error_msg);
             }
