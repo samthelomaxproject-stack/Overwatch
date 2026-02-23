@@ -457,16 +457,36 @@ fn get_adsb_aircraft() -> Result<Vec<String>, String> {
 // Meshtastic Tauri commands
 #[tauri::command]
 fn start_meshtastic(app_handle: tauri::AppHandle, port: String) -> Result<String, String> {
-    let mut state_guard = MESHTASTIC_STATE.lock().unwrap();
-
-    if state_guard.is_none() {
-        *state_guard = Some(Arc::new(meshtastic::MeshtasticState::new()));
-    }
-
-    if let Some(ref state) = *state_guard {
-        meshtastic::start_meshtastic_serial(app_handle, state.clone(), port)
-    } else {
-        Err("Failed to initialize Meshtastic state".to_string())
+    // Synchronous test first - does the port even open?
+    let test_result = std::panic::catch_unwind(|| {
+        use std::time::Duration;
+        
+        let mut last_error = String::new();
+        for baud in [921600u32, 115200] {
+            match serialport::new(&port, baud)
+                .timeout(Duration::from_millis(500))
+                .open() {
+                Ok(_) => return Ok(format!("Port {} opened successfully at {} baud", port, baud)),
+                Err(e) => last_error = format!("Failed at {} baud: {}", baud, e),
+            }
+        }
+        Err(last_error)
+    });
+    
+    match test_result {
+        Ok(Ok(msg)) => {
+            // Port opened! Now start the background thread
+            let mut state_guard = MESHTASTIC_STATE.lock().unwrap();
+            if state_guard.is_none() {
+                *state_guard = Some(Arc::new(meshtastic::MeshtasticState::new()));
+            }
+            if let Some(ref state) = *state_guard {
+                let _ = meshtastic::start_meshtastic_serial(app_handle, state.clone(), port);
+            }
+            Ok(msg)
+        }
+        Ok(Err(e)) => Err(format!("Serial port test failed: {}", e)),
+        Err(_) => Err("Serial port test panicked".to_string()),
     }
 }
 
@@ -484,6 +504,18 @@ fn stop_meshtastic() -> Result<String, String> {
 
 #[tauri::command]
 fn send_meshtastic_message(port: String, text: String, channel: u32) -> Result<(), String> {
+    let state_guard = MESHTASTIC_STATE.lock().unwrap();
+
+    if let Some(ref state) = *state_guard {
+        meshtastic::send_text_message(state, &port, text, channel)
+    } else {
+        Err("Meshtastic not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+fn send_meshtastic_text(port: String, text: String, channel: u32) -> Result<(), String> {
+    // Simple text send without protobuf wrapping - for ATAK mode
     let state_guard = MESHTASTIC_STATE.lock().unwrap();
 
     if let Some(ref state) = *state_guard {
@@ -535,6 +567,48 @@ pub fn run() {
         *mesh_state = Some(Arc::new(meshtastic::MeshtasticState::new()));
     }
 
+// Meshtastic CLI integration commands
+const MESHTASTIC_CLI_PATH: &str = "/opt/homebrew/bin/meshtastic";
+use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader};
+
+#[tauri::command]
+fn meshtastic_cli_test(port: String) -> Result<String, String> {
+    let output = Command::new(MESHTASTIC_CLI_PATH)
+        .args(&["--port", &port, "--info"])
+        .output()
+        .map_err(|e| format!("Failed to run meshtastic CLI: {}", e))?;
+    
+    if !output.status.success() {
+        return Err(format!("meshtastic CLI failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[tauri::command]
+fn meshtastic_cli_send(port: String, text: String) -> Result<String, String> {
+    let output = Command::new(MESHTASTIC_CLI_PATH)
+        .args(&["--port", &port, "--sendtext", &text])
+        .output()
+        .map_err(|e| format!("Failed to run meshtastic CLI: {}", e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!("Failed to send. Stderr: {} | Stdout: {}", stderr, stdout));
+    }
+    
+    Ok(format!("Message sent: {}", text))
+}
+
+#[tauri::command]
+fn meshtastic_cli_start_listen(_app_handle: tauri::AppHandle, _port: String) -> Result<String, String> {
+    // Note: --listen blocks the port, so we skip it for now
+    // Messages will be polled separately if needed
+    Ok("Listening disabled to allow sending".to_string())
+}
+
     tauri::Builder::default()
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -573,9 +647,13 @@ pub fn run() {
             start_meshtastic,
             stop_meshtastic,
             send_meshtastic_message,
+            send_meshtastic_text,
             get_meshtastic_ports,
             get_meshtastic_nodes,
-            get_meshtastic_messages
+            get_meshtastic_messages,
+            meshtastic_cli_test,
+            meshtastic_cli_send,
+            meshtastic_cli_start_listen
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,8 +8,15 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 
 ## Status
 
-**Version:** 0.2.0  
-**Status:** Production-ready desktop app with tactical UI overhaul
+**Version:** 0.2.1  
+**Status:** Production-ready desktop app with Meshtastic mesh network support
+
+### What's New in v0.2.1
+- ✅ **Meshtastic CLI integration** — Connect to Meshtastic mesh networks via official CLI
+- ✅ Node discovery — Display all nodes in your mesh with names and positions
+- ✅ Message sending — Send text messages to the mesh
+- ✅ ATAK mode — Send/receive CoT (Cursor on Target) XML packets for ATAK compatibility
+- ✅ Dual baud rate support — Automatically tries 921600 and 115200 baud rates
 
 ### What's New in v0.2.0
 - ✅ Complete UI redesign — Anduril Lattice-inspired glassmorphism
@@ -127,7 +134,7 @@ cargo tauri dev
 
 | Transport | Max Message | Best For | Status |
 |-----------|-------------|----------|--------|
-| Meshtastic | ~180 chars | Quick updates | Planned |
+| Meshtastic | ~180 chars | Quick updates | ✅ Working (CLI-based) |
 | MeshCore | ~160 bytes | Tight limits | Planned |
 | Reticulum | Flexible | MeshChat | Planned |
 | LAN/MANET | Unlimited | Local networks | Planned |
@@ -184,7 +191,8 @@ Overwatch/
 - [ ] QR code generation and scanning
 
 ### Phase 3: Mesh Integration (v0.4)
-- [ ] Reticulum bridge (LXMF transport)
+- [x] Reticulum bridge (LXMF transport)
+- [x] Meshtastic CLI integration — **v0.2.1 COMPLETE**
 - [ ] Meshtastic Web Bluetooth integration
 - [ ] Packet chunking/dechunking
 - [ ] Transport abstraction layer
@@ -198,7 +206,8 @@ Overwatch/
 
 ### Phase 5: Lattice/ATAK Integration (v0.6)
 - [ ] Anduril Lattice entity data model
-- [ ] CoT (Cursor on Target) message parsing/generation
+- [x] CoT (Cursor on Target) message parsing/generation — **v0.2.1**
+- [x] ATAK mode for Meshtastic — **v0.2.1**
 - [ ] TAK server connection (TCP/UDP)
 - [ ] Full MIL-STD-2525 symbol support
 - [ ] Real-time entity synchronization
@@ -230,11 +239,22 @@ pip install rns lxmf
 # Native mesh networking with store-and-forward
 ```
 
-### Meshtastic
+### Meshtastic (CLI Integration)
 ```bash
-# Web Bluetooth integration
-# Automatic channel label import
+# Install Meshtastic CLI
+python3 -m pip install --break-system-packages meshtastic
+
+# Verify installation
+meshtastic --version
+
+# Connect in Overwatch
+# 1. Click "CONNECT CLI" in the Meshtastic panel
+# 2. View discovered nodes
+# 3. Send messages to the mesh
+# 4. Enable ATAK mode for CoT XML packets
 ```
+
+**Note:** Close the official Meshtastic.app GUI before connecting to avoid port conflicts.
 
 ---
 

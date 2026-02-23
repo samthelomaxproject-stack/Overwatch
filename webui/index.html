@@ -22,32 +22,32 @@
             font-weight: 700;
             font-family: var(--font-mono);
         }
-        
+
         .tac-symbol-friendly {
             border-color: var(--tac-friendly);
             color: var(--tac-friendly);
             background: rgba(0, 200, 81, 0.1);
         }
-        
+
         .tac-symbol-hostile {
             border-color: var(--tac-hostile);
             color: var(--tac-hostile);
             background: rgba(255, 51, 51, 0.1);
             border-radius: 50%;
         }
-        
+
         .tac-symbol-neutral {
             border-color: var(--tac-neutral);
             color: var(--tac-neutral);
             background: rgba(0, 212, 255, 0.1);
         }
-        
+
         .tac-symbol-unknown {
             border-color: var(--tac-unknown);
             color: var(--tac-unknown);
             background: rgba(255, 204, 0, 0.1);
         }
-        
+
         /* Unit Type Icons */
         .tac-icon-infantry::before { content: '⏚'; }
         .tac-icon-armor::before { content: '▰'; }
@@ -55,7 +55,7 @@
         .tac-icon-naval::before { content: '≋'; }
         .tac-icon-drone::before { content: '⏍'; }
         .tac-icon-sensor::before { content: '◎'; }
-        
+
         /* Entity Cards */
         .tac-entity {
             display: flex;
@@ -67,33 +67,33 @@
             border-radius: 4px;
             transition: all var(--transition-fast);
         }
-        
+
         .tac-entity:hover {
             border-color: var(--accent-cyan-dim);
         }
-        
+
         .tac-entity-info {
             flex: 1;
         }
-        
+
         .tac-entity-name {
             font-weight: 600;
             color: var(--text-primary);
             font-family: var(--font-mono);
         }
-        
+
         .tac-entity-meta {
             font-size: 0.75rem;
             color: var(--text-secondary);
             font-family: var(--font-mono);
         }
-        
+
         .tac-entity-coords {
             font-family: var(--font-mono);
             font-size: 0.75rem;
             color: var(--accent-cyan);
         }
-        
+
         /* Map Overlay Controls */
         .tac-map-overlay {
             position: absolute;
@@ -104,7 +104,7 @@
             flex-direction: column;
             gap: var(--space-xs);
         }
-        
+
         .tac-map-btn {
             width: 36px;
             height: 36px;
@@ -119,18 +119,18 @@
             transition: all var(--transition-fast);
             backdrop-filter: blur(8px);
         }
-        
+
         .tac-map-btn:hover {
             border-color: var(--accent-cyan);
             color: var(--accent-cyan);
         }
-        
+
         .tac-map-btn.active {
             background: var(--accent-cyan-dim);
             border-color: var(--accent-cyan);
             color: var(--accent-cyan);
         }
-        
+
         /* Layer Toggle Group */
         .tac-layer-group {
             display: flex;
@@ -141,7 +141,7 @@
             border-radius: 4px;
             backdrop-filter: blur(8px);
         }
-        
+
         .tac-layer-btn {
             padding: var(--space-xs) var(--space-sm);
             font-size: 0.625rem;
@@ -155,18 +155,18 @@
             transition: all var(--transition-fast);
             font-weight: 600;
         }
-        
+
         .tac-layer-btn:hover {
             border-color: var(--accent-cyan);
             color: var(--accent-cyan);
         }
-        
+
         .tac-layer-btn.active {
             background: var(--accent-cyan-dim);
             border-color: var(--accent-cyan);
             color: var(--accent-cyan);
         }
-        
+
         /* Packet List Items */
         .tac-packet {
             display: grid;
@@ -181,11 +181,11 @@
             cursor: pointer;
             transition: all var(--transition-fast);
         }
-        
+
         .tac-packet:hover {
             background: rgba(0, 212, 255, 0.05);
         }
-        
+
         .tac-packet-type {
             font-family: var(--font-mono);
             font-size: 0.6875rem;
@@ -196,11 +196,11 @@
             border-radius: 2px;
             background: var(--bg-secondary);
         }
-        
+
         .tac-packet-content {
             min-width: 0;
         }
-        
+
         .tac-packet-text {
             font-size: 0.875rem;
             color: var(--text-primary);
@@ -208,13 +208,13 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        
+
         .tac-packet-meta {
             font-size: 0.6875rem;
             color: var(--text-secondary);
             font-family: var(--font-mono);
         }
-        
+
         /* Squad Cards */
         .tac-squad {
             background: var(--bg-tertiary);
@@ -222,7 +222,7 @@
             border-radius: 4px;
             overflow: hidden;
         }
-        
+
         .tac-squad-header {
             display: flex;
             align-items: center;
@@ -231,18 +231,18 @@
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
         }
-        
+
         .tac-squad-name {
             font-family: var(--font-mono);
             font-weight: 700;
             color: var(--accent-cyan);
             font-size: 0.875rem;
         }
-        
+
         .tac-squad-members {
             padding: var(--space-sm);
         }
-        
+
         .tac-squad-member {
             display: flex;
             align-items: center;
@@ -250,24 +250,24 @@
             padding: var(--space-xs) var(--space-sm);
             border-bottom: 1px solid var(--border-subtle);
         }
-        
+
         .tac-squad-member:last-child {
             border-bottom: none;
         }
-        
+
         .tac-squad-callsign {
             font-family: var(--font-mono);
             font-size: 0.8125rem;
             color: var(--text-primary);
         }
-        
+
         .tac-squad-role {
             font-size: 0.6875rem;
             color: var(--text-secondary);
             text-transform: uppercase;
             letter-spacing: 0.1em;
         }
-        
+
         /* Quick Action Bar */
         .tac-quick-actions {
             display: flex;
@@ -276,7 +276,7 @@
             background: var(--bg-secondary);
             border-radius: 4px;
         }
-        
+
         .tac-quick-btn {
             padding: var(--space-xs) var(--space-sm);
             font-size: 0.625rem;
@@ -289,7 +289,7 @@
             cursor: pointer;
             transition: all var(--transition-fast);
         }
-        
+
         .tac-quick-btn:hover {
             border-color: var(--accent-cyan);
             color: var(--accent-cyan);
@@ -320,12 +320,12 @@
                 </div>
             </div>
         </header>
-        
+
         <!-- Debug Panel -->
         <div id="debugPanel" style="background: #1a1a2e; color: #00ff00; padding: 10px; font-family: monospace; font-size: 11px; max-height: 150px; overflow-y: auto; border-bottom: 1px solid #333;">
             <div>Debug Output:</div>
         </div>
-        
+
         <!-- Main Container -->
         <div class="tac-container">
             <!-- Sidebar -->
@@ -346,7 +346,7 @@
                     <span>SDR / SIGINT</span>
                     <span class="tac-nav-shortcut">⌘3</span>
                 </div>
-                
+
                 <div class="tac-nav-section">Assets</div>
                 <div class="tac-nav-item" data-view="squads" data-key="4">
                     <span class="tac-nav-icon">◉</span>
@@ -363,7 +363,7 @@
                     <span>SATCOM</span>
                     <span class="tac-nav-shortcut">⌘6</span>
                 </div>
-                
+
                 <div class="tac-nav-section">Systems</div>
                 <div class="tac-nav-item" data-view="zones" data-key="7">
                     <span class="tac-nav-icon">▣</span>
@@ -381,7 +381,7 @@
                     <span class="tac-nav-shortcut">⌘9</span>
                 </div>
             </nav>
-            
+
             <!-- Main Content -->
             <main class="tac-main">
                 <!-- Packets View -->
@@ -394,7 +394,7 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <div class="tac-panel">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">Recent Packets</span>
@@ -410,7 +410,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Map View -->
                 <div class="tac-view" id="view-map">
                     <div class="tac-map-container" id="map"></div>
@@ -432,7 +432,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- SDR View -->
                 <div class="tac-view" id="view-sdr">
                     <div class="tac-panel">
@@ -444,7 +444,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Squads View -->
                 <div class="tac-view" id="view-squads">
                     <div class="tac-panel">
@@ -461,7 +461,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Entities View -->
                 <div class="tac-view" id="view-entities">
                     <div class="tac-panel">
@@ -479,7 +479,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- SATCOM View -->
                 <div class="tac-view" id="view-satcom">
                     <div class="tac-panel">
@@ -492,7 +492,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Zones View -->
                 <div class="tac-view" id="view-zones">
                     <div class="tac-panel">
@@ -513,7 +513,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- ATAK View -->
                 <div class="tac-view" id="view-atak">
                     <div class="tac-panel">
@@ -535,7 +535,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Settings View -->
                 <div class="tac-view" id="view-settings">
                     <div class="tac-panel">
@@ -577,7 +577,7 @@
             </main>
         </div>
     </div>
-    
+
     <!-- New Packet Modal -->
     <div class="tac-modal" id="packetModal">
         <div class="tac-modal-content">
@@ -623,7 +623,7 @@
             </div>
         </div>
     </div>
-    
+
     <!-- New Squad Modal -->
     <div class="tac-modal" id="squadModal">
         <div class="tac-modal-content">
@@ -648,7 +648,7 @@ ALPHA-3 | REAR"></textarea>
             </div>
         </div>
     </div>
-    
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // State
@@ -662,7 +662,7 @@ ALPHA-3 | REAR"></textarea>
         ];
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
-        
+
         // Map styles
         const mapStyles = {
             dark: {
@@ -684,26 +684,26 @@ ALPHA-3 | REAR"></textarea>
                 attribution: '© OpenTopoMap'
             }
         };
-        
+
         let currentStyle = 'dark';
-        
+
         // Navigation
         document.querySelectorAll('.tac-nav-item').forEach(item => {
             item.addEventListener('click', () => {
                 const view = item.dataset.view;
-                
+
                 document.querySelectorAll('.tac-nav-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                
+
                 document.querySelectorAll('.tac-view').forEach(m => m.classList.remove('active'));
                 document.getElementById('view-' + view).classList.add('active');
-                
+
                 if (view === 'map' && !map) {
                     setTimeout(initMap, 100);
                 }
             });
         });
-        
+
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             if (e.metaKey || e.ctrlKey) {
@@ -715,42 +715,42 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
         });
-        
+
         // Map functions
         function initMap() {
             if (map) return; // Already initialized
-            
+
             const mapContainer = document.getElementById('map');
             if (!mapContainer) {
                 debugLog('Map container not found!');
                 return;
             }
-            
+
             // Make sure map view is visible for proper initialization
             const mapView = document.getElementById('view-map');
             if (mapView) {
                 mapView.classList.add('active');
             }
-            
+
             map = L.map('map', {
                 zoomControl: true,
                 attributionControl: true
             }).setView([34.0522, -118.2437], 10);
-            
+
             L.tileLayer(mapStyles.dark.url, {
                 attribution: mapStyles.dark.attribution,
                 maxZoom: 19
             }).addTo(map);
-            
+
             debugLog('Map initialized successfully');
-            
+
             // If we have a location already, show it
             if (lastKnownLocation) {
                 debugLog('Have stored location, updating marker');
                 updateMyLocation(lastKnownLocation.lat, lastKnownLocation.lon, lastKnownLocation.accuracy);
             }
         }
-        
+
         function setMapStyle(style) {
             currentStyle = style;
             document.querySelectorAll('.tac-layer-group:first-child .tac-layer-btn').forEach(btn => {
@@ -759,7 +759,7 @@ ALPHA-3 | REAR"></textarea>
                     btn.classList.add('active');
                 }
             });
-            
+
             if (map) {
                 // Remove all tile layers
                 map.eachLayer(layer => {
@@ -767,13 +767,13 @@ ALPHA-3 | REAR"></textarea>
                         map.removeLayer(layer);
                     }
                 });
-                
+
                 // Add base layer
                 L.tileLayer(mapStyles[style].url, {
                     attribution: mapStyles[style].attribution,
                     maxZoom: 19
                 }).addTo(map);
-                
+
                 // For hybrid, add labels on top
                 if (style === 'hybrid') {
                     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
@@ -783,24 +783,24 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
         }
-        
+
         function toggleLayer(layer) {
             event.target.classList.toggle('active');
         }
-        
+
         // 3D Cesium View
         let cesiumViewer = null;
         let is3DMode = false;
-        
+
         function toggle3D() {
             const mapDiv = document.getElementById('map');
             const cesiumDiv = document.getElementById('cesiumContainer');
-            
+
             if (!is3DMode) {
                 // Switch to 3D
                 mapDiv.style.display = 'none';
                 cesiumDiv.style.display = 'block';
-                
+
                 // Move our buttons to bottom left so they don't cover Cesium controls
                 const overlay = document.getElementById('mapOverlay');
                 if (overlay) {
@@ -809,7 +809,7 @@ ALPHA-3 | REAR"></textarea>
                     overlay.style.left = 'var(--space-md)';
                     overlay.style.right = 'auto';
                 }
-                
+
                 if (!cesiumViewer) {
                     debugLog('Creating Cesium viewer...');
                     try {
@@ -831,12 +831,12 @@ ALPHA-3 | REAR"></textarea>
                         return;
                     }
                 }
-                
+
                 // Get target coordinates
                 const targetLat = lastKnownLocation ? lastKnownLocation.lat : 39.8283;
                 const targetLon = lastKnownLocation ? lastKnownLocation.lon : -98.5795;
                 debugLog('Target: ' + targetLat + ', ' + targetLon);
-                
+
                 // Use flyTo for smooth animation to location - start closer
                 try {
                     cesiumViewer.camera.flyTo({
@@ -852,7 +852,7 @@ ALPHA-3 | REAR"></textarea>
                 } catch (e) {
                     debugLog('ERROR in flyTo: ' + e.message);
                 }
-                
+
                 // Add marker
                 try {
                     cesiumViewer.entities.removeAll();
@@ -875,7 +875,7 @@ ALPHA-3 | REAR"></textarea>
                 } catch (e) {
                     debugLog('ERROR adding entity: ' + e.message);
                 }
-                
+
                 is3DMode = true;
                 event.target.classList.add('active');
                 debugLog('Switched to 3D view');
@@ -886,7 +886,7 @@ ALPHA-3 | REAR"></textarea>
                 is3DMode = false;
                 event.target.classList.remove('active');
                 debugLog('Switched to 2D view');
-                
+
                 // Restore overlay position
                 const overlay = document.getElementById('mapOverlay');
                 if (overlay) {
@@ -895,7 +895,7 @@ ALPHA-3 | REAR"></textarea>
                     overlay.style.left = 'auto';
                     overlay.style.right = 'var(--space-md)';
                 }
-                
+
                 // Fix Leaflet map display after being hidden
                 if (map) {
                     setTimeout(() => {
@@ -905,7 +905,7 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
         }
-        
+
         // Debug logging to visible panel
         function debugLog(msg) {
             const panel = document.getElementById('debugPanel');
@@ -920,7 +920,7 @@ ALPHA-3 | REAR"></textarea>
 
         // GPS tracking with permission handling
         let gpsPermissionState = 'prompt';
-        
+
         async function checkLocationPermission() {
             const tauriAvailable = checkTauriAvailable();
             debugLog('checkLocationPermission called, tauriAvailable: ' + tauriAvailable);
@@ -942,18 +942,18 @@ ALPHA-3 | REAR"></textarea>
                     console.log('Native location check failed:', e);
                 }
             }
-            
+
             // Fall back to web permission API
             console.log('Falling back to web geolocation API');
             if (!('permissions' in navigator)) {
                 return 'prompt';
             }
-            
+
             try {
                 const result = await navigator.permissions.query({ name: 'geolocation' });
                 console.log('Web geolocation permission state:', result.state);
                 gpsPermissionState = result.state;
-                
+
                 result.addEventListener('change', () => {
                     gpsPermissionState = result.state;
                     updateGPSStatus();
@@ -961,21 +961,21 @@ ALPHA-3 | REAR"></textarea>
                         startGPSTracking();
                     }
                 });
-                
+
                 return result.state;
             } catch (e) {
                 console.log('Permission API not supported');
                 return 'prompt';
             }
         }
-        
+
         function updateGPSStatus() {
             console.log('updateGPSStatus called, gpsPermissionState =', gpsPermissionState);
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
             const settingsDot = document.getElementById('settingsGPSDot');
             const settingsText = document.getElementById('settingsGPSText');
-            
+
             if (gpsPermissionState === 'denied') {
                 console.log('Setting UI to DENIED');
                 dot.classList.add('offline');
@@ -1000,7 +1000,7 @@ ALPHA-3 | REAR"></textarea>
                 if (settingsText) settingsText.textContent = 'GPS ACTIVE';
             }
         }
-        
+
         // Check if Tauri is available - call this function when needed
         function checkTauriAvailable() {
             try {
@@ -1009,7 +1009,7 @@ ALPHA-3 | REAR"></textarea>
                 return false;
             }
         }
-        
+
         function getTauriListener() {
             try {
                 return window.__TAURI__?.event?.listen;
@@ -1017,30 +1017,30 @@ ALPHA-3 | REAR"></textarea>
                 return null;
             }
         }
-        
+
         // ADS-B tracking state
         let adsbAircraft = [];
         let adsbActive = false;
         let adsbAircraftCount = 0;
         let adsbMaxRange = 0;
-        
+
         // Poll for Tauri availability - it might take time to inject
         let tauriCheckCount = 0;
         const tauriCheckInterval = setInterval(() => {
             tauriCheckCount++;
             const hasTauri = typeof window.__TAURI__ !== 'undefined';
-            
+
             if (hasTauri) {
                 clearInterval(tauriCheckInterval);
                 debugLog('Tauri found after ' + tauriCheckCount + ' checks!');
                 debugLog('window.__TAURI__.core: ' + (typeof window.__TAURI__.core));
                 debugLog('window.__TAURI__.event: ' + (typeof window.__TAURI__.event));
-                
+
                 // Now set up listeners
                 const tauriListen = getTauriListener();
                 if (tauriListen) {
                     debugLog('Setting up native listeners');
-                    
+
                     tauriListen('location-update', (event) => {
                         debugLog('Location update: ' + JSON.stringify(event.payload));
                         const [lat, lon, accuracy] = event.payload;
@@ -1048,13 +1048,13 @@ ALPHA-3 | REAR"></textarea>
                         gpsPermissionState = 'granted';
                         updateGPSStatus();
                     });
-                    
+
                     tauriListen('permission-change', (event) => {
                         debugLog('Permission change: ' + event.payload);
                         gpsPermissionState = event.payload ? 'granted' : 'denied';
                         updateGPSStatus();
                     });
-                    
+
                     // ADS-B listeners
                     tauriListen('adsb-aircraft', (event) => {
                         const aircraft = event.payload;
@@ -1063,24 +1063,24 @@ ALPHA-3 | REAR"></textarea>
                         if (adsbAircraft.length > 50) adsbAircraft.shift();
                         updateAdsbDisplay();
                     });
-                    
+
                     tauriListen('adsb-count', (event) => {
                         adsbAircraftCount = event.payload;
                         debugLog('ADS-B count: ' + adsbAircraftCount);
                         updateAdsbPanel();
                     });
-                    
+
                     tauriListen('adsb-error', (event) => {
                         debugLog('ADS-B error: ' + event.payload);
                         alert('ADS-B Error: ' + event.payload);
                     });
-                    
+
                     debugLog('Listeners registered');
-                    
+
                     // Setup Meshtastic listeners
                     setupMeshtasticListeners();
                 }
-                
+
                 // Also trigger GPS init if not already done
                 if (gpsPermissionState === 'prompt') {
                     initGPS();
@@ -1092,7 +1092,7 @@ ALPHA-3 | REAR"></textarea>
                 debugLog('URL: ' + window.location.href);
             }
         }, 200);
-        
+
         async function requestLocationPermission() {
             // Try native Tauri location first
             const tauriAvailable = checkTauriAvailable();
@@ -1100,7 +1100,7 @@ ALPHA-3 | REAR"></textarea>
                 try {
                     await window.__TAURI__.core.invoke('request_location_permission');
                     console.log('Native location requested');
-                    
+
                     // Check status after a delay
                     setTimeout(async () => {
                         const status = await window.__TAURI__.core.invoke('check_location_permission');
@@ -1121,7 +1121,7 @@ ALPHA-3 | REAR"></textarea>
                     console.log('Native location request failed:', e);
                 }
             }
-            
+
             // Fall back to web geolocation API
             if ('geolocation' in navigator) {
                 navigator.geolocation.getCurrentPosition(
@@ -1147,13 +1147,13 @@ ALPHA-3 | REAR"></textarea>
                 alert('Geolocation is not supported in this browser.');
             }
         }
-        
+
         function startGPSTracking() {
             if (!('geolocation' in navigator)) {
                 document.getElementById('statusText').textContent = 'GPS NOT SUPPORTED';
                 return;
             }
-            
+
             navigator.geolocation.watchPosition(
                 (position) => {
                     const { latitude, longitude, accuracy } = position.coords;
@@ -1167,11 +1167,11 @@ ALPHA-3 | REAR"></textarea>
                 { enableHighAccuracy: true, maximumAge: 10000 }
             );
         }
-        
+
         function initGPS() {
             const tauriAvailable = checkTauriAvailable();
             debugLog('initGPS called, tauriAvailable: ' + tauriAvailable);
-            
+
             // If Tauri native location is available, use it exclusively
             if (tauriAvailable) {
                 debugLog('Using native location...');
@@ -1186,7 +1186,7 @@ ALPHA-3 | REAR"></textarea>
                         debugLog('Poll ' + pollCount + ': status==="authorized_always": ' + (status === 'authorized_always'));
                         debugLog('Poll ' + pollCount + ': status==="authorized_when_in_use": ' + (status === 'authorized_when_in_use'));
                         debugLog('Poll ' + pollCount + ': status==="denied": ' + (status === 'denied'));
-                        
+
                         if (status === 'authorized_when_in_use' || status === 'authorized_always') {
                             debugLog('MATCH! Setting to GRANTED');
                             clearInterval(pollInterval);
@@ -1228,7 +1228,7 @@ ALPHA-3 | REAR"></textarea>
                 checkWebLocationPermission();
             }
         }
-        
+
         async function checkWebLocationPermission() {
             console.log('checkWebLocationPermission called - THIS SHOULD NOT HAPPEN WHEN TAURI IS AVAILABLE');
             try {
@@ -1244,7 +1244,7 @@ ALPHA-3 | REAR"></textarea>
                 document.getElementById('statusText').textContent = 'GPS ERROR';
             }
         }
-        
+
         function toMGRS(lat, lon) {
             const zone = Math.floor((lon + 180) / 6) + 1;
             const letter = String.fromCharCode(65 + Math.floor((lat + 80) / 8));
@@ -1252,24 +1252,24 @@ ALPHA-3 | REAR"></textarea>
             const northing = Math.floor((lat % 8 + 8) % 8 * 100000 + 500000);
             return `${zone}${letter} ${easting.toString().slice(-5)} ${northing.toString().slice(-5)}`;
         }
-        
+
         function updateMyLocation(lat, lon, accuracy) {
             // Store location for later use
             lastKnownLocation = { lat, lon, accuracy };
-            
+
             const gridCoords = toMGRS(lat, lon);
-            
+
             // Initialize map if not ready
             if (!map) {
                 debugLog('Map not ready, initializing now...');
                 initMap();
             }
-            
+
             if (!map) {
                 debugLog('Map still not available after init');
                 return;
             }
-            
+
             const myIcon = L.divIcon({
                 className: 'my-location-marker',
                 html: `<div style="width:20px;height:20px;background:var(--accent-cyan);border:3px solid white;border-radius:50%;box-shadow:0 0 15px var(--accent-cyan);position:relative;">
@@ -1278,7 +1278,7 @@ ALPHA-3 | REAR"></textarea>
                 iconSize: [20, 20],
                 iconAnchor: [10, 10]
             });
-            
+
             if (myLocationMarker) {
                 myLocationMarker.setLatLng([lat, lon]);
                 myLocationMarker.setPopupContent(`<strong>${myCallsign}</strong><br>${gridCoords}<br>Accuracy: ${Math.round(accuracy)}m`);
@@ -1290,23 +1290,23 @@ ALPHA-3 | REAR"></textarea>
                 map.setView([lat, lon], 16);
                 debugLog('Marker created at ' + lat + ', ' + lon);
             }
-            
+
             document.getElementById('statusDot').classList.remove('offline');
             document.getElementById('statusText').innerHTML = `<span class="tac-status-value">${myCallsign}</span> • ${gridCoords}`;
-            
+
             // Update Cesium if in 3D mode
             updateCesiumLocation(lat, lon);
         }
-        
+
         // Store last known location
         let lastKnownLocation = null;
-        
+
         // Update Cesium when location changes if in 3D mode
         function updateCesiumLocation(lat, lon) {
             if (!cesiumViewer || !is3DMode) return;
-            
+
             debugLog('Updating Cesium with new location');
-            
+
             // Remove old entities and add new one
             cesiumViewer.entities.removeAll();
             cesiumViewer.entities.add({
@@ -1330,20 +1330,20 @@ ALPHA-3 | REAR"></textarea>
                 }
             });
         }
-        
+
         // Modal functions
         function showPacketModal() {
             document.getElementById('packetModal').classList.add('active');
         }
-        
+
         function showSquadModal() {
             document.getElementById('squadModal').classList.add('active');
         }
-        
+
         function hideModal(id) {
             document.getElementById(id).classList.remove('active');
         }
-        
+
         // Packet functions
         function createPacket(e) {
             e.preventDefault();
@@ -1352,7 +1352,7 @@ ALPHA-3 | REAR"></textarea>
             const to = document.getElementById('packetTo').value;
             const content = document.getElementById('packetContent').value;
             const from = document.getElementById('myCallsign').value || 'ME';
-            
+
             const packet = {
                 id: Date.now(),
                 type,
@@ -1362,27 +1362,27 @@ ALPHA-3 | REAR"></textarea>
                 content,
                 timestamp: new Date().toISOString()
             };
-            
+
             packets.unshift(packet);
             renderPackets();
             hideModal('packetModal');
             document.getElementById('packetForm').reset();
         }
-        
+
         function renderPackets() {
             const list = document.getElementById('packetList');
             if (packets.length === 0) {
                 list.innerHTML = '<div style="text-align: center; padding: var(--space-xl); color: var(--text-muted);">NO PACKETS</div>';
                 return;
             }
-            
+
             const priorityClass = {
                 'ROUTINE': 'tac-priority-routine',
                 'PRIORITY': 'tac-priority-priority',
                 'URGENT': 'tac-priority-urgent',
                 'FLASH': 'tac-priority-flash'
             };
-            
+
             const typeColor = {
                 'SITREP': 'var(--accent-cyan)',
                 'TASK': 'var(--accent-green)',
@@ -1394,7 +1394,7 @@ ALPHA-3 | REAR"></textarea>
                 'MISSION': '#fc8181',
                 'EVENT': '#63b3ed'
             };
-            
+
             list.innerHTML = packets.map(p => `
                 <div class="tac-packet tac-type-${p.type.toLowerCase()}" style="border-left-color: ${typeColor[p.type] || 'var(--accent-cyan)'};">
                     <div>
@@ -1408,29 +1408,29 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         function filterPackets(type) {
             // Filter implementation
             console.log('Filter packets:', type);
         }
-        
+
         // Squad functions
         function createSquad(e) {
             e.preventDefault();
             const name = document.getElementById('squadName').value.toUpperCase();
             const membersText = document.getElementById('squadMembers').value;
-            
+
             const members = membersText.split('\n').filter(line => line.trim()).map(line => {
                 const [callsign, role] = line.split('|').map(s => s.trim().toUpperCase());
                 return { callsign: callsign || 'UNKNOWN', role: role || 'MEMBER' };
             });
-            
+
             squads.push({ name, members });
             renderSquads();
             hideModal('squadModal');
             document.getElementById('squadForm').reset();
         }
-        
+
         function renderSquads() {
             const grid = document.getElementById('squadGrid');
             grid.innerHTML = squads.map((squad, index) => `
@@ -1450,14 +1450,14 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         function deleteSquad(index) {
             if (confirm('DELETE SQUAD?')) {
                 squads.splice(index, 1);
                 renderSquads();
             }
         }
-        
+
         // SDR functions
         function renderSDR() {
             const panel = document.getElementById('sdrPanel');
@@ -1507,29 +1507,40 @@ ALPHA-3 | REAR"></textarea>
                     <div class="tac-panel" style="grid-column: 1 / -1;">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">Meshtastic (LoRa 915 MHz)</span>
-                            <button class="tac-btn tac-btn-sm ${meshtasticConnected ? 'tac-btn-danger' : 'tac-btn-primary'}" id="meshtasticBtn" onclick="connectMeshtastic()">
-                                ${meshtasticConnected ? 'DISCONNECT' : 'CONNECT'}
-                            </button>
+                            <div style="display: flex; gap: var(--space-xs);">
+                                <button class="tac-btn tac-btn-sm ${meshtasticCliConnected ? 'tac-btn-danger' : 'tac-btn-primary'}" id="meshtasticBtn" onclick="connectMeshtasticCLI()">
+                                    ${meshtasticCliConnected ? 'DISCONNECT' : 'CONNECT CLI'}
+                                </button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" id="meshtasticRefreshBtn" onclick="refreshMeshtasticNodes()" ${!meshtasticCliConnected ? 'disabled' : ''}>
+                                    Refresh
+                                </button>
+                            </div>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-muted); margin-bottom: var(--space-sm);" id="meshtasticStatus">
-                                ${meshtasticConnected ? 'CONNECTED - ' + meshtasticPort : 'DISCONNECTED'}
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+                                <div style="font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-muted);" id="meshtasticStatus">
+                                    ${meshtasticCliConnected ? 'CLI CONNECTED - ' + meshtasticCliPort : 'DISCONNECTED'}
+                                </div>
+                                <label style="display: flex; align-items: center; gap: var(--space-xs); font-size: 0.75rem; cursor: pointer;">
+                                    <input type="checkbox" id="atakmodeswitch" onchange="toggleAtakMode(this.checked)" ${meshtasticAtakMode ? 'checked' : ''}>
+                                    <span style="color: var(--text-secondary);">ATAK MODE</span>
+                                </label>
                             </div>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md);">
                                 <div>
                                     <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-xs);">NODES</div>
                                     <div id="meshtasticNodes" style="max-height: 150px; overflow-y: auto; font-size: 0.75rem;">
-                                        <div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>
+                                        ${renderMeshtasticCliNodes()}
                                     </div>
                                 </div>
                                 <div>
                                     <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-xs);">MESSAGES</div>
                                     <div id="meshtasticMessages" style="max-height: 100px; overflow-y: auto; font-size: 0.75rem; margin-bottom: var(--space-sm);">
-                                        <div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>
+                                        ${renderMeshtasticCliMessages()}
                                     </div>
                                     <div style="display: flex; gap: var(--space-xs);">
-                                        <input type="text" id="meshtasticInput" class="tac-input" placeholder="Message..." style="flex: 1; font-size: 0.75rem;" onkeypress="if(event.key==='Enter') sendMeshtasticMessage()">
-                                        <button class="tac-btn tac-btn-sm tac-btn-primary" onclick="sendMeshtasticMessage()">SEND</button>
+                                        <input type="text" id="meshtasticInput" class="tac-input" placeholder="Message..." style="flex: 1; font-size: 0.75rem;" onkeypress="if(event.key==='Enter') sendMeshtasticCliMessage()" ${!meshtasticCliConnected ? 'disabled' : ''}>
+                                        <button class="tac-btn tac-btn-sm tac-btn-primary" onclick="sendMeshtasticCliMessage()" ${!meshtasticCliConnected ? 'disabled' : ''}>SEND</button>
                                     </div>
                                 </div>
                             </div>
@@ -1538,12 +1549,12 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `;
         }
-        
+
         function renderAdsbAircraftList() {
             if (adsbAircraft.length === 0) {
                 return '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO AIRCRAFT</div>';
             }
-            
+
             return adsbAircraft.slice(-10).reverse().map(ac => `
                 <div style="display: flex; justify-content: space-between; padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 0.75rem;">
                     <span style="color: var(--accent-cyan);">${ac.callsign || ac.icao}</span>
@@ -1551,17 +1562,17 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         function updateAdsbPanel() {
             const countEl = document.getElementById('adsbCount');
             const rangeEl = document.getElementById('adsbRange');
             const listEl = document.getElementById('adsbAircraftList');
-            
+
             if (countEl) countEl.textContent = adsbAircraftCount;
             if (rangeEl) rangeEl.textContent = adsbMaxRange || '--';
             if (listEl) listEl.innerHTML = renderAdsbAircraftList();
         }
-        
+
         function updateAdsbDisplay() {
             // Calculate max range if we have GPS position
             if (lastKnownLocation && adsbAircraft.length > 0) {
@@ -1577,15 +1588,15 @@ ALPHA-3 | REAR"></textarea>
                 });
                 adsbMaxRange = Math.round(maxRangeKm);
             }
-            
+
             updateAdsbPanel();
-            
+
             // Update map if visible
             if (document.getElementById('view-map').classList.contains('active')) {
                 updateAdsbOnMap();
             }
         }
-        
+
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371; // Earth's radius in km
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -1596,16 +1607,16 @@ ALPHA-3 | REAR"></textarea>
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
             return R * c;
         }
-        
+
         let adsbMapMarkers = [];
-        
+
         function updateAdsbOnMap() {
             if (!map) return;
-            
+
             // Clear old markers
             adsbMapMarkers.forEach(marker => map.removeLayer(marker));
             adsbMapMarkers = [];
-            
+
             // Add aircraft markers
             adsbAircraft.forEach(ac => {
                 if (ac.latitude && ac.longitude) {
@@ -1617,23 +1628,23 @@ ALPHA-3 | REAR"></textarea>
                         iconSize: [16, 16],
                         iconAnchor: [8, 8]
                     });
-                    
+
                     const marker = L.marker([ac.latitude, ac.longitude], { icon })
                         .addTo(map)
                         .bindPopup(`<strong>${ac.callsign || ac.icao}</strong><br>Alt: ${ac.altitude || '--'}m<br>Spd: ${ac.speed || '--'}kt`);
-                    
+
                     adsbMapMarkers.push(marker);
                 }
             });
         }
-        
+
         async function toggleADSB() {
             const tauriAvailable = checkTauriAvailable();
             if (!tauriAvailable) {
                 alert('Tauri not available - cannot start ADS-B');
                 return;
             }
-            
+
             if (!adsbActive) {
                 try {
                     const result = await window.__TAURI__.core.invoke('start_adsb');
@@ -1658,7 +1669,7 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
         }
-        
+
         function toggleSDR(type) {
             if (type === 'adsb') {
                 toggleADSB();
@@ -1666,13 +1677,23 @@ ALPHA-3 | REAR"></textarea>
                 alert('AIS not yet implemented - requires additional SDR');
             }
         }
-        
-        // Meshtastic integration
+
+        // Meshtastic integration (CLI-based)
         let meshtasticConnected = false;
         let meshtasticPort = '';
         let meshtasticNodes = [];
         let meshtasticMessages = [];
-        
+        let meshtasticBluetoothDevice = null;
+        let meshtasticBluetoothServer = null;
+        let meshtasticBluetoothCharacteristic = null;
+
+        // CLI-based Meshtastic
+        let meshtasticCliConnected = false;
+        let meshtasticCliPort = '/dev/cu.usbmodem34CDB03CEA401';
+        let meshtasticCliNodes = [];
+        let meshtasticCliMessages = [];
+        let meshtasticAtakMode = false;
+
         async function scanMeshtasticPorts() {
             try {
                 const ports = await window.__TAURI__.core.invoke('get_meshtastic_ports');
@@ -1683,7 +1704,7 @@ ALPHA-3 | REAR"></textarea>
                 return [];
             }
         }
-        
+
         async function connectMeshtastic() {
             if (meshtasticConnected) {
                 // Disconnect
@@ -1698,19 +1719,19 @@ ALPHA-3 | REAR"></textarea>
                 }
                 return;
             }
-            
+
             // Scan for ports
             const ports = await scanMeshtasticPorts();
-            
+
             if (ports.length === 0) {
                 alert('No Meshtastic devices found.\n\nMake sure:\n1. Device is connected via USB\n2. No other app is using the serial port (close Meshtastic CLI, Python scripts, etc.)\n3. Try unplugging and reconnecting the device');
                 return;
             }
-            
+
             // Try each port until one works
             for (const port of ports) {
                 debugLog('Trying port: ' + port);
-                
+
                 try {
                     const result = await window.__TAURI__.core.invoke('start_meshtastic', { port });
                     debugLog(result);
@@ -1723,51 +1744,179 @@ ALPHA-3 | REAR"></textarea>
                     // Continue to next port
                 }
             }
-            
+
             // All ports failed
-            alert('Failed to connect to any Meshtastic device.\n\nDevice may be busy. Try:\n1. Close any Meshtastic CLI or Python scripts\n2. Unplug and reconnect the device\n3. Wait a few seconds and try again');
+            alert('Failed to connect to any Meshtastic device.\n\nDevice may be busy. Try:\n1. Close any Meshtastic CLI or Python scripts\n2. Unplug and reconnect the device\n3. Wait a few seconds and try again\n\nOr try Bluetooth connection instead.');
         }
-        
+
+        // Web Bluetooth Meshtastic connection
+        async function connectMeshtasticBluetooth() {
+            console.log('Bluetooth button clicked!');
+            debugLog('Bluetooth button clicked');
+
+            // Check if Web Bluetooth is available
+            if (!navigator.bluetooth) {
+                debugLog('ERROR: navigator.bluetooth is not available');
+                alert('Web Bluetooth is not available in this browser.\n\nOn macOS, try:\n1. Use Chrome browser (not Safari)\n2. Go to chrome://flags\n3. Enable "Experimental Web Platform Features"\n4. Restart browser');
+                return;
+            }
+            debugLog('navigator.bluetooth is available');
+
+            if (meshtasticConnected && meshtasticBluetoothDevice) {
+                // Disconnect Bluetooth
+                if (meshtasticBluetoothServer) {
+                    await meshtasticBluetoothServer.disconnect();
+                }
+                meshtasticBluetoothDevice = null;
+                meshtasticBluetoothServer = null;
+                meshtasticBluetoothCharacteristic = null;
+                meshtasticConnected = false;
+                debugLog('Bluetooth disconnected');
+                updateMeshtasticUI();
+                return;
+            }
+
+            if (!navigator.bluetooth) {
+                alert('Web Bluetooth not supported. Use Chrome or Edge browser.\n\nOn macOS:\n1. Open chrome://flags\n2. Enable "Experimental Web Platform Features"\n3. Restart browser');
+                return;
+            }
+
+            try {
+                debugLog('Scanning for Bluetooth devices...');
+                debugLog('Calling navigator.bluetooth.requestDevice...');
+
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { namePrefix: 'Meshtastic' }
+                    ],
+                    optionalServices: ['6ba1b218-2a13-4bd8-99f2-477754e57e7a'] // Meshtastic service UUID
+                });
+
+                debugLog('Found device: ' + device.name);
+                meshtasticBluetoothDevice = device;
+
+                device.addEventListener('gattserverdisconnected', () => {
+                    debugLog('Bluetooth device disconnected');
+                    meshtasticConnected = false;
+                    updateMeshtasticUI();
+                });
+
+                debugLog('Connecting to GATT server...');
+                const server = await device.gatt.connect();
+                meshtasticBluetoothServer = server;
+                debugLog('Connected to GATT server');
+
+                debugLog('Getting Meshtastic service...');
+                const service = await server.getPrimaryService('6ba1b218-2a13-4bd8-99f2-477754e57e7a');
+
+                debugLog('Getting characteristics...');
+                // Try to get the TO_RADIO characteristic for sending
+                try {
+                    const toRadioChar = await service.getCharacteristic('f75c76d2-129e-4dad-a1dd-7866124401e1');
+                    meshtasticBluetoothCharacteristic = toRadioChar;
+                    debugLog('Got TO_RADIO characteristic');
+                } catch (e) {
+                    debugLog('TO_RADIO characteristic not found: ' + e);
+                }
+
+                // Get the FROM_RADIO characteristic for receiving
+                try {
+                    const fromRadioChar = await service.getCharacteristic('8ba2bcc2-ee02-4a55-a531-525f0257ffe9');
+                    debugLog('Got FROM_RADIO characteristic');
+
+                    // Start notifications
+                    await fromRadioChar.startNotifications();
+                    debugLog('Started notifications on FROM_RADIO');
+
+                    fromRadioChar.addEventListener('characteristicvaluechanged', (event) => {
+                        const value = event.target.value;
+                        const bytes = new Uint8Array(value.buffer);
+                        debugLog('Received ' + bytes.length + ' bytes via Bluetooth');
+                        // TODO: Parse protobuf packet
+                    });
+                } catch (e) {
+                    debugLog('FROM_RADIO characteristic error: ' + e);
+                }
+
+                meshtasticConnected = true;
+                meshtasticPort = 'Bluetooth: ' + device.name;
+                debugLog('Bluetooth Meshtastic connected!');
+                updateMeshtasticUI();
+
+            } catch (e) {
+                debugLog('Bluetooth connection failed: ' + e.name + ': ' + e.message);
+                console.error('Bluetooth error details:', e);
+
+                if (e.name === 'NotFoundError') {
+                    debugLog('No Bluetooth devices found matching the filter');
+                    alert('No Meshtastic devices found.\n\nMake sure:\n1. Bluetooth is enabled\n2. Device is powered on and in pairing mode\n3. Device name starts with "Meshtastic"');
+                } else if (e.name === 'SecurityError') {
+                    debugLog('Bluetooth permission denied');
+                    alert('Bluetooth permission denied.\n\nCheck System Settings > Privacy & Security > Bluetooth and allow Overwatch.');
+                } else if (e.name === 'NotSupportedError') {
+                    debugLog('Web Bluetooth not supported');
+                    alert('Web Bluetooth is not supported in this browser.\n\nPlease use Chrome or Edge with Experimental Web Platform Features enabled.');
+                } else {
+                    alert('Bluetooth connection failed: ' + e.name + ': ' + e.message);
+                }
+            }
+        }
+
         function updateMeshtasticUI() {
             const btn = document.getElementById('meshtasticBtn');
+            const refreshBtn = document.getElementById('meshtasticRefreshBtn');
             const status = document.getElementById('meshtasticStatus');
-            
+            const input = document.getElementById('meshtasticInput');
+            const sendBtn = input ? input.nextElementSibling : null;
+
             if (btn) {
-                btn.textContent = meshtasticConnected ? 'DISCONNECT' : 'CONNECT';
-                btn.className = 'tac-btn tac-btn-sm ' + (meshtasticConnected ? 'tac-btn-danger' : 'tac-btn-primary');
+                btn.textContent = meshtasticCliConnected ? 'DISCONNECT' : 'CONNECT CLI';
+                btn.className = 'tac-btn tac-btn-sm ' + (meshtasticCliConnected ? 'tac-btn-danger' : 'tac-btn-primary');
             }
-            
+
+            if (refreshBtn) {
+                refreshBtn.disabled = !meshtasticCliConnected;
+            }
+
             if (status) {
-                status.textContent = meshtasticConnected ? 'CONNECTED - ' + meshtasticPort : 'DISCONNECTED';
-                status.style.color = meshtasticConnected ? 'var(--accent-cyan)' : 'var(--text-muted)';
+                status.textContent = meshtasticCliConnected ? 'CLI CONNECTED - ' + meshtasticCliPort : 'DISCONNECTED';
+                status.style.color = meshtasticCliConnected ? 'var(--accent-cyan)' : 'var(--text-muted)';
+            }
+
+            if (input) {
+                input.disabled = !meshtasticCliConnected;
+            }
+
+            if (sendBtn) {
+                sendBtn.disabled = !meshtasticCliConnected;
             }
         }
-        
+
         async function sendMeshtasticMessage() {
             if (!meshtasticConnected) {
                 alert('Not connected to Meshtastic');
                 return;
             }
-            
+
             const input = document.getElementById('meshtasticInput');
             const text = input.value.trim();
-            
+
             if (!text) return;
-            
+
             try {
                 await window.__TAURI__.core.invoke('send_meshtastic_message', {
                     port: meshtasticPort,
                     text: text,
                     channel: 0
                 });
-                
+
                 // Add to local messages
                 meshtasticMessages.push({
                     from: 'ME',
                     text: text,
                     timestamp: Date.now()
                 });
-                
+
                 input.value = '';
                 renderMeshtasticMessages();
             } catch (e) {
@@ -1775,16 +1924,16 @@ ALPHA-3 | REAR"></textarea>
                 alert('Failed to send: ' + e);
             }
         }
-        
+
         function renderMeshtasticMessages() {
             const list = document.getElementById('meshtasticMessages');
             if (!list) return;
-            
+
             if (meshtasticMessages.length === 0) {
                 list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>';
                 return;
             }
-            
+
             list.innerHTML = meshtasticMessages.slice(-20).reverse().map(m => `
                 <div style="padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
                     <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">${m.from}</div>
@@ -1792,16 +1941,16 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         function renderMeshtasticNodes() {
             const list = document.getElementById('meshtasticNodes');
             if (!list) return;
-            
+
             if (meshtasticNodes.length === 0) {
                 list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>';
                 return;
             }
-            
+
             list.innerHTML = meshtasticNodes.map(n => `
                 <div style="display: flex; justify-content: space-between; padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
                     <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">${n.short_name}</span>
@@ -1809,12 +1958,12 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         // Meshtastic event listeners
         function setupMeshtasticListeners() {
             const tauriListen = getTauriListener();
             if (!tauriListen) return;
-            
+
             tauriListen('meshtastic-status', (event) => {
                 debugLog('Meshtastic status: ' + event.payload);
                 if (event.payload === 'connected') {
@@ -1824,18 +1973,44 @@ ALPHA-3 | REAR"></textarea>
                 }
                 updateMeshtasticUI();
             });
-            
+
             tauriListen('meshtastic-message', (event) => {
                 const msg = event.payload;
                 debugLog('Meshtastic msg from ' + msg.from + ': ' + msg.text);
-                meshtasticMessages.push(msg);
-                renderMeshtasticMessages();
+
+                // Check for ATAK mode
+                if (meshtasticAtakMode) {
+                    handleMeshtasticMessageAtak(msg.from, msg.text);
+                } else {
+                    meshtasticMessages.push(msg);
+                    renderMeshtasticMessages();
+                }
             });
-            
+
+            // CLI-based message listener
+            tauriListen('meshtastic-cli-message', (event) => {
+                const line = event.payload;
+                debugLog('CLI: ' + line);
+
+                // Parse received messages
+                if (line.includes('Received TEXT_MESSAGE')) {
+                    const textMatch = line.match(/text:\s*(.+)/);
+                    const fromMatch = line.match(/from:\s*(\w+)/);
+                    if (textMatch) {
+                        meshtasticCliMessages.push({
+                            from: fromMatch ? fromMatch[1] : 'UNKNOWN',
+                            text: textMatch[1],
+                            time: new Date().toLocaleTimeString()
+                        });
+                        renderSDR();
+                    }
+                }
+            });
+
             tauriListen('meshtastic-node', (event) => {
                 const node = event.payload;
                 debugLog('Meshtastic node: ' + node.short_name);
-                
+
                 const existing = meshtasticNodes.findIndex(n => n.node_id === node.node_id);
                 if (existing >= 0) {
                     meshtasticNodes[existing] = node;
@@ -1844,22 +2019,23 @@ ALPHA-3 | REAR"></textarea>
                 }
                 renderMeshtasticNodes();
             });
-            
+
             tauriListen('meshtastic-position', (event) => {
                 const pos = event.payload;
                 debugLog('Meshtastic position: ' + pos.latitude + ', ' + pos.longitude);
                 // Could add to map here
             });
-            
+
             tauriListen('meshtastic-error', (event) => {
                 debugLog('Meshtastic error: ' + event.payload);
             });
-            
+
             tauriListen('meshtastic-debug', (event) => {
+                console.log('[MESH DEBUG]', event.payload);
                 debugLog('Meshtastic: ' + event.payload);
             });
         }
-        
+
         // Entity functions
         function renderEntities() {
             const list = document.getElementById('entityList');
@@ -1868,7 +2044,7 @@ ALPHA-3 | REAR"></textarea>
                 { name: 'BRAVO-1', type: 'ARMOR', affiliation: 'friendly', coords: '11SNU 12350 67895' },
                 { name: 'UNKNOWN-1', type: 'AIR', affiliation: 'unknown', coords: '11SNU 12400 67900' }
             ];
-            
+
             list.innerHTML = entities.map(e => `
                 <div class="tac-entity">
                     <div class="tac-symbol tac-symbol-${e.affiliation}">${e.type[0]}</div>
@@ -1880,11 +2056,11 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         function filterEntities(type) {
             console.log('Filter entities:', type);
         }
-        
+
         // SATCOM functions
         function renderSATCOM() {
             const list = document.getElementById('satList');
@@ -1893,7 +2069,7 @@ ALPHA-3 | REAR"></textarea>
                 { name: 'NOAA 19', elev: '12°', az: '270°', status: 'VISIBLE' },
                 { name: 'AO-91', elev: '--', az: '--', status: 'AOS 23MIN' }
             ];
-            
+
             list.innerHTML = sats.map(s => `
                 <div class="tac-entity">
                     <div class="tac-symbol tac-symbol-neutral">◐</div>
@@ -1905,30 +2081,364 @@ ALPHA-3 | REAR"></textarea>
                 </div>
             `).join('');
         }
-        
+
         function loadTLEs() {
             alert('TLE LOADING');
         }
-        
+
         // Zone functions
         function renderZones() {
             const list = document.getElementById('zoneList');
             list.innerHTML = '<div style="text-align: center; padding: var(--space-xl); color: var(--text-muted);">NO ZONES DEFINED</div>';
         }
-        
+
         function showZoneModal() {
             alert('ZONE EDITOR');
         }
-        
+
+        // ATAK-style Meshtastic Integration (CoT over Mesh)
+
+        // Convert Overwatch packet to CoT XML format
+        function packetToCoT(packet) {
+            const now = new Date().toISOString();
+            const stale = new Date(Date.now() + 3600000).toISOString(); // 1 hour stale
+
+            let cotType = 'a-f-G-U-C'; // Default: friendly unit
+            if (packet.type === 'SITREP') cotType = 'b-m-p-s';
+            if (packet.type === 'TASK') cotType = 'b-m-p-t';
+            if (packet.type === 'CONTACT') cotType = 'b-m-p-c';
+            if (packet.type === 'ZONE') cotType = 'u-d';
+
+            // Get GPS coords from packet or use last known
+            let lat = packet.lat || (lastKnownLocation ? lastKnownLocation.lat : 0);
+            let lon = packet.lon || (lastKnownLocation ? lastKnownLocation.lon : 0);
+
+            return `<?xml version="1.0" encoding="UTF-8"?>
+<event version="2.0" uid="${packet.id}" type="${cotType}" time="${now}" start="${now}" stale="${stale}" how="m-g">
+    <point lat="${lat}" lon="${lon}" hae="0" ce="9999999" le="9999999"/>
+    <detail>
+        <remarks>${packet.callsign}: ${packet.summary}</remarks>
+        <precisionlocation geopointsrc="GPS" altsrc="???"/>
+        <_overwatch>
+            <type>${packet.type}</type>
+            <priority>${packet.priority}</priority>
+            <summary>${escapeXml(packet.summary)}</summary>
+            ${packet.lat ? `<lat>${packet.lat}</lat>` : ''}
+            ${packet.lon ? `<lon>${packet.lon}</lon>` : ''}
+        </_overwatch>
+    </detail>
+</event>`;
+        }
+
+        function escapeXml(str) {
+            return str.replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;')
+                      .replace(/'/g, '&apos;');
+        }
+
+        // Parse CoT XML to Overwatch packet
+        function cotToPacket(cotXml) {
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(cotXml, 'text/xml');
+
+                const event = doc.querySelector('event');
+                if (!event) return null;
+
+                const uid = event.getAttribute('uid') || crypto.randomUUID();
+                const type = event.getAttribute('type') || 'UNKNOWN';
+                const point = doc.querySelector('point');
+                const remarks = doc.querySelector('remarks');
+                const owDetail = doc.querySelector('_overwatch');
+
+                // Try to get Overwatch-specific data first
+                if (owDetail) {
+                    return {
+                        id: uid,
+                        type: getText(owDetail, 'type') || 'SITREP',
+                        callsign: remarks ? remarks.textContent.split(':')[0] : 'UNKNOWN',
+                        summary: getText(owDetail, 'summary') || (remarks ? remarks.textContent.split(':').slice(1).join(':').trim() : ''),
+                        priority: getText(owDetail, 'priority') || 'ROUTINE',
+                        lat: parseFloat(getText(owDetail, 'lat')) || 0,
+                        lon: parseFloat(getText(owDetail, 'lon')) || 0,
+                        timestamp: new Date().toISOString()
+                    };
+                }
+
+                // Fallback: parse from CoT standard
+                return {
+                    id: uid,
+                    type: 'SITREP',
+                    callsign: remarks ? remarks.textContent.split(':')[0] : 'UNKNOWN',
+                    summary: remarks ? remarks.textContent.split(':').slice(1).join(':').trim() : '',
+                    priority: 'ROUTINE',
+                    lat: point ? parseFloat(point.getAttribute('lat')) : 0,
+                    lon: point ? parseFloat(point.getAttribute('lon')) : 0,
+                    timestamp: new Date().toISOString()
+                };
+            } catch (e) {
+                debugLog('CoT parse error: ' + e);
+                return null;
+            }
+        }
+
+        function getText(parent, tag) {
+            const el = parent.querySelector(tag);
+            return el ? el.textContent : '';
+        }
+
+        // Send packet via Meshtastic (ATAK mode)
+        async function sendPacketViaMeshtastic(packet) {
+            if (!meshtasticConnected) {
+                debugLog('Cannot send: Meshtastic not connected');
+                return false;
+            }
+
+            // Convert to CoT XML
+            const cot = packetToCoT(packet);
+
+            // Chunk if needed (Meshtastic ~200 char limit)
+            const maxLen = 180;
+            if (cot.length <= maxLen) {
+                return await sendMeshtasticText(cot);
+            }
+
+            // Split into chunks
+            const chunks = [];
+            for (let i = 0; i < cot.length; i += maxLen) {
+                chunks.push(cot.slice(i, i + maxLen));
+            }
+
+            debugLog(`Sending packet in ${chunks.length} chunks...`);
+            for (let i = 0; i < chunks.length; i++) {
+                const chunkHeader = `[${i+1}/${chunks.length}]`;
+                const success = await sendMeshtasticText(chunkHeader + chunks[i]);
+                if (!success) return false;
+                await new Promise(r => setTimeout(r, 500)); // Delay between chunks
+            }
+            return true;
+        }
+
+        async function sendMeshtasticText(text) {
+            if (meshtasticBluetoothCharacteristic) {
+                // Send via Bluetooth if available
+                const encoder = new TextEncoder();
+                const data = encoder.encode(text);
+                try {
+                    await meshtasticBluetoothCharacteristic.writeValue(data);
+                    return true;
+                } catch (e) {
+                    debugLog('BT send failed: ' + e);
+                    return false;
+                }
+            }
+
+            // Fallback: use Tauri serial
+            if (meshtasticPort && window.__TAURI__) {
+                try {
+                    await window.__TAURI__.core.invoke('send_meshtastic_text', {
+                        port: meshtasticPort,
+                        text: text,
+                        channel: 0
+                    });
+                    return true;
+                } catch (e) {
+                    debugLog('Serial send failed: ' + e);
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        // Handle incoming Meshtastic message (ATAK mode)
+        function handleMeshtasticMessageAtak(from, text) {
+            debugLog(`ATAK: Message from ${from}: ${text.substring(0, 50)}...`);
+
+            // Check for chunked messages
+            const chunkMatch = text.match(/^\[(\d+)\/(\d+)\]/);
+            if (chunkMatch) {
+                // Handle chunking (simplified - in production, buffer and reassemble)
+                debugLog('Received chunked message part');
+                return;
+            }
+
+            // Try to parse as CoT
+            if (text.includes('<?xml') || text.includes('<event')) {
+                const packet = cotToPacket(text);
+                if (packet) {
+                    debugLog(`ATAK: Parsed ${packet.type} from ${packet.callsign}`);
+                    packets.push(packet);
+                    renderPackets();
+                    return;
+                }
+            }
+
+            // Plain text fallback
+            debugLog('Plain text message: ' + text);
+        }
+
+        // Toggle ATAK mode
+        function toggleAtakMode(enabled) {
+            meshtasticAtakMode = enabled;
+            if (enabled) {
+                debugLog('ATAK Mode ENABLED - Packets will be sent as CoT XML');
+            } else {
+                debugLog('ATAK Mode DISABLED - Raw Meshtastic protocol');
+            }
+            // Re-render SDR panel to show updated checkbox state
+            renderSDR();
+        }
+
+        // Meshtastic CLI Integration
+        async function connectMeshtasticCLI() {
+            if (meshtasticCliConnected) {
+                // Disconnect
+                meshtasticCliConnected = false;
+                debugLog('Meshtastic CLI disconnected');
+                updateMeshtasticUI();
+                return;
+            }
+
+            debugLog('Connecting via Meshtastic CLI...');
+            try {
+                const result = await window.__TAURI__.core.invoke('meshtastic_cli_test', {
+                    port: meshtasticCliPort
+                });
+
+                debugLog('CLI Connected! Parsing nodes...');
+                meshtasticCliConnected = true;
+
+                // Parse nodes from result
+                parseMeshtasticCliOutput(result);
+
+                // Start listening for messages
+                await window.__TAURI__.core.invoke('meshtastic_cli_start_listen', {
+                    port: meshtasticCliPort
+                });
+
+                updateMeshtasticUI();
+                debugLog('Meshtastic CLI ready');
+            } catch (e) {
+                debugLog('CLI Connection Error: ' + e);
+                alert('Failed to connect: ' + e);
+            }
+        }
+
+        async function refreshMeshtasticNodes() {
+            if (!meshtasticCliConnected) return;
+
+            try {
+                const result = await window.__TAURI__.core.invoke('meshtastic_cli_test', {
+                    port: meshtasticCliPort
+                });
+                parseMeshtasticCliOutput(result);
+                renderSDR();
+            } catch (e) {
+                debugLog('Refresh error: ' + e);
+            }
+        }
+
+        async function sendMeshtasticCliMessage() {
+            if (!meshtasticCliConnected) return;
+
+            const input = document.getElementById('meshtasticInput');
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                await window.__TAURI__.core.invoke('meshtastic_cli_send', {
+                    port: meshtasticCliPort,
+                    text: text
+                });
+
+                meshtasticCliMessages.push({
+                    from: 'ME',
+                    text: text,
+                    time: new Date().toLocaleTimeString()
+                });
+
+                input.value = '';
+                renderSDR();
+                debugLog('Sent: ' + text);
+            } catch (e) {
+                debugLog('Send error: ' + e);
+            }
+        }
+
+        function parseMeshtasticCliOutput(output) {
+            // Simple parsing of meshtastic --info output
+            meshtasticCliNodes = [];
+            debugLog('Parsing CLI output...');
+            
+            // Look for node entries like "!b03cea40":
+            const nodeMatches = output.matchAll(/"!(\w+)":\s*\{([^}]+)\}/g);
+            for (const match of nodeMatches) {
+                const nodeId = match[1];
+                const nodeData = match[2];
+                debugLog(`Found node: ${nodeId}`);
+                
+                // Extract user info
+                const longNameMatch = nodeData.match(/"longName":\s*"([^"]+)"/);
+                const shortNameMatch = nodeData.match(/"shortName":\s*"([^"]+)"/);
+                const latMatch = nodeData.match(/"latitude":\s*([\d.-]+)/);
+                const lonMatch = nodeData.match(/"longitude":\s*([\d.-]+)/);
+                
+                meshtasticCliNodes.push({
+                    id: nodeId,
+                    longName: longNameMatch ? longNameMatch[1] : nodeId,
+                    shortName: shortNameMatch ? shortNameMatch[1] : nodeId.substring(0, 4),
+                    lat: latMatch ? parseFloat(latMatch[1]) : 0,
+                    lon: lonMatch ? parseFloat(lonMatch[1]) : 0
+                });
+            }
+            
+            debugLog(`Parsed ${meshtasticCliNodes.length} nodes`);
+            
+            // Direct DOM update
+            const nodesList = document.getElementById('meshtasticNodes');
+            if (nodesList) {
+                nodesList.innerHTML = renderMeshtasticCliNodes();
+            }
+        }
+
+        function renderMeshtasticCliNodes() {
+            debugLog(`renderMeshtasticCliNodes called, ${meshtasticCliNodes.length} nodes`);
+            if (meshtasticCliNodes.length === 0) {
+                return '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>';
+            }
+
+            return meshtasticCliNodes.map(node => `
+                <div style="padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
+                    <div style="font-weight: 600; color: var(--accent-cyan);">${node.shortName}</div>
+                    <div style="font-size: 0.7rem; color: var(--text-secondary);">${node.longName}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderMeshtasticCliMessages() {
+            if (meshtasticCliMessages.length === 0) {
+                return '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>';
+            }
+
+            return meshtasticCliMessages.slice(-5).map(msg => `
+                <div style="padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle); font-size: 0.7rem;">
+                    <span style="color: var(--accent-cyan);">${msg.from}:</span> ${msg.text}
+                </div>
+            `).join('');
+        }
+
         // ATAK functions
         function importKML() {
             alert('KML IMPORT');
         }
-        
+
         function exportKML() {
             alert('KML EXPORT');
         }
-        
+
         // Settings functions
         function exportData() {
             const data = { packets, squads, zones };
@@ -1939,11 +2449,11 @@ ALPHA-3 | REAR"></textarea>
             a.download = 'overwatch-data.json';
             a.click();
         }
-        
+
         function importData() {
             alert('IMPORT');
         }
-        
+
         function clearData() {
             if (confirm('CLEAR ALL DATA?')) {
                 packets = [];
@@ -1953,19 +2463,19 @@ ALPHA-3 | REAR"></textarea>
                 renderSquads();
             }
         }
-        
+
         // Event listeners
         document.getElementById('encryptionMode').addEventListener('change', (e) => {
             document.getElementById('keyGroup').style.display = e.target.value === 'secure' ? 'block' : 'none';
         });
-        
+
         document.getElementById('myCallsign').addEventListener('input', (e) => {
             myCallsign = e.target.value.toUpperCase() || 'ALPHA-1';
             if (myLocationMarker) {
                 myLocationMarker.setTitle(myCallsign);
             }
         });
-        
+
         // Close modals on outside click
         document.querySelectorAll('.tac-modal').forEach(modal => {
             modal.addEventListener('click', (e) => {
@@ -1974,7 +2484,7 @@ ALPHA-3 | REAR"></textarea>
                 }
             });
         });
-        
+
         // Initialize - with error handling
         try {
             renderPackets();
@@ -1983,12 +2493,12 @@ ALPHA-3 | REAR"></textarea>
             renderEntities();
             renderSATCOM();
             renderZones();
-            
+
             // IMMEDIATE GPS STATUS CHECK
             if (tauriAvailable) {
                 window.__TAURI__.core.invoke('check_location_permission').then(status => {
                     console.log('Immediate GPS status:', status);
-                    
+
                     if (status === 'authorized_when_in_use' || status === 'authorized_always') {
                         gpsPermissionState = 'granted';
                         updateGPSStatus();
@@ -2003,15 +2513,15 @@ ALPHA-3 | REAR"></textarea>
                     console.error('Immediate GPS check failed:', e);
                 });
             }
-            
+
             // Initialize map immediately so GPS can show location
             setTimeout(() => {
                 initMap();
                 debugLog('Map initialized');
             }, 100);
-            
+
             debugLog('App initialized, waiting for Tauri...');
-            
+
             console.log('Overwatch v0.2.0 - Tactical UI Loaded');
         } catch (e) {
             console.error('Initialization error:', e);

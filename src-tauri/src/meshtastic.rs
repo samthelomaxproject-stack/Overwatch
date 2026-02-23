@@ -84,24 +84,41 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
     
     thread::spawn(move || {
         eprintln!("Connecting to Meshtastic on port: {}", port_clone);
+        let _ = app_handle.emit("meshtastic-debug", "Thread started, entering baud rate loop");
         
         // Try 921600 first (newer firmware), fall back to 115200 (older)
         let baud_rates = [921600, 115200];
         let mut port_result = None;
         
         for &baud in &baud_rates {
-            eprintln!("Trying baud rate: {}", baud);
+            let msg = format!("Trying baud rate: {}", baud);
+            eprintln!("{}", msg);
+            let _ = app_handle.emit("meshtastic-debug", msg);
             match serialport::new(&port_clone, baud)
                 .timeout(Duration::from_millis(100))
+                .data_bits(serialport::DataBits::Eight)
+                .parity(serialport::Parity::None)
+                .stop_bits(serialport::StopBits::One)
+                .flow_control(serialport::FlowControl::None)
                 .open() {
-                Ok(p) => {
+                Ok(mut p) => {
                     eprintln!("Opened port at {} baud", baud);
                     let _ = app_handle.emit("meshtastic-debug", format!("Port opened at {} baud", baud));
+                    // Set DTR and RTS - some devices need this to enable TX
+                    if let Err(e) = p.write_data_terminal_ready(true) {
+                        let _ = app_handle.emit("meshtastic-debug", format!("Warning: Could not set DTR: {}", e));
+                    }
+                    if let Err(e) = p.write_request_to_send(true) {
+                        let _ = app_handle.emit("meshtastic-debug", format!("Warning: Could not set RTS: {}", e));
+                    }
+                    let _ = app_handle.emit("meshtastic-debug", "DTR/RTS set");
                     port_result = Some(p);
                     break;
                 }
                 Err(e) => {
-                    eprintln!("Failed to open at {} baud: {}", baud, e);
+                    let err_msg = format!("Failed to open at {} baud: {}", baud, e);
+                    eprintln!("{}", err_msg);
+                    let _ = app_handle.emit("meshtastic-debug", err_msg);
                 }
             }
         }
@@ -122,16 +139,28 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                 let config_request = ToRadio {
                     payload_variant: Some(PayloadVariant::WantConfigId(0)),
                 };
-                if let Err(e) = send_protobuf(&mut port, config_request) {
-                    eprintln!("Failed to send config request: {}", e);
+                match send_protobuf(&mut port, config_request) {
+                    Ok(_) => {
+                        let _ = app_handle.emit("meshtastic-debug", "Config request sent successfully");
+                    }
+                    Err(e) => {
+                        let _ = app_handle.emit("meshtastic-debug", format!("Failed to send config request: {}", e));
+                    }
                 }
                 
                 let mut last_data_time = Instant::now();
                 let mut packets_received = 0u32;
+                let mut last_heartbeat = Instant::now();
                 
                 loop {
                     if !state_clone.is_connected.load(Ordering::SeqCst) {
                         break;
+                    }
+                    
+                    // Heartbeat every 5 seconds
+                    if last_heartbeat.elapsed() > Duration::from_secs(5) {
+                        let _ = app_handle.emit("meshtastic-debug", format!("Heartbeat: connected, {} packets received", packets_received));
+                        last_heartbeat = Instant::now();
                     }
                     
                     let mut byte = [0u8; 1];
@@ -202,7 +231,7 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                             
                             // Check for no data timeout
                             if last_data_time.elapsed() > Duration::from_secs(10) && packets_received == 0 {
-                                let msg = "No data received for 10 seconds. Check:\n1. Device is in CLIENT mode\n2. Other nodes are broadcasting\n3. Device firmware is up to date (2.2+)";
+                                let msg = "⚠️ No data for 10s. Check: 1) Device in CLIENT mode 2) Other nodes on 3) FW 2.2+";
                                 eprintln!("{}", msg);
                                 let _ = app_handle.emit("meshtastic-debug", msg);
                             }
