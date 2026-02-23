@@ -1,22 +1,69 @@
-// Simplified Meshtastic protobuf definitions
 syntax = "proto3";
 
 package meshtastic;
 
-// Main message container
-message MeshPacket {
-    bytes payload = 1;
-    uint32 from = 2;
-    uint32 to = 3;
-    uint32 channel = 4;
-    uint32 rx_time = 5;
-    int32 rx_snr = 6;
-    uint32 hop_limit = 7;
-    bool want_ack = 8;
+// FromRadio - messages from device to client
+message FromRadio {
+    oneof payload_variant {
+        uint32 num = 1;  // Packet number
+        MeshPacket packet = 2;
+        MyNodeInfo my_info = 3;
+        NodeInfo node_info = 4;
+        Config config = 5;
+        ModuleConfig module_config = 6;
+        Channel channel = 7;
+        bool queue_status = 8;
+        uint32 config_complete_id = 9;
+        LogRecord log_record = 10;
+        bool rebooted = 11;
+    }
 }
 
-// Data types
+// ToRadio - messages from client to device
+message ToRadio {
+    oneof payload_variant {
+        MeshPacket packet = 1;
+        uint32 want_config_id = 2;
+        bool disconnect = 3;
+    }
+}
+
+// Main mesh packet
+message MeshPacket {
+    uint32 from = 1;
+    uint32 to = 2;
+    uint32 channel = 3;
+    bytes payload = 4;
+    uint32 id = 5;
+    uint32 rx_time = 6;
+    int32 rx_snr = 7;
+    uint32 hop_limit = 8;
+    bool want_ack = 9;
+    Priority priority = 10;
+    bytes rx_rssi = 11;
+    uint32 delayed = 12;
+    
+    enum Priority {
+        UNSET = 0;
+        MIN = 1;
+        BACKGROUND = 2;
+        DEFAULT = 3;
+        RELIABLE = 4;
+        ACK = 5;
+        MAX = 7;
+    }
+}
+
+// Data payload types
 message Data {
+    PortNum portnum = 1;
+    bytes payload = 2;
+    bool want_response = 3;
+    uint32 dest = 4;
+    uint32 source = 5;
+    bytes request_id = 6;
+    bytes reply_id = 7;
+    
     enum PortNum {
         UNKNOWN_APP = 0;
         TEXT_MESSAGE_APP = 1;
@@ -31,45 +78,131 @@ message Data {
         DETECTION_SENSOR_APP = 10;
         PAXCOUNTER_APP = 11;
         BATTERY_APP = 12;
+        TRACEROUTE_APP = 13;
+        NEIGHBORINFO_APP = 14;
+        ATAUMETRICS_APP = 15;
+        MAP_REPORT_APP = 16;
+        POWERSTRESS_APP = 17;
         PRIVATE_APP = 256;
     }
-    PortNum portnum = 1;
-    bytes payload = 2;
-    bool want_response = 3;
 }
 
-// Position packet
+// Position message
 message Position {
     int32 latitude_i = 1;
     int32 longitude_i = 2;
     int32 altitude = 3;
     uint32 time = 4;
+    LocationSource location_source = 5;
     uint32 precision_bits = 10;
+    uint32 raw_sats_in_view = 11;
+    uint32 seq_number = 12;
+    
+    enum LocationSource {
+        LOC_UNSET = 0;
+        LOC_MANUAL = 1;
+        LOC_INTERNAL = 2;
+        LOC_EXTERNAL = 3;
+    }
 }
 
-// Node info
+// User/Node info
 message User {
     string id = 1;
     string long_name = 2;
     string short_name = 3;
     bytes macaddr = 4;
+    HardwareModel hw_model = 5;
+    bool is_licensed = 6;
+    bytes role = 7;
+    bytes public_key = 8;
 }
 
-// From radio stream
-message FromRadio {
-    oneof payload_variant {
-        uint32 num = 1;
-        MeshPacket packet = 2;
-        bool heartbeat = 3;
-        MeshPacket queue_status = 4;
-        uint32 config_complete_id = 5;
-    }
+// Node info
+message NodeInfo {
+    uint32 num = 1;
+    User user = 2;
+    Position position = 3;
+    uint32 snr = 4;
+    uint32 last_heard = 5;
+    uint32 channel = 6;
+    bool via_mqtt = 7;
+    uint32 hops_away = 8;
+    bool is_favorite = 9;
 }
 
-// To radio stream
-message ToRadio {
-    oneof payload_variant {
-        MeshPacket packet = 1;
-        uint32 want_config_id = 2;
-    }
+// My node info
+message MyNodeInfo {
+    uint32 my_node_num = 1;
+    uint32 reboot_count = 2;
+    string firmware_version = 3;
+    bool has_gps = 4;
+    uint32 max_channels = 5;
+}
+
+// Hardware models
+enum HardwareModel {
+    UNSET = 0;
+    TLORA_V2 = 1;
+    TLORA_V1 = 2;
+    TLORA_V2_1_1P6 = 3;
+    TBEAM = 4;
+    HELTEC_V2_0 = 5;
+    TBEAM_V0P7 = 6;
+    T_ECHO = 7;
+    TLORA_V1_3 = 8;
+    RAK4631 = 9;
+    HELTEC_V2_1 = 10;
+    HELTEC_V1 = 11;
+    LILYGO_TBEAM_S3_CORE = 12;
+    RAK11200 = 13;
+    NANO_G1_EXPLORER = 14;
+    NANO_G2_ULTRA = 15;
+    LORA_TYPE = 16;
+    TLORA_T3_S3 = 17;
+    NANO_G1 = 18;
+    TLORA_V2_1_1P8 = 19;
+    TLORA_T3_S3_V1 = 20;
+    NANO_G2 = 21;
+    TLORA_V2_1_PCB = 22;
+    RP2040_LORA = 23;
+    HELTEC_WSL_V3 = 24;
+    STATION_G1 = 25;
+    RAK11310 = 26;
+    HELTEC_HT62 = 27;
+    HELTEC_WIRELESS_PAPER = 28;
+    T_DECK = 29;
+    T_WATCH_S3 = 30;
+    PICOMPUTER = 31;
+    HELTEC_WIRELESS_TRACKER = 32;
+    HELTEC_WIRELESS_PAPER_V1_0 = 33;
+    T_BEAM_S3_CORE = 34;
+    RAK2560 = 35;
+    HELTEC_HRU_3601 = 36;
+    BETAFPV_2400_TX = 37;
+    BETAFPV_900_NANO_TX = 38;
+    BETAFPV_900_TX = 39;
+    RAK2560_BOARD = 40;
+}
+
+// Config placeholder
+message Config {
+    uint32 placeholder = 1;
+}
+
+// ModuleConfig placeholder
+message ModuleConfig {
+    uint32 placeholder = 1;
+}
+
+// Channel placeholder
+message Channel {
+    uint32 placeholder = 1;
+}
+
+// Log record
+message LogRecord {
+    uint32 message = 1;
+    uint32 time = 2;
+    uint32 source = 3;
 }

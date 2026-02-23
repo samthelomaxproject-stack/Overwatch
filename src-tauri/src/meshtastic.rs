@@ -107,6 +107,9 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                     eprintln!("Failed to send config request: {}", e);
                 }
                 
+                let mut last_data_time = Instant::now();
+                let mut packets_received = 0u32;
+                
                 loop {
                     if !state_clone.is_connected.load(Ordering::SeqCst) {
                         break;
@@ -114,9 +117,12 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                     
                     let mut byte = [0u8; 1];
                     match port.read(&mut byte) {
-                        Ok(1) => {
+                        Ok(n) => {
+                            if n == 0 { continue; }
                             let b = byte[0];
-                            // Debug: log every byte received occasionally
+                            last_data_time = Instant::now(); // We got data!
+                            
+                            // Debug: log START_BYTE
                             if b == START_BYTE {
                                 let _ = app_handle.emit("meshtastic-debug", "START_BYTE received");
                             }
@@ -147,9 +153,13 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                                     packet_buffer.push(b);
                                     if packet_buffer.len() >= packet_len {
                                         // Parse packet
+                                        eprintln!("Attempting to decode packet of {} bytes", packet_len);
+                                        let _ = app_handle.emit("meshtastic-debug", format!("Decoding {} byte packet", packet_len));
+                                        
                                         match FromRadio::decode(&packet_buffer[..]) {
                                             Ok(from_radio) => {
-                                                eprintln!("Packet decoded successfully");
+                                                eprintln!("Packet decoded successfully!");
+                                                let _ = app_handle.emit("meshtastic-debug", "Packet decoded OK");
                                                 handle_from_radio(&app_handle, &state_clone, from_radio);
                                             }
                                             Err(e) => {
@@ -170,16 +180,25 @@ pub fn start_meshtastic_serial(app_handle: tauri::AppHandle, state: Arc<Meshtast
                                 let _ = app_handle.emit("meshtastic-error", format!("Read error: {}", e));
                                 break;
                             }
+                            
+                            // Check for no data timeout
+                            if last_data_time.elapsed() > Duration::from_secs(10) && packets_received == 0 {
+                                let msg = "No data received for 10 seconds. Check:\n1. Device is in CLIENT mode\n2. Other nodes are broadcasting\n3. Device firmware is up to date (2.2+)";
+                                eprintln!("{}", msg);
+                                let _ = app_handle.emit("meshtastic-debug", msg);
+                            }
                         }
                     }
                 }
                 
-                eprintln!("Meshtastic disconnected");
+                eprintln!("Meshtastic disconnected - received {} packets", packets_received);
                 let _ = app_handle.emit("meshtastic-status", "disconnected");
             }
             Err(e) => {
                 eprintln!("Failed to open serial port: {}", e);
-                let _ = app_handle.emit("meshtastic-error", format!("Failed to open port: {}", e));
+                let error_msg = format!("Failed to open port {}: {}", port_clone, e);
+                let _ = app_handle.emit("meshtastic-error", error_msg.clone());
+                let _ = app_handle.emit("meshtastic-debug", error_msg);
             }
         }
         
@@ -214,9 +233,7 @@ fn handle_from_radio(app_handle: &tauri::AppHandle, state: &Arc<MeshtasticState>
             let _ = app_handle.emit("meshtastic-debug", format!("Packet from node {}", packet.from));
             handle_mesh_packet(app_handle, state, packet);
         }
-        Some(PayloadVariant::Heartbeat(_)) => {
-            // Heartbeat received
-        }
+        // Heartbeat removed in newer protobuf versions
         Some(PayloadVariant::ConfigCompleteId(_)) => {
             eprintln!("Config complete");
             let _ = app_handle.emit("meshtastic-status", "configured");
@@ -324,6 +341,10 @@ pub fn send_text_message(state: &Arc<MeshtasticState>, port: &str, text: String,
         portnum: 1, // TEXT_MESSAGE_APP
         payload: text.into_bytes(),
         want_response: false,
+        dest: 0,
+        source: 0,
+        request_id: vec![],
+        reply_id: vec![],
     };
     
     let mut payload = Vec::new();
@@ -334,10 +355,14 @@ pub fn send_text_message(state: &Arc<MeshtasticState>, port: &str, text: String,
         from,
         to: 0xFFFFFFFF, // Broadcast
         channel,
+        id: 0,
         rx_time: 0,
         rx_snr: 0,
         hop_limit: 3,
         want_ack: false,
+        priority: 0, // UNSET
+        rx_rssi: vec![],
+        delayed: 0,
     };
     
     let to_radio = ToRadio {
