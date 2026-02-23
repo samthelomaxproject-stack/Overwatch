@@ -825,17 +825,17 @@ ALPHA-3 | REAR"></textarea>
                     debugLog('Cesium 3D initialized');
                 }
                 
-                // Set initial view to USA if no location yet
+                // Set initial view closer to Earth
                 if (!lastKnownLocation) {
                     cesiumViewer.camera.setView({
-                        destination: Cesium.Cartesian3.fromDegrees(-96.8, 33.1, 2000000), // Texas, 2000km up
+                        destination: Cesium.Cartesian3.fromDegrees(-96.8, 33.1, 50000), // Texas, 50km up
                         orientation: {
                             heading: Cesium.Math.toRadians(0.0),
-                            pitch: Cesium.Math.toRadians(-90.0),
+                            pitch: Cesium.Math.toRadians(-45.0),
                             roll: 0.0
                         }
                     });
-                    debugLog('No location yet, showing default view');
+                    debugLog('No location yet, showing default view at 50km');
                 }
                 
                 // If we have location, fly there
@@ -845,19 +845,36 @@ ALPHA-3 | REAR"></textarea>
                     // Remove existing entity if any
                     cesiumViewer.entities.removeAll();
                     
-                    cesiumViewer.camera.flyTo({
+                    // Set initial view close to target before flying
+                    cesiumViewer.camera.setView({
                         destination: Cesium.Cartesian3.fromDegrees(
                             lastKnownLocation.lon, 
                             lastKnownLocation.lat, 
-                            5000 // 5km altitude
+                            10000 // Start at 10km
                         ),
                         orientation: {
                             heading: Cesium.Math.toRadians(0.0),
                             pitch: Cesium.Math.toRadians(-45.0),
                             roll: 0.0
-                        },
-                        duration: 2 // 2 second flight
+                        }
                     });
+                    
+                    // Then fly closer
+                    setTimeout(() => {
+                        cesiumViewer.camera.flyTo({
+                            destination: Cesium.Cartesian3.fromDegrees(
+                                lastKnownLocation.lon, 
+                                lastKnownLocation.lat, 
+                                3000 // 3km altitude for detail
+                            ),
+                            orientation: {
+                                heading: Cesium.Math.toRadians(0.0),
+                                pitch: Cesium.Math.toRadians(-30.0),
+                                roll: 0.0
+                            },
+                            duration: 3 // 3 second flight
+                        });
+                    }, 100);
                     
                     // Add entity marker
                     cesiumViewer.entities.add({
