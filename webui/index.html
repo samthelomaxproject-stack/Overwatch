@@ -806,8 +806,9 @@ ALPHA-3 | REAR"></textarea>
                     try {
                         // Use simplest possible Cesium setup with built-in imagery
                         cesiumViewer = new Cesium.Viewer('cesiumContainer', {
-                            imageryProvider: new Cesium.TileMapServiceImageryProvider({
-                                url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
+                            // Use OpenStreetMap - free, no API key, good detail
+                            imageryProvider: new Cesium.OpenStreetMapImageryProvider({
+                                url: 'https://a.tile.openstreetmap.org/'
                             }),
                             baseLayerPicker: false,
                             geocoder: false,
