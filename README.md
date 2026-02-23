@@ -21,6 +21,8 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 - ✅ Native GPS integration — macOS CoreLocation with real-time position updates
 - ✅ MGRS grid coordinates — Military grid reference system display
 - ✅ Pulsing location marker — Animated position indicator on tactical map
+- ✅ 3D Cesium view — Interactive 3D globe with terrain and satellite imagery
+- ✅ GPS status sync — Permission state properly reflected in UI
 
 ---
 
@@ -39,6 +41,7 @@ Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) appli
 
 ### Mapping & Situational Awareness
 - **Tactical map**: Leaflet-based with dark/satellite/terrain layers
+- **3D Globe View**: CesiumJS-powered interactive 3D view with terrain
 - **Native GPS tracking**: macOS CoreLocation integration with real-time position updates
 - **MGRS grid coordinates**: Military Grid Reference System display
 - **Pulsing position marker**: Animated cyan dot with accuracy radius and popup info
@@ -288,7 +291,7 @@ MIT
 
 ## Changelog
 
-### v0.2.0 (2026-02-22) — Tactical UI Overhaul + Native GPS
+### v0.2.0 (2026-02-23) — Tactical UI Overhaul + Native GPS + 3D View
 - Complete visual redesign with Anduril Lattice inspiration
 - Glassmorphism panels with backdrop blur effects
 - Tactical grid background pattern
@@ -303,8 +306,12 @@ MIT
 - **Real-time position updates**: Polling-based location with event emission
 - **MGRS grid display**: Military coordinates in status bar and map popup
 - **Pulsing location marker**: Animated cyan dot on tactical map
+- **3D Cesium view**: Interactive 3D globe with terrain and satellite imagery
+- Fixed GPS permission sync between Rust backend and JavaScript UI
 - Fixed Tauri API injection with `withGlobalTauri: true`
 - Fixed resource bundling in Tauri app
+- Fixed map initialization timing for GPS location display
+- Fixed 3D view overlay positioning to expose Cesium controls
 
 ### v0.1.2 (2026-02-21)
 - Fixed GPS implementation breaking sidebar navigation
