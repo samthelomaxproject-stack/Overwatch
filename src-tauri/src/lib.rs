@@ -643,6 +643,11 @@ fn meshtastic_cli_start_listen(_app_handle: tauri::AppHandle, _port: String) -> 
 // RTL-SDR / ADS-B State
 static RTL_SDR_STATE: Mutex<Option<bool>> = Mutex::new(None);
 
+// Debug logging helper
+fn debug_log(msg: &str) {
+    eprintln!("[DEBUG] {}", msg);
+}
+
 #[tauri::command]
 fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
     let mut state = RTL_SDR_STATE.lock().unwrap();
@@ -669,15 +674,17 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
         // Connect to SBS output port
         use std::net::TcpStream;
         use std::io::Read;
+        use std::time::Duration;
         
         let mut retry_count = 0;
         let stream = loop {
-            match TcpStream::connect("127.0.0.1:30003") {
+            match TcpStream::connect_timeout(&"127.0.0.1:30003".parse().unwrap(), Duration::from_secs(2)) {
                 Ok(s) => break s,
                 Err(e) => {
                     retry_count += 1;
+                    let _ = app_handle.emit("rtl-sdr-status", format!("Connection attempt {}: {}", retry_count, e));
                     if retry_count > 10 {
-                        let _ = app_handle.emit("rtl-sdr-status", "Failed to connect to dump1090");
+                        let _ = app_handle.emit("rtl-sdr-status", "Failed to connect to dump1090 after 10 retries");
                         return;
                     }
                     thread::sleep(Duration::from_millis(500));
