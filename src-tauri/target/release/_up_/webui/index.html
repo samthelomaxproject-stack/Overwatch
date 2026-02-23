@@ -1703,24 +1703,29 @@ ALPHA-3 | REAR"></textarea>
             const ports = await scanMeshtasticPorts();
             
             if (ports.length === 0) {
-                alert('No Meshtastic devices found. Please connect your device via USB.');
+                alert('No Meshtastic devices found.\n\nMake sure:\n1. Device is connected via USB\n2. No other app is using the serial port (close Meshtastic CLI, Python scripts, etc.)\n3. Try unplugging and reconnecting the device');
                 return;
             }
             
-            // Use first available port
-            const port = ports[0];
-            debugLog('Connecting to Meshtastic on: ' + port);
-            
-            try {
-                const result = await window.__TAURI__.core.invoke('start_meshtastic', { port });
-                debugLog(result);
-                meshtasticConnected = true;
-                meshtasticPort = port;
-                updateMeshtasticUI();
-            } catch (e) {
-                debugLog('Connection failed: ' + e);
-                alert('Failed to connect: ' + e);
+            // Try each port until one works
+            for (const port of ports) {
+                debugLog('Trying port: ' + port);
+                
+                try {
+                    const result = await window.__TAURI__.core.invoke('start_meshtastic', { port });
+                    debugLog(result);
+                    meshtasticConnected = true;
+                    meshtasticPort = port;
+                    updateMeshtasticUI();
+                    return; // Success!
+                } catch (e) {
+                    debugLog('Failed on ' + port + ': ' + e);
+                    // Continue to next port
+                }
             }
+            
+            // All ports failed
+            alert('Failed to connect to any Meshtastic device.\n\nDevice may be busy. Try:\n1. Close any Meshtastic CLI or Python scripts\n2. Unplug and reconnect the device\n3. Wait a few seconds and try again');
         }
         
         function updateMeshtasticUI() {
@@ -1848,6 +1853,10 @@ ALPHA-3 | REAR"></textarea>
             
             tauriListen('meshtastic-error', (event) => {
                 debugLog('Meshtastic error: ' + event.payload);
+            });
+            
+            tauriListen('meshtastic-debug', (event) => {
+                debugLog('Meshtastic: ' + event.payload);
             });
         }
         

@@ -358,7 +358,7 @@ pub fn stop_meshtastic(state: &Arc<MeshtasticState>) {
 }
 
 pub fn get_available_ports() -> Vec<String> {
-    serialport::available_ports()
+    let ports = serialport::available_ports()
         .unwrap_or_default()
         .into_iter()
         .filter(|p| {
@@ -370,5 +370,12 @@ pub fn get_available_ports() -> Vec<String> {
             p.port_name.contains("cu.usb")
         })
         .map(|p| p.port_name)
-        .collect()
+        .collect::<Vec<_>>();
+    
+    eprintln!("Found {} potential Meshtastic ports", ports.len());
+    for port in &ports {
+        eprintln!("  - {}", port);
+    }
+    
+    ports
 }
