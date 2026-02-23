@@ -822,40 +822,51 @@ ALPHA-3 | REAR"></textarea>
                     cesiumViewer.scene.globe.depthTestAgainstTerrain = true;
                     cesiumViewer.scene.globe.enableLighting = true;
                     
-                    // Set initial camera to continental US at reasonable altitude (500km)
-                    cesiumViewer.camera.setView({
-                        destination: Cesium.Cartesian3.fromDegrees(-98.5795, 39.8283, 500000),
-                        orientation: {
-                            heading: Cesium.Math.toRadians(0.0),
-                            pitch: Cesium.Math.toRadians(-60.0),
-                            roll: 0.0
-                        }
-                    });
-                    
-                    debugLog('Cesium 3D initialized with default view');
+                    debugLog('Cesium 3D initialized');
                 }
                 
-                // If we have location, fly there
-                if (lastKnownLocation) {
-                    debugLog('Flying to location: ' + lastKnownLocation.lat + ', ' + lastKnownLocation.lon);
-                    
-                    // Remove existing entity if any
-                    cesiumViewer.entities.removeAll();
-                    
-                    // Fly to location at 5km altitude
-                    cesiumViewer.camera.flyTo({
-                        destination: Cesium.Cartesian3.fromDegrees(
-                            lastKnownLocation.lon, 
-                            lastKnownLocation.lat, 
-                            5000 // 5km altitude
-                        ),
-                        orientation: {
-                            heading: Cesium.Math.toRadians(0.0),
-                            pitch: Cesium.Math.toRadians(-45.0),
-                            roll: 0.0
-                        },
-                        duration: 2
-                    });
+                // Always fly from a close starting position to target
+                const targetLat = lastKnownLocation ? lastKnownLocation.lat : 39.8283;
+                const targetLon = lastKnownLocation ? lastKnownLocation.lon : -98.5795;
+                
+                debugLog('Flying to: ' + targetLat + ', ' + targetLon);
+                
+                // First set camera very close to target
+                cesiumViewer.camera.setView({
+                    destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 10000),
+                    orientation: {
+                        heading: Cesium.Math.toRadians(0.0),
+                        pitch: Cesium.Math.toRadians(-45.0),
+                        roll: 0.0
+                    }
+                });
+                
+                // Remove old entities
+                cesiumViewer.entities.removeAll();
+                
+                // Add marker at target
+                cesiumViewer.entities.add({
+                    position: Cesium.Cartesian3.fromDegrees(targetLon, targetLat),
+                    point: {
+                        pixelSize: 20,
+                        color: Cesium.Color.CYAN,
+                        outlineColor: Cesium.Color.WHITE,
+                        outlineWidth: 3,
+                        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+                    },
+                    label: {
+                        text: myCallsign,
+                        font: '14px monospace',
+                        fillColor: Cesium.Color.CYAN,
+                        outlineColor: Cesium.Color.BLACK,
+                        outlineWidth: 2,
+                        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                        pixelOffset: new Cesium.Cartesian2(0, -25)
+                    }
+                });
+                
+                debugLog('Entity added');
                     
                     // Add entity marker
                     cesiumViewer.entities.add({
