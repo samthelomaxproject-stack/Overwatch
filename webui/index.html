@@ -831,15 +831,20 @@ ALPHA-3 | REAR"></textarea>
                 
                 debugLog('Flying to: ' + targetLat + ', ' + targetLon);
                 
-                // First set camera very close to target
+                // Set camera to 1km altitude - should be close enough to see ground details
+                const cameraHeight = 1000; // 1km up
+                debugLog('Setting camera to: ' + targetLat + ', ' + targetLon + ' at ' + cameraHeight + 'm');
+                
                 cesiumViewer.camera.setView({
-                    destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 10000),
+                    destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, cameraHeight),
                     orientation: {
                         heading: Cesium.Math.toRadians(0.0),
-                        pitch: Cesium.Math.toRadians(-45.0),
+                        pitch: Cesium.Math.toRadians(-30.0),
                         roll: 0.0
                     }
                 });
+                
+                debugLog('Camera setView called');
                 
                 // Remove old entities
                 cesiumViewer.entities.removeAll();
