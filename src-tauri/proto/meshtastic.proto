@@ -1,0 +1,75 @@
+// Simplified Meshtastic protobuf definitions
+syntax = "proto3";
+
+package meshtastic;
+
+// Main message container
+message MeshPacket {
+    bytes payload = 1;
+    uint32 from = 2;
+    uint32 to = 3;
+    uint32 channel = 4;
+    uint32 rx_time = 5;
+    int32 rx_snr = 6;
+    uint32 hop_limit = 7;
+    bool want_ack = 8;
+}
+
+// Data types
+message Data {
+    enum PortNum {
+        UNKNOWN_APP = 0;
+        TEXT_MESSAGE_APP = 1;
+        REMOTE_HARDWARE_APP = 2;
+        POSITION_APP = 3;
+        NODEINFO_APP = 4;
+        ROUTING_APP = 5;
+        ADMIN_APP = 6;
+        TEXT_MESSAGE_COMPRESSED_APP = 7;
+        WAYPOINT_APP = 8;
+        AUDIO_APP = 9;
+        DETECTION_SENSOR_APP = 10;
+        PAXCOUNTER_APP = 11;
+        BATTERY_APP = 12;
+        PRIVATE_APP = 256;
+    }
+    PortNum portnum = 1;
+    bytes payload = 2;
+    bool want_response = 3;
+}
+
+// Position packet
+message Position {
+    int32 latitude_i = 1;
+    int32 longitude_i = 2;
+    int32 altitude = 3;
+    uint32 time = 4;
+    uint32 precision_bits = 10;
+}
+
+// Node info
+message User {
+    string id = 1;
+    string long_name = 2;
+    string short_name = 3;
+    bytes macaddr = 4;
+}
+
+// From radio stream
+message FromRadio {
+    oneof payload_variant {
+        uint32 num = 1;
+        MeshPacket packet = 2;
+        bool heartbeat = 3;
+        MeshPacket queue_status = 4;
+        uint32 config_complete_id = 5;
+    }
+}
+
+// To radio stream
+message ToRadio {
+    oneof payload_variant {
+        MeshPacket packet = 1;
+        uint32 want_config_id = 2;
+    }
+}

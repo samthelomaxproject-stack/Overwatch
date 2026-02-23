@@ -6,6 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 
+// Include generated protobuf code
+pub mod meshtastic_proto {
+    include!(concat!(env!("OUT_DIR"), "/meshtastic.rs"));
+}
+
+mod meshtastic;
+
 // Location state shared between threads
 #[derive(Clone, Copy, Default, Debug)]
 struct LocationState {
@@ -400,6 +407,9 @@ fn request_location_permission() -> Result<(), String> {
 // ADS-B State
 static ADSB_STATE: Mutex<Option<Arc<adsb::AdsbState>>> = Mutex::new(None);
 
+// Meshtastic State
+static MESHTASTIC_STATE: Mutex<Option<Arc<meshtastic::MeshtasticState>>> = Mutex::new(None);
+
 // Tauri command to start ADS-B monitoring
 #[tauri::command]
 fn start_adsb(app_handle: tauri::AppHandle) -> Result<String, String> {
@@ -434,11 +444,79 @@ fn stop_adsb() -> Result<String, String> {
 #[tauri::command]
 fn get_adsb_aircraft() -> Result<Vec<String>, String> {
     let state_guard = ADSB_STATE.lock().unwrap();
-    
+
     if let Some(ref state) = *state_guard {
         let aircraft = state.aircraft.lock().unwrap();
         let icaos: Vec<String> = aircraft.iter().map(|a| a.icao.clone()).collect();
         Ok(icaos)
+    } else {
+        Ok(vec![])
+    }
+}
+
+// Meshtastic Tauri commands
+#[tauri::command]
+fn start_meshtastic(app_handle: tauri::AppHandle, port: String) -> Result<String, String> {
+    let mut state_guard = MESHTASTIC_STATE.lock().unwrap();
+
+    if state_guard.is_none() {
+        *state_guard = Some(Arc::new(meshtastic::MeshtasticState::new()));
+    }
+
+    if let Some(ref state) = *state_guard {
+        meshtastic::start_meshtastic_serial(app_handle, state.clone(), port)
+    } else {
+        Err("Failed to initialize Meshtastic state".to_string())
+    }
+}
+
+#[tauri::command]
+fn stop_meshtastic() -> Result<String, String> {
+    let mut state_guard = MESHTASTIC_STATE.lock().unwrap();
+
+    if let Some(ref state) = *state_guard {
+        meshtastic::stop_meshtastic(state);
+        Ok("Meshtastic disconnected".to_string())
+    } else {
+        Ok("Meshtastic was not running".to_string())
+    }
+}
+
+#[tauri::command]
+fn send_meshtastic_message(port: String, text: String, channel: u32) -> Result<(), String> {
+    let state_guard = MESHTASTIC_STATE.lock().unwrap();
+
+    if let Some(ref state) = *state_guard {
+        meshtastic::send_text_message(state, &port, text, channel)
+    } else {
+        Err("Meshtastic not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_meshtastic_ports() -> Result<Vec<String>, String> {
+    Ok(meshtastic::get_available_ports())
+}
+
+#[tauri::command]
+fn get_meshtastic_nodes() -> Result<Vec<meshtastic::MeshtasticNode>, String> {
+    let state_guard = MESHTASTIC_STATE.lock().unwrap();
+
+    if let Some(ref state) = *state_guard {
+        let nodes = state.nodes.lock().unwrap();
+        Ok(nodes.clone())
+    } else {
+        Ok(vec![])
+    }
+}
+
+#[tauri::command]
+fn get_meshtastic_messages() -> Result<Vec<meshtastic::MeshtasticMessage>, String> {
+    let state_guard = MESHTASTIC_STATE.lock().unwrap();
+
+    if let Some(ref state) = *state_guard {
+        let messages = state.messages.lock().unwrap();
+        Ok(messages.clone())
     } else {
         Ok(vec![])
     }
@@ -450,7 +528,13 @@ pub fn run() {
         let mut adsb_state = ADSB_STATE.lock().unwrap();
         *adsb_state = Some(Arc::new(adsb::AdsbState::new()));
     }
-    
+
+    // Initialize Meshtastic state
+    {
+        let mut mesh_state = MESHTASTIC_STATE.lock().unwrap();
+        *mesh_state = Some(Arc::new(meshtastic::MeshtasticState::new()));
+    }
+
     tauri::Builder::default()
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -485,7 +569,13 @@ pub fn run() {
             request_location_permission,
             start_adsb,
             stop_adsb,
-            get_adsb_aircraft
+            get_adsb_aircraft,
+            start_meshtastic,
+            stop_meshtastic,
+            send_meshtastic_message,
+            get_meshtastic_ports,
+            get_meshtastic_nodes,
+            get_meshtastic_messages
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

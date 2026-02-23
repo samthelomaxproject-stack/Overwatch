@@ -11,3 +11,6 @@ cargo:PERMISSION_FILES_PATH=/Users/thelomaxproject/Overwatch/src-tauri/target/re
 cargo:rerun-if-changed=capabilities
 cargo:rerun-if-env-changed=REMOVE_UNUSED_COMMANDS
 cargo:rustc-env=TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin
+cargo:rerun-if-changed=../webui/index.html
+cargo:rerun-if-changed=../webui/tac-ui.css
+cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks

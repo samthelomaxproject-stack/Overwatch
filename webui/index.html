@@ -1076,6 +1076,9 @@ ALPHA-3 | REAR"></textarea>
                     });
                     
                     debugLog('Listeners registered');
+                    
+                    // Setup Meshtastic listeners
+                    setupMeshtasticListeners();
                 }
                 
                 // Also trigger GPS init if not already done
@@ -1501,6 +1504,37 @@ ALPHA-3 | REAR"></textarea>
                             </div>
                         </div>
                     </div>
+                    <div class="tac-panel" style="grid-column: 1 / -1;">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Meshtastic (LoRa 915 MHz)</span>
+                            <button class="tac-btn tac-btn-sm ${meshtasticConnected ? 'tac-btn-danger' : 'tac-btn-primary'}" id="meshtasticBtn" onclick="connectMeshtastic()">
+                                ${meshtasticConnected ? 'DISCONNECT' : 'CONNECT'}
+                            </button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-muted); margin-bottom: var(--space-sm);" id="meshtasticStatus">
+                                ${meshtasticConnected ? 'CONNECTED - ' + meshtasticPort : 'DISCONNECTED'}
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md);">
+                                <div>
+                                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-xs);">NODES</div>
+                                    <div id="meshtasticNodes" style="max-height: 150px; overflow-y: auto; font-size: 0.75rem;">
+                                        <div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-xs);">MESSAGES</div>
+                                    <div id="meshtasticMessages" style="max-height: 100px; overflow-y: auto; font-size: 0.75rem; margin-bottom: var(--space-sm);">
+                                        <div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>
+                                    </div>
+                                    <div style="display: flex; gap: var(--space-xs);">
+                                        <input type="text" id="meshtasticInput" class="tac-input" placeholder="Message..." style="flex: 1; font-size: 0.75rem;" onkeypress="if(event.key==='Enter') sendMeshtasticMessage()">
+                                        <button class="tac-btn tac-btn-sm tac-btn-primary" onclick="sendMeshtasticMessage()">SEND</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -1631,6 +1665,190 @@ ALPHA-3 | REAR"></textarea>
             } else {
                 alert('AIS not yet implemented - requires additional SDR');
             }
+        }
+        
+        // Meshtastic integration
+        let meshtasticConnected = false;
+        let meshtasticPort = '';
+        let meshtasticNodes = [];
+        let meshtasticMessages = [];
+        
+        async function scanMeshtasticPorts() {
+            try {
+                const ports = await window.__TAURI__.core.invoke('get_meshtastic_ports');
+                debugLog('Meshtastic ports found: ' + ports.join(', '));
+                return ports;
+            } catch (e) {
+                debugLog('Error scanning ports: ' + e);
+                return [];
+            }
+        }
+        
+        async function connectMeshtastic() {
+            if (meshtasticConnected) {
+                // Disconnect
+                try {
+                    await window.__TAURI__.core.invoke('stop_meshtastic');
+                    meshtasticConnected = false;
+                    meshtasticPort = '';
+                    debugLog('Meshtastic disconnected');
+                    updateMeshtasticUI();
+                } catch (e) {
+                    debugLog('Error disconnecting: ' + e);
+                }
+                return;
+            }
+            
+            // Scan for ports
+            const ports = await scanMeshtasticPorts();
+            
+            if (ports.length === 0) {
+                alert('No Meshtastic devices found. Please connect your device via USB.');
+                return;
+            }
+            
+            // Use first available port
+            const port = ports[0];
+            debugLog('Connecting to Meshtastic on: ' + port);
+            
+            try {
+                const result = await window.__TAURI__.core.invoke('start_meshtastic', { port });
+                debugLog(result);
+                meshtasticConnected = true;
+                meshtasticPort = port;
+                updateMeshtasticUI();
+            } catch (e) {
+                debugLog('Connection failed: ' + e);
+                alert('Failed to connect: ' + e);
+            }
+        }
+        
+        function updateMeshtasticUI() {
+            const btn = document.getElementById('meshtasticBtn');
+            const status = document.getElementById('meshtasticStatus');
+            
+            if (btn) {
+                btn.textContent = meshtasticConnected ? 'DISCONNECT' : 'CONNECT';
+                btn.className = 'tac-btn tac-btn-sm ' + (meshtasticConnected ? 'tac-btn-danger' : 'tac-btn-primary');
+            }
+            
+            if (status) {
+                status.textContent = meshtasticConnected ? 'CONNECTED - ' + meshtasticPort : 'DISCONNECTED';
+                status.style.color = meshtasticConnected ? 'var(--accent-cyan)' : 'var(--text-muted)';
+            }
+        }
+        
+        async function sendMeshtasticMessage() {
+            if (!meshtasticConnected) {
+                alert('Not connected to Meshtastic');
+                return;
+            }
+            
+            const input = document.getElementById('meshtasticInput');
+            const text = input.value.trim();
+            
+            if (!text) return;
+            
+            try {
+                await window.__TAURI__.core.invoke('send_meshtastic_message', {
+                    port: meshtasticPort,
+                    text: text,
+                    channel: 0
+                });
+                
+                // Add to local messages
+                meshtasticMessages.push({
+                    from: 'ME',
+                    text: text,
+                    timestamp: Date.now()
+                });
+                
+                input.value = '';
+                renderMeshtasticMessages();
+            } catch (e) {
+                debugLog('Send failed: ' + e);
+                alert('Failed to send: ' + e);
+            }
+        }
+        
+        function renderMeshtasticMessages() {
+            const list = document.getElementById('meshtasticMessages');
+            if (!list) return;
+            
+            if (meshtasticMessages.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>';
+                return;
+            }
+            
+            list.innerHTML = meshtasticMessages.slice(-20).reverse().map(m => `
+                <div style="padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
+                    <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">${m.from}</div>
+                    <div style="font-size: 0.875rem; color: var(--text-primary);">${m.text}</div>
+                </div>
+            `).join('');
+        }
+        
+        function renderMeshtasticNodes() {
+            const list = document.getElementById('meshtasticNodes');
+            if (!list) return;
+            
+            if (meshtasticNodes.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>';
+                return;
+            }
+            
+            list.innerHTML = meshtasticNodes.map(n => `
+                <div style="display: flex; justify-content: space-between; padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
+                    <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">${n.short_name}</span>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary);">${n.long_name}</span>
+                </div>
+            `).join('');
+        }
+        
+        // Meshtastic event listeners
+        function setupMeshtasticListeners() {
+            const tauriListen = getTauriListener();
+            if (!tauriListen) return;
+            
+            tauriListen('meshtastic-status', (event) => {
+                debugLog('Meshtastic status: ' + event.payload);
+                if (event.payload === 'connected') {
+                    meshtasticConnected = true;
+                } else if (event.payload === 'disconnected') {
+                    meshtasticConnected = false;
+                }
+                updateMeshtasticUI();
+            });
+            
+            tauriListen('meshtastic-message', (event) => {
+                const msg = event.payload;
+                debugLog('Meshtastic msg from ' + msg.from + ': ' + msg.text);
+                meshtasticMessages.push(msg);
+                renderMeshtasticMessages();
+            });
+            
+            tauriListen('meshtastic-node', (event) => {
+                const node = event.payload;
+                debugLog('Meshtastic node: ' + node.short_name);
+                
+                const existing = meshtasticNodes.findIndex(n => n.node_id === node.node_id);
+                if (existing >= 0) {
+                    meshtasticNodes[existing] = node;
+                } else {
+                    meshtasticNodes.push(node);
+                }
+                renderMeshtasticNodes();
+            });
+            
+            tauriListen('meshtastic-position', (event) => {
+                const pos = event.payload;
+                debugLog('Meshtastic position: ' + pos.latitude + ', ' + pos.longitude);
+                // Could add to map here
+            });
+            
+            tauriListen('meshtastic-error', (event) => {
+                debugLog('Meshtastic error: ' + event.payload);
+            });
         }
         
         // Entity functions

@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Overwatch | Tactical Operations Center</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <link rel="stylesheet" href="tac-ui.css">
     <style>
         /* Military Symbol System - MIL-STD-2525 Inspired */
@@ -319,6 +321,11 @@
             </div>
         </header>
         
+        <!-- Debug Panel -->
+        <div id="debugPanel" style="background: #1a1a2e; color: #00ff00; padding: 10px; font-family: monospace; font-size: 11px; max-height: 150px; overflow-y: auto; border-bottom: 1px solid #333;">
+            <div>Debug Output:</div>
+        </div>
+        
         <!-- Main Container -->
         <div class="tac-container">
             <!-- Sidebar -->
@@ -407,11 +414,14 @@
                 <!-- Map View -->
                 <div class="tac-view" id="view-map">
                     <div class="tac-map-container" id="map"></div>
-                    <div class="tac-map-overlay">
+                    <div id="cesiumContainer" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:10;"></div>
+                    <div class="tac-map-overlay" id="mapOverlay" style="z-index: 1000;">
                         <div class="tac-layer-group">
                             <button class="tac-layer-btn active" onclick="setMapStyle('dark')">DARK</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('satellite')">SAT</button>
+                            <button class="tac-layer-btn" onclick="setMapStyle('hybrid')">HYB</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('terrain')">TER</button>
+                            <button class="tac-layer-btn" onclick="toggle3D()">3D</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group">
@@ -660,6 +670,12 @@ ALPHA-3 | REAR"></textarea>
                 attribution: '© CartoDB'
             },
             satellite: {
+                // High-res satellite imagery (Google Earth-like)
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri'
+            },
+            hybrid: {
+                // Satellite with labels
                 url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                 attribution: '© Esri'
             },
@@ -702,11 +718,37 @@ ALPHA-3 | REAR"></textarea>
         
         // Map functions
         function initMap() {
-            map = L.map('map').setView([34.0522, -118.2437], 10);
+            if (map) return; // Already initialized
+            
+            const mapContainer = document.getElementById('map');
+            if (!mapContainer) {
+                debugLog('Map container not found!');
+                return;
+            }
+            
+            // Make sure map view is visible for proper initialization
+            const mapView = document.getElementById('view-map');
+            if (mapView) {
+                mapView.classList.add('active');
+            }
+            
+            map = L.map('map', {
+                zoomControl: true,
+                attributionControl: true
+            }).setView([34.0522, -118.2437], 10);
+            
             L.tileLayer(mapStyles.dark.url, {
                 attribution: mapStyles.dark.attribution,
                 maxZoom: 19
             }).addTo(map);
+            
+            debugLog('Map initialized successfully');
+            
+            // If we have a location already, show it
+            if (lastKnownLocation) {
+                debugLog('Have stored location, updating marker');
+                updateMyLocation(lastKnownLocation.lat, lastKnownLocation.lon, lastKnownLocation.accuracy);
+            }
         }
         
         function setMapStyle(style) {
@@ -719,15 +761,26 @@ ALPHA-3 | REAR"></textarea>
             });
             
             if (map) {
+                // Remove all tile layers
                 map.eachLayer(layer => {
                     if (layer instanceof L.TileLayer) {
                         map.removeLayer(layer);
                     }
                 });
+                
+                // Add base layer
                 L.tileLayer(mapStyles[style].url, {
                     attribution: mapStyles[style].attribution,
                     maxZoom: 19
                 }).addTo(map);
+                
+                // For hybrid, add labels on top
+                if (style === 'hybrid') {
+                    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                        attribution: '© Esri',
+                        maxZoom: 19
+                    }).addTo(map);
+                }
             }
         }
         
@@ -735,20 +788,155 @@ ALPHA-3 | REAR"></textarea>
             event.target.classList.toggle('active');
         }
         
+        // 3D Cesium View
+        let cesiumViewer = null;
+        let is3DMode = false;
+        
+        function toggle3D() {
+            const mapDiv = document.getElementById('map');
+            const cesiumDiv = document.getElementById('cesiumContainer');
+            
+            if (!is3DMode) {
+                // Switch to 3D
+                mapDiv.style.display = 'none';
+                cesiumDiv.style.display = 'block';
+                
+                // Move our buttons to bottom left so they don't cover Cesium controls
+                const overlay = document.getElementById('mapOverlay');
+                if (overlay) {
+                    overlay.style.top = 'auto';
+                    overlay.style.bottom = 'var(--space-md)';
+                    overlay.style.left = 'var(--space-md)';
+                    overlay.style.right = 'auto';
+                }
+                
+                if (!cesiumViewer) {
+                    debugLog('Creating Cesium viewer...');
+                    try {
+                        // Use basic ellipsoid terrain (no API key needed)
+                        cesiumViewer = new Cesium.Viewer('cesiumContainer', {
+                            terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+                            baseLayerPicker: true,
+                            geocoder: false,
+                            homeButton: true,
+                            sceneModePicker: true,
+                            navigationHelpButton: false,
+                            animation: false,
+                            timeline: false,
+                            fullscreenButton: false
+                        });
+                        debugLog('Cesium viewer created successfully');
+                    } catch (e) {
+                        debugLog('ERROR creating Cesium: ' + e.message);
+                        return;
+                    }
+                }
+                
+                // Get target coordinates
+                const targetLat = lastKnownLocation ? lastKnownLocation.lat : 39.8283;
+                const targetLon = lastKnownLocation ? lastKnownLocation.lon : -98.5795;
+                debugLog('Target: ' + targetLat + ', ' + targetLon);
+                
+                // Use flyTo for smooth animation to location - start closer
+                try {
+                    cesiumViewer.camera.flyTo({
+                        destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 2000), // 2km up for detail
+                        orientation: {
+                            heading: 0.0,
+                            pitch: -Cesium.Math.PI_OVER_FOUR,
+                            roll: 0.0
+                        },
+                        duration: 2
+                    });
+                    debugLog('Camera flyTo called at 2km altitude');
+                } catch (e) {
+                    debugLog('ERROR in flyTo: ' + e.message);
+                }
+                
+                // Add marker
+                try {
+                    cesiumViewer.entities.removeAll();
+                    cesiumViewer.entities.add({
+                        position: Cesium.Cartesian3.fromDegrees(targetLon, targetLat),
+                        point: {
+                            pixelSize: 20,
+                            color: Cesium.Color.CYAN,
+                            outlineColor: Cesium.Color.WHITE,
+                            outlineWidth: 3
+                        },
+                        label: {
+                            text: myCallsign,
+                            font: '14px monospace',
+                            fillColor: Cesium.Color.CYAN,
+                            pixelOffset: new Cesium.Cartesian2(0, -30)
+                        }
+                    });
+                    debugLog('Entity added');
+                } catch (e) {
+                    debugLog('ERROR adding entity: ' + e.message);
+                }
+                
+                is3DMode = true;
+                event.target.classList.add('active');
+                debugLog('Switched to 3D view');
+            } else {
+                // Switch back to 2D
+                mapDiv.style.display = 'block';
+                cesiumDiv.style.display = 'none';
+                is3DMode = false;
+                event.target.classList.remove('active');
+                debugLog('Switched to 2D view');
+                
+                // Restore overlay position
+                const overlay = document.getElementById('mapOverlay');
+                if (overlay) {
+                    overlay.style.top = 'var(--space-md)';
+                    overlay.style.bottom = 'auto';
+                    overlay.style.left = 'auto';
+                    overlay.style.right = 'var(--space-md)';
+                }
+                
+                // Fix Leaflet map display after being hidden
+                if (map) {
+                    setTimeout(() => {
+                        map.invalidateSize();
+                        debugLog('Map size invalidated');
+                    }, 100);
+                }
+            }
+        }
+        
+        // Debug logging to visible panel
+        function debugLog(msg) {
+            const panel = document.getElementById('debugPanel');
+            if (panel) {
+                const line = document.createElement('div');
+                line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                panel.appendChild(line);
+                panel.scrollTop = panel.scrollHeight;
+            }
+            console.log(msg);
+        }
+
         // GPS tracking with permission handling
         let gpsPermissionState = 'prompt';
         
         async function checkLocationPermission() {
+            const tauriAvailable = checkTauriAvailable();
+            debugLog('checkLocationPermission called, tauriAvailable: ' + tauriAvailable);
             // Try native Tauri location first
-            if (enableNativeLocation && tauriAvailable) {
+            if (tauriAvailable) {
                 try {
-                    const status = await window.__TAURI__.core.invoke('get_location_status');
+                    const status = await window.__TAURI__.core.invoke('check_location_permission');
                     console.log('Native location status:', status);
                     if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                        console.log('Native says GRANTED');
                         return 'granted';
                     } else if (status === 'denied') {
+                        console.log('Native says DENIED');
                         return 'denied';
                     }
+                    console.log('Native says PROMPT (not_determined)');
                     return 'prompt';
                 } catch (e) {
                     console.log('Native location check failed:', e);
@@ -756,12 +944,14 @@ ALPHA-3 | REAR"></textarea>
             }
             
             // Fall back to web permission API
+            console.log('Falling back to web geolocation API');
             if (!('permissions' in navigator)) {
                 return 'prompt';
             }
             
             try {
                 const result = await navigator.permissions.query({ name: 'geolocation' });
+                console.log('Web geolocation permission state:', result.state);
                 gpsPermissionState = result.state;
                 
                 result.addEventListener('change', () => {
@@ -780,74 +970,146 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function updateGPSStatus() {
+            console.log('updateGPSStatus called, gpsPermissionState =', gpsPermissionState);
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
             const settingsDot = document.getElementById('settingsGPSDot');
             const settingsText = document.getElementById('settingsGPSText');
             
             if (gpsPermissionState === 'denied') {
+                console.log('Setting UI to DENIED');
                 dot.classList.add('offline');
                 text.innerHTML = '<span class="tac-status-value">GPS DENIED</span>';
                 if (settingsDot) settingsDot.classList.add('offline');
                 if (settingsText) settingsText.textContent = 'GPS DENIED - CHECK SYSTEM SETTINGS';
             } else if (gpsPermissionState === 'prompt') {
+                console.log('Setting UI to OFFLINE');
                 dot.classList.add('offline');
                 text.innerHTML = '<span class="tac-status-value">GPS OFFLINE</span>';
                 if (settingsDot) settingsDot.classList.add('offline');
                 if (settingsText) settingsText.textContent = 'GPS OFFLINE - CLICK ENABLE BELOW';
             } else if (gpsPermissionState === 'granted') {
+                console.log('Setting UI to ACTIVE');
                 dot.classList.remove('offline');
+                // When granted, status text will be updated by updateMyLocation with coordinates
+                // But set it here in case coordinates aren't ready yet
+                if (!text.innerHTML.includes('•')) {
+                    text.innerHTML = '<span class="tac-status-value">GPS ACTIVE</span>';
+                }
                 if (settingsDot) settingsDot.classList.remove('offline');
                 if (settingsText) settingsText.textContent = 'GPS ACTIVE';
             }
         }
         
-        // Use native Tauri location when available
-        const enableNativeLocation = true;
-        
-        // Check if Tauri is available
-        let tauriAvailable = false;
-        let tauriListen = null;
-        try {
-            tauriAvailable = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core;
-            tauriListen = window.__TAURI__.event?.listen;
-        } catch (e) {
-            tauriAvailable = false;
+        // Check if Tauri is available - call this function when needed
+        function checkTauriAvailable() {
+            try {
+                return typeof window.__TAURI__ !== 'undefined' && !!window.__TAURI__.core;
+            } catch (e) {
+                return false;
+            }
         }
         
-        // Listen for native location updates from Rust
-        if (tauriAvailable && tauriListen) {
-            tauriListen('location-update', (event) => {
-                const [lat, lon, accuracy] = event.payload;
-                console.log('Native location update:', lat, lon, accuracy);
-                updateMyLocation(lat, lon, accuracy);
-                gpsPermissionState = 'granted';
-                updateGPSStatus();
-            });
+        function getTauriListener() {
+            try {
+                return window.__TAURI__?.event?.listen;
+            } catch (e) {
+                return null;
+            }
+        }
+        
+        // ADS-B tracking state
+        let adsbAircraft = [];
+        let adsbActive = false;
+        let adsbAircraftCount = 0;
+        let adsbMaxRange = 0;
+        
+        // Poll for Tauri availability - it might take time to inject
+        let tauriCheckCount = 0;
+        const tauriCheckInterval = setInterval(() => {
+            tauriCheckCount++;
+            const hasTauri = typeof window.__TAURI__ !== 'undefined';
             
-            tauriListen('permission-change', (event) => {
-                const granted = event.payload;
-                console.log('Permission changed:', granted);
-                gpsPermissionState = granted ? 'granted' : 'denied';
-                updateGPSStatus();
-            });
-        }
+            if (hasTauri) {
+                clearInterval(tauriCheckInterval);
+                debugLog('Tauri found after ' + tauriCheckCount + ' checks!');
+                debugLog('window.__TAURI__.core: ' + (typeof window.__TAURI__.core));
+                debugLog('window.__TAURI__.event: ' + (typeof window.__TAURI__.event));
+                
+                // Now set up listeners
+                const tauriListen = getTauriListener();
+                if (tauriListen) {
+                    debugLog('Setting up native listeners');
+                    
+                    tauriListen('location-update', (event) => {
+                        debugLog('Location update: ' + JSON.stringify(event.payload));
+                        const [lat, lon, accuracy] = event.payload;
+                        updateMyLocation(lat, lon, accuracy);
+                        gpsPermissionState = 'granted';
+                        updateGPSStatus();
+                    });
+                    
+                    tauriListen('permission-change', (event) => {
+                        debugLog('Permission change: ' + event.payload);
+                        gpsPermissionState = event.payload ? 'granted' : 'denied';
+                        updateGPSStatus();
+                    });
+                    
+                    // ADS-B listeners
+                    tauriListen('adsb-aircraft', (event) => {
+                        const aircraft = event.payload;
+                        debugLog('ADS-B aircraft: ' + aircraft.icao);
+                        adsbAircraft.push(aircraft);
+                        if (adsbAircraft.length > 50) adsbAircraft.shift();
+                        updateAdsbDisplay();
+                    });
+                    
+                    tauriListen('adsb-count', (event) => {
+                        adsbAircraftCount = event.payload;
+                        debugLog('ADS-B count: ' + adsbAircraftCount);
+                        updateAdsbPanel();
+                    });
+                    
+                    tauriListen('adsb-error', (event) => {
+                        debugLog('ADS-B error: ' + event.payload);
+                        alert('ADS-B Error: ' + event.payload);
+                    });
+                    
+                    debugLog('Listeners registered');
+                    
+                    // Setup Meshtastic listeners
+                    setupMeshtasticListeners();
+                }
+                
+                // Also trigger GPS init if not already done
+                if (gpsPermissionState === 'prompt') {
+                    initGPS();
+                }
+            } else if (tauriCheckCount > 20) {
+                clearInterval(tauriCheckInterval);
+                debugLog('Tauri NOT found after 20 attempts');
+                debugLog('Protocol: ' + window.location.protocol);
+                debugLog('URL: ' + window.location.href);
+            }
+        }, 200);
         
         async function requestLocationPermission() {
             // Try native Tauri location first
-            if (enableNativeLocation && tauriAvailable) {
+            const tauriAvailable = checkTauriAvailable();
+            if (tauriAvailable) {
                 try {
-                    await window.__TAURI__.core.invoke('request_location');
+                    await window.__TAURI__.core.invoke('request_location_permission');
                     console.log('Native location requested');
                     
                     // Check status after a delay
                     setTimeout(async () => {
-                        const status = await window.__TAURI__.core.invoke('get_location_status');
+                        const status = await window.__TAURI__.core.invoke('check_location_permission');
                         console.log('Location status after request:', status);
                         if (status === 'authorized_when_in_use' || status === 'authorized_always') {
                             gpsPermissionState = 'granted';
                             updateGPSStatus();
-                            startGPSTracking();
+                            // Start getting location updates
+                            console.log('Permission granted, starting location tracking');
                         } else if (status === 'denied') {
                             gpsPermissionState = 'denied';
                             updateGPSStatus();
@@ -907,24 +1169,80 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function initGPS() {
-            // Set a timeout to prevent hanging
-            const timeout = setTimeout(() => {
-                console.log('GPS init timeout - continuing without GPS');
-                document.getElementById('statusText').textContent = 'GPS UNAVAILABLE';
-            }, 3000);
+            const tauriAvailable = checkTauriAvailable();
+            debugLog('initGPS called, tauriAvailable: ' + tauriAvailable);
             
-            checkLocationPermission().then(state => {
-                clearTimeout(timeout);
+            // If Tauri native location is available, use it exclusively
+            if (tauriAvailable) {
+                debugLog('Using native location...');
+                // Poll for native location status
+                let pollCount = 0;
+                const pollInterval = setInterval(async () => {
+                    pollCount++;
+                    try {
+                        debugLog('Poll ' + pollCount + ': invoking check_location_permission');
+                        const status = await window.__TAURI__.core.invoke('check_location_permission');
+                        debugLog('Poll ' + pollCount + ': received status="' + status + '" type=' + typeof status);
+                        debugLog('Poll ' + pollCount + ': status==="authorized_always": ' + (status === 'authorized_always'));
+                        debugLog('Poll ' + pollCount + ': status==="authorized_when_in_use": ' + (status === 'authorized_when_in_use'));
+                        debugLog('Poll ' + pollCount + ': status==="denied": ' + (status === 'denied'));
+                        
+                        if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                            debugLog('MATCH! Setting to GRANTED');
+                            clearInterval(pollInterval);
+                            gpsPermissionState = 'granted';
+                            updateGPSStatus();
+                            // Get current location immediately
+                            try {
+                                const loc = await window.__TAURI__.core.invoke('get_current_location');
+                                debugLog('Got location: ' + JSON.stringify(loc));
+                                if (loc && loc[0] !== 0) {
+                                    updateMyLocation(loc[0], loc[1], loc[2]);
+                                }
+                            } catch (locErr) {
+                                debugLog('No location fix yet: ' + locErr);
+                            }
+                        } else if (status === 'denied') {
+                            debugLog('Status is DENIED');
+                            clearInterval(pollInterval);
+                            gpsPermissionState = 'denied';
+                            updateGPSStatus();
+                        } else if (pollCount > 20) {
+                            debugLog('Poll timeout, setting to PROMPT');
+                            clearInterval(pollInterval);
+                            gpsPermissionState = 'prompt';
+                            updateGPSStatus();
+                        } else {
+                            debugLog('Status "' + status + '" not matched, continuing...');
+                        }
+                    } catch (e) {
+                        debugLog('GPS poll ERROR: ' + e);
+                        if (pollCount > 5) {
+                            clearInterval(pollInterval);
+                            checkWebLocationPermission();
+                        }
+                    }
+                }, 500);
+            } else {
+                debugLog('Tauri NOT available, using web location');
+                checkWebLocationPermission();
+            }
+        }
+        
+        async function checkWebLocationPermission() {
+            console.log('checkWebLocationPermission called - THIS SHOULD NOT HAPPEN WHEN TAURI IS AVAILABLE');
+            try {
+                const state = await checkLocationPermission();
+                console.log('Web location permission result:', state);
                 if (state === 'granted') {
                     startGPSTracking();
                 } else {
                     updateGPSStatus();
                 }
-            }).catch(err => {
-                clearTimeout(timeout);
+            } catch (err) {
                 console.error('GPS permission check failed:', err);
                 document.getElementById('statusText').textContent = 'GPS ERROR';
-            });
+            }
         }
         
         function toMGRS(lat, lon) {
@@ -936,9 +1254,22 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function updateMyLocation(lat, lon, accuracy) {
-            if (!map) return;
+            // Store location for later use
+            lastKnownLocation = { lat, lon, accuracy };
             
             const gridCoords = toMGRS(lat, lon);
+            
+            // Initialize map if not ready
+            if (!map) {
+                debugLog('Map not ready, initializing now...');
+                initMap();
+            }
+            
+            if (!map) {
+                debugLog('Map still not available after init');
+                return;
+            }
+            
             const myIcon = L.divIcon({
                 className: 'my-location-marker',
                 html: `<div style="width:20px;height:20px;background:var(--accent-cyan);border:3px solid white;border-radius:50%;box-shadow:0 0 15px var(--accent-cyan);position:relative;">
@@ -950,15 +1281,54 @@ ALPHA-3 | REAR"></textarea>
             
             if (myLocationMarker) {
                 myLocationMarker.setLatLng([lat, lon]);
+                myLocationMarker.setPopupContent(`<strong>${myCallsign}</strong><br>${gridCoords}<br>Accuracy: ${Math.round(accuracy)}m`);
             } else {
                 myLocationMarker = L.marker([lat, lon], { icon: myIcon, title: myCallsign })
                     .addTo(map)
-                    .bindPopup(`<strong>${myCallsign}</strong><br>${gridCoords}`);
-                map.setView([lat, lon], 14);
+                    .bindPopup(`<strong>${myCallsign}</strong><br>${gridCoords}<br>Accuracy: ${Math.round(accuracy)}m`);
+                // Center map on location with good zoom
+                map.setView([lat, lon], 16);
+                debugLog('Marker created at ' + lat + ', ' + lon);
             }
             
             document.getElementById('statusDot').classList.remove('offline');
             document.getElementById('statusText').innerHTML = `<span class="tac-status-value">${myCallsign}</span> • ${gridCoords}`;
+            
+            // Update Cesium if in 3D mode
+            updateCesiumLocation(lat, lon);
+        }
+        
+        // Store last known location
+        let lastKnownLocation = null;
+        
+        // Update Cesium when location changes if in 3D mode
+        function updateCesiumLocation(lat, lon) {
+            if (!cesiumViewer || !is3DMode) return;
+            
+            debugLog('Updating Cesium with new location');
+            
+            // Remove old entities and add new one
+            cesiumViewer.entities.removeAll();
+            cesiumViewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(lon, lat),
+                point: {
+                    pixelSize: 20,
+                    color: Cesium.Color.CYAN,
+                    outlineColor: Cesium.Color.WHITE,
+                    outlineWidth: 3,
+                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+                },
+                label: {
+                    text: myCallsign,
+                    font: '14px monospace',
+                    fillColor: Cesium.Color.CYAN,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -25)
+                }
+            });
         }
         
         // Modal functions
@@ -1096,18 +1466,23 @@ ALPHA-3 | REAR"></textarea>
                     <div class="tac-panel">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">ADS-B (1090 MHz)</span>
-                            <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleSDR('adsb')">START</button>
+                            <button class="tac-btn tac-btn-sm ${adsbActive ? 'tac-btn-danger' : 'tac-btn-primary'}" id="adsbBtn" onclick="toggleADSB()">
+                                ${adsbActive ? 'STOP' : 'START'}
+                            </button>
                         </div>
                         <div class="tac-panel-body">
                             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-md); text-align: center;">
                                 <div>
-                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">0</div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);" id="adsbCount">${adsbAircraftCount}</div>
                                     <div class="tac-label">AIRCRAFT</div>
                                 </div>
                                 <div>
-                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">--</div>
-                                    <div class="tac-label">MAX RANGE</div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);" id="adsbRange">${adsbMaxRange || '--'}</div>
+                                    <div class="tac-label">MAX RANGE (km)</div>
                                 </div>
+                            </div>
+                            <div style="margin-top: var(--space-md); max-height: 200px; overflow-y: auto;" id="adsbAircraftList">
+                                ${renderAdsbAircraftList()}
                             </div>
                         </div>
                     </div>
@@ -1129,12 +1504,351 @@ ALPHA-3 | REAR"></textarea>
                             </div>
                         </div>
                     </div>
+                    <div class="tac-panel" style="grid-column: 1 / -1;">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Meshtastic (LoRa 915 MHz)</span>
+                            <button class="tac-btn tac-btn-sm ${meshtasticConnected ? 'tac-btn-danger' : 'tac-btn-primary'}" id="meshtasticBtn" onclick="connectMeshtastic()">
+                                ${meshtasticConnected ? 'DISCONNECT' : 'CONNECT'}
+                            </button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="font-family: var(--font-mono); font-size: 0.875rem; color: var(--text-muted); margin-bottom: var(--space-sm);" id="meshtasticStatus">
+                                ${meshtasticConnected ? 'CONNECTED - ' + meshtasticPort : 'DISCONNECTED'}
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md);">
+                                <div>
+                                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-xs);">NODES</div>
+                                    <div id="meshtasticNodes" style="max-height: 150px; overflow-y: auto; font-size: 0.75rem;">
+                                        <div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-xs);">MESSAGES</div>
+                                    <div id="meshtasticMessages" style="max-height: 100px; overflow-y: auto; font-size: 0.75rem; margin-bottom: var(--space-sm);">
+                                        <div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>
+                                    </div>
+                                    <div style="display: flex; gap: var(--space-xs);">
+                                        <input type="text" id="meshtasticInput" class="tac-input" placeholder="Message..." style="flex: 1; font-size: 0.75rem;" onkeypress="if(event.key==='Enter') sendMeshtasticMessage()">
+                                        <button class="tac-btn tac-btn-sm tac-btn-primary" onclick="sendMeshtasticMessage()">SEND</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
         }
         
+        function renderAdsbAircraftList() {
+            if (adsbAircraft.length === 0) {
+                return '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO AIRCRAFT</div>';
+            }
+            
+            return adsbAircraft.slice(-10).reverse().map(ac => `
+                <div style="display: flex; justify-content: space-between; padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 0.75rem;">
+                    <span style="color: var(--accent-cyan);">${ac.callsign || ac.icao}</span>
+                    <span style="color: var(--text-secondary);">${ac.altitude ? ac.altitude + 'm' : '--'}</span>
+                </div>
+            `).join('');
+        }
+        
+        function updateAdsbPanel() {
+            const countEl = document.getElementById('adsbCount');
+            const rangeEl = document.getElementById('adsbRange');
+            const listEl = document.getElementById('adsbAircraftList');
+            
+            if (countEl) countEl.textContent = adsbAircraftCount;
+            if (rangeEl) rangeEl.textContent = adsbMaxRange || '--';
+            if (listEl) listEl.innerHTML = renderAdsbAircraftList();
+        }
+        
+        function updateAdsbDisplay() {
+            // Calculate max range if we have GPS position
+            if (lastKnownLocation && adsbAircraft.length > 0) {
+                let maxRangeKm = 0;
+                adsbAircraft.forEach(ac => {
+                    if (ac.latitude && ac.longitude) {
+                        const range = calculateDistance(
+                            lastKnownLocation.lat, lastKnownLocation.lon,
+                            ac.latitude, ac.longitude
+                        );
+                        if (range > maxRangeKm) maxRangeKm = range;
+                    }
+                });
+                adsbMaxRange = Math.round(maxRangeKm);
+            }
+            
+            updateAdsbPanel();
+            
+            // Update map if visible
+            if (document.getElementById('view-map').classList.contains('active')) {
+                updateAdsbOnMap();
+            }
+        }
+        
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+        
+        let adsbMapMarkers = [];
+        
+        function updateAdsbOnMap() {
+            if (!map) return;
+            
+            // Clear old markers
+            adsbMapMarkers.forEach(marker => map.removeLayer(marker));
+            adsbMapMarkers = [];
+            
+            // Add aircraft markers
+            adsbAircraft.forEach(ac => {
+                if (ac.latitude && ac.longitude) {
+                    const icon = L.divIcon({
+                        className: 'adsb-aircraft-marker',
+                        html: `<div style="width: 16px; height: 16px; background: var(--accent-orange); border: 2px solid white; border-radius: 50%; transform: rotate(${ac.heading || 0}deg);">
+                            <div style="position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 8px solid var(--accent-orange);"></div>
+                        </div>`,
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    });
+                    
+                    const marker = L.marker([ac.latitude, ac.longitude], { icon })
+                        .addTo(map)
+                        .bindPopup(`<strong>${ac.callsign || ac.icao}</strong><br>Alt: ${ac.altitude || '--'}m<br>Spd: ${ac.speed || '--'}kt`);
+                    
+                    adsbMapMarkers.push(marker);
+                }
+            });
+        }
+        
+        async function toggleADSB() {
+            const tauriAvailable = checkTauriAvailable();
+            if (!tauriAvailable) {
+                alert('Tauri not available - cannot start ADS-B');
+                return;
+            }
+            
+            if (!adsbActive) {
+                try {
+                    const result = await window.__TAURI__.core.invoke('start_adsb');
+                    debugLog('ADS-B started: ' + result);
+                    adsbActive = true;
+                    renderSDR(); // Re-render to update button
+                } catch (e) {
+                    debugLog('Failed to start ADS-B: ' + e);
+                    alert('Failed to start ADS-B: ' + e);
+                }
+            } else {
+                try {
+                    const result = await window.__TAURI__.core.invoke('stop_adsb');
+                    debugLog('ADS-B stopped: ' + result);
+                    adsbActive = false;
+                    adsbAircraft = [];
+                    adsbAircraftCount = 0;
+                    adsbMaxRange = 0;
+                    renderSDR();
+                } catch (e) {
+                    debugLog('Failed to stop ADS-B: ' + e);
+                }
+            }
+        }
+        
         function toggleSDR(type) {
-            alert('SDR REQUIRES HARDWARE');
+            if (type === 'adsb') {
+                toggleADSB();
+            } else {
+                alert('AIS not yet implemented - requires additional SDR');
+            }
+        }
+        
+        // Meshtastic integration
+        let meshtasticConnected = false;
+        let meshtasticPort = '';
+        let meshtasticNodes = [];
+        let meshtasticMessages = [];
+        
+        async function scanMeshtasticPorts() {
+            try {
+                const ports = await window.__TAURI__.core.invoke('get_meshtastic_ports');
+                debugLog('Meshtastic ports found: ' + ports.join(', '));
+                return ports;
+            } catch (e) {
+                debugLog('Error scanning ports: ' + e);
+                return [];
+            }
+        }
+        
+        async function connectMeshtastic() {
+            if (meshtasticConnected) {
+                // Disconnect
+                try {
+                    await window.__TAURI__.core.invoke('stop_meshtastic');
+                    meshtasticConnected = false;
+                    meshtasticPort = '';
+                    debugLog('Meshtastic disconnected');
+                    updateMeshtasticUI();
+                } catch (e) {
+                    debugLog('Error disconnecting: ' + e);
+                }
+                return;
+            }
+            
+            // Scan for ports
+            const ports = await scanMeshtasticPorts();
+            
+            if (ports.length === 0) {
+                alert('No Meshtastic devices found. Please connect your device via USB.');
+                return;
+            }
+            
+            // Use first available port
+            const port = ports[0];
+            debugLog('Connecting to Meshtastic on: ' + port);
+            
+            try {
+                const result = await window.__TAURI__.core.invoke('start_meshtastic', { port });
+                debugLog(result);
+                meshtasticConnected = true;
+                meshtasticPort = port;
+                updateMeshtasticUI();
+            } catch (e) {
+                debugLog('Connection failed: ' + e);
+                alert('Failed to connect: ' + e);
+            }
+        }
+        
+        function updateMeshtasticUI() {
+            const btn = document.getElementById('meshtasticBtn');
+            const status = document.getElementById('meshtasticStatus');
+            
+            if (btn) {
+                btn.textContent = meshtasticConnected ? 'DISCONNECT' : 'CONNECT';
+                btn.className = 'tac-btn tac-btn-sm ' + (meshtasticConnected ? 'tac-btn-danger' : 'tac-btn-primary');
+            }
+            
+            if (status) {
+                status.textContent = meshtasticConnected ? 'CONNECTED - ' + meshtasticPort : 'DISCONNECTED';
+                status.style.color = meshtasticConnected ? 'var(--accent-cyan)' : 'var(--text-muted)';
+            }
+        }
+        
+        async function sendMeshtasticMessage() {
+            if (!meshtasticConnected) {
+                alert('Not connected to Meshtastic');
+                return;
+            }
+            
+            const input = document.getElementById('meshtasticInput');
+            const text = input.value.trim();
+            
+            if (!text) return;
+            
+            try {
+                await window.__TAURI__.core.invoke('send_meshtastic_message', {
+                    port: meshtasticPort,
+                    text: text,
+                    channel: 0
+                });
+                
+                // Add to local messages
+                meshtasticMessages.push({
+                    from: 'ME',
+                    text: text,
+                    timestamp: Date.now()
+                });
+                
+                input.value = '';
+                renderMeshtasticMessages();
+            } catch (e) {
+                debugLog('Send failed: ' + e);
+                alert('Failed to send: ' + e);
+            }
+        }
+        
+        function renderMeshtasticMessages() {
+            const list = document.getElementById('meshtasticMessages');
+            if (!list) return;
+            
+            if (meshtasticMessages.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO MESSAGES</div>';
+                return;
+            }
+            
+            list.innerHTML = meshtasticMessages.slice(-20).reverse().map(m => `
+                <div style="padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
+                    <div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">${m.from}</div>
+                    <div style="font-size: 0.875rem; color: var(--text-primary);">${m.text}</div>
+                </div>
+            `).join('');
+        }
+        
+        function renderMeshtasticNodes() {
+            const list = document.getElementById('meshtasticNodes');
+            if (!list) return;
+            
+            if (meshtasticNodes.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO NODES</div>';
+                return;
+            }
+            
+            list.innerHTML = meshtasticNodes.map(n => `
+                <div style="display: flex; justify-content: space-between; padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle);">
+                    <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-cyan);">${n.short_name}</span>
+                    <span style="font-size: 0.75rem; color: var(--text-secondary);">${n.long_name}</span>
+                </div>
+            `).join('');
+        }
+        
+        // Meshtastic event listeners
+        function setupMeshtasticListeners() {
+            const tauriListen = getTauriListener();
+            if (!tauriListen) return;
+            
+            tauriListen('meshtastic-status', (event) => {
+                debugLog('Meshtastic status: ' + event.payload);
+                if (event.payload === 'connected') {
+                    meshtasticConnected = true;
+                } else if (event.payload === 'disconnected') {
+                    meshtasticConnected = false;
+                }
+                updateMeshtasticUI();
+            });
+            
+            tauriListen('meshtastic-message', (event) => {
+                const msg = event.payload;
+                debugLog('Meshtastic msg from ' + msg.from + ': ' + msg.text);
+                meshtasticMessages.push(msg);
+                renderMeshtasticMessages();
+            });
+            
+            tauriListen('meshtastic-node', (event) => {
+                const node = event.payload;
+                debugLog('Meshtastic node: ' + node.short_name);
+                
+                const existing = meshtasticNodes.findIndex(n => n.node_id === node.node_id);
+                if (existing >= 0) {
+                    meshtasticNodes[existing] = node;
+                } else {
+                    meshtasticNodes.push(node);
+                }
+                renderMeshtasticNodes();
+            });
+            
+            tauriListen('meshtastic-position', (event) => {
+                const pos = event.payload;
+                debugLog('Meshtastic position: ' + pos.latitude + ', ' + pos.longitude);
+                // Could add to map here
+            });
+            
+            tauriListen('meshtastic-error', (event) => {
+                debugLog('Meshtastic error: ' + event.payload);
+            });
         }
         
         // Entity functions
@@ -1261,15 +1975,33 @@ ALPHA-3 | REAR"></textarea>
             renderSATCOM();
             renderZones();
             
-            // Initialize GPS after a short delay to let UI render first
+            // IMMEDIATE GPS STATUS CHECK
+            if (tauriAvailable) {
+                window.__TAURI__.core.invoke('check_location_permission').then(status => {
+                    console.log('Immediate GPS status:', status);
+                    
+                    if (status === 'authorized_when_in_use' || status === 'authorized_always') {
+                        gpsPermissionState = 'granted';
+                        updateGPSStatus();
+                        // Also try to get location immediately
+                        window.__TAURI__.core.invoke('get_current_location').then(loc => {
+                            if (loc && loc[0] !== 0) {
+                                updateMyLocation(loc[0], loc[1], loc[2]);
+                            }
+                        }).catch(() => {});
+                    }
+                }).catch(e => {
+                    console.error('Immediate GPS check failed:', e);
+                });
+            }
+            
+            // Initialize map immediately so GPS can show location
             setTimeout(() => {
-                try {
-                    initGPS();
-                } catch (e) {
-                    console.error('GPS init error:', e);
-                    document.getElementById('statusText').textContent = 'GPS ERROR';
-                }
+                initMap();
+                debugLog('Map initialized');
             }, 100);
+            
+            debugLog('App initialized, waiting for Tauri...');
             
             console.log('Overwatch v0.2.0 - Tactical UI Loaded');
         } catch (e) {
