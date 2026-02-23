@@ -804,16 +804,13 @@ ALPHA-3 | REAR"></textarea>
                 if (!cesiumViewer) {
                     debugLog('Creating Cesium viewer...');
                     try {
-                        // Use simplest possible Cesium setup with built-in imagery
+                        // Use Cesium's default imagery (should always work)
                         cesiumViewer = new Cesium.Viewer('cesiumContainer', {
-                            // Use OpenStreetMap - free, no API key, good detail
-                            imageryProvider: new Cesium.OpenStreetMapImageryProvider({
-                                url: 'https://a.tile.openstreetmap.org/'
-                            }),
-                            baseLayerPicker: false,
+                            terrain: Cesium.Terrain.fromWorldTerrain(),
+                            baseLayerPicker: true, // Let user pick imagery
                             geocoder: false,
-                            homeButton: false,
-                            sceneModePicker: false,
+                            homeButton: true,
+                            sceneModePicker: true,
                             navigationHelpButton: false,
                             animation: false,
                             timeline: false,
@@ -831,18 +828,18 @@ ALPHA-3 | REAR"></textarea>
                 const targetLon = lastKnownLocation ? lastKnownLocation.lon : -98.5795;
                 debugLog('Target: ' + targetLat + ', ' + targetLon);
                 
-                // Use flyTo for smooth animation to location
+                // Use flyTo for smooth animation to location - start closer
                 try {
                     cesiumViewer.camera.flyTo({
-                        destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 5000),
+                        destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 2000), // 2km up for detail
                         orientation: {
                             heading: 0.0,
                             pitch: -Cesium.Math.PI_OVER_FOUR,
                             roll: 0.0
                         },
-                        duration: 3
+                        duration: 2
                     });
-                    debugLog('Camera flyTo called');
+                    debugLog('Camera flyTo called at 2km altitude');
                 } catch (e) {
                     debugLog('ERROR in flyTo: ' + e.message);
                 }
