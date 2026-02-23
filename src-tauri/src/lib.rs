@@ -1,7 +1,8 @@
 use tauri::{Manager, Emitter};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
@@ -643,6 +644,49 @@ fn meshtastic_cli_start_listen(_app_handle: tauri::AppHandle, _port: String) -> 
 // RTL-SDR / ADS-B State
 static RTL_SDR_STATE: Mutex<Option<bool>> = Mutex::new(None);
 
+// Aircraft database with TTL cleanup (like Intercept's DataStore)
+use std::collections::HashMap;
+use std::time::{Instant, Duration};
+
+#[derive(Clone, Debug)]
+struct Aircraft {
+    icao: String,
+    callsign: Option<String>,
+    registration: Option<String>,
+    aircraft_type: Option<String>,
+    altitude: Option<i32>,
+    speed: Option<i32>,
+    heading: Option<i32>,
+    vertical_rate: Option<i32>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    squawk: Option<String>,
+    last_seen: Instant,
+}
+
+impl Aircraft {
+    fn new(icao: String) -> Self {
+        Aircraft {
+            icao,
+            callsign: None,
+            registration: None,
+            aircraft_type: None,
+            altitude: None,
+            speed: None,
+            heading: None,
+            vertical_rate: None,
+            latitude: None,
+            longitude: None,
+            squawk: None,
+            last_seen: Instant::now(),
+        }
+    }
+    
+    fn is_stale(&self) -> bool {
+        self.last_seen.elapsed() > Duration::from_secs(60)
+    }
+}
+
 // Debug logging helper
 fn debug_log(msg: &str) {
     eprintln!("[DEBUG] {}", msg);
@@ -657,34 +701,63 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
     
     *state = Some(true);
     
-    // Start dump1090 in net-only mode (no ncurses)
+    // Aircraft database - shared between threads
+    let aircraft_cache: Arc<Mutex<HashMap<String, Aircraft>>> = Arc::new(Mutex::new(HashMap::new()));
+    
+    // Emergency squawks (like Intercept)
+    let emergency_squawks: HashMap<&str, &str> = [
+        ("7700", "General Emergency"),
+        ("7600", "Radio Failure"),
+        ("7500", "Hijack"),
+    ].iter().cloned().collect();
+    
     thread::spawn(move || {
-        let mut child = Command::new("/opt/homebrew/bin/dump1090")
+        debug_log("[RTL-SDR] Starting dump1090...");
+        
+        let child_result = Command::new("/opt/homebrew/bin/dump1090")
             .args(&["--net", "--net-sbs-port", "30003", "--quiet"])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
-            .spawn()
-            .expect("Failed to start dump1090");
+            .spawn();
         
-        // Give dump1090 time to start
+        let mut child = match child_result {
+            Ok(c) => {
+                debug_log(&format!("[RTL-SDR] dump1090 started, PID: {:?}", c.id()));
+                c
+            }
+            Err(e) => {
+                let _ = app_handle.emit("rtl-sdr-error", format!("Failed to start dump1090: {}", e));
+                return;
+            }
+        };
+        
         thread::sleep(Duration::from_secs(2));
-        
-        let _ = app_handle.emit("rtl-sdr-status", "RTL-SDR scanning 1090 MHz - waiting for aircraft...");
+        let _ = app_handle.emit("rtl-sdr-status", "RTL-SDR scanning 1090 MHz - connecting...");
         
         // Connect to SBS output port
         use std::net::TcpStream;
         use std::io::Read;
-        use std::time::Duration;
+        
+        let addr = match "127.0.0.1:30003".parse() {
+            Ok(a) => a,
+            Err(e) => {
+                let _ = app_handle.emit("rtl-sdr-error", format!("Invalid address: {}", e));
+                return;
+            }
+        };
         
         let mut retry_count = 0;
         let stream = loop {
-            match TcpStream::connect_timeout(&"127.0.0.1:30003".parse().unwrap(), Duration::from_secs(2)) {
-                Ok(s) => break s,
+            match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
+                Ok(s) => {
+                    debug_log(&format!("[RTL-SDR] Connected on attempt {}", retry_count + 1));
+                    break s;
+                }
                 Err(e) => {
                     retry_count += 1;
-                    let _ = app_handle.emit("rtl-sdr-status", format!("Connection attempt {}: {}", retry_count, e));
+                    let _ = app_handle.emit("rtl-sdr-status", format!("Connection attempt {}: {:?}", retry_count, e));
                     if retry_count > 10 {
-                        let _ = app_handle.emit("rtl-sdr-status", "Failed to connect to dump1090 after 10 retries");
+                        let _ = app_handle.emit("rtl-sdr-error", "Failed to connect after 10 retries");
                         return;
                     }
                     thread::sleep(Duration::from_millis(500));
@@ -694,37 +767,159 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
         
         let _ = app_handle.emit("rtl-sdr-status", "Connected - receiving aircraft data");
         
-        // Read SBS format messages
+        // Read SBS format messages (like Intercept)
         let mut reader = BufReader::new(stream);
-        let mut line = String::new();
+        let mut buffer = String::new();
+        let mut last_broadcast = Instant::now();
+        let broadcast_interval = Duration::from_millis(500); // Update every 500ms
         
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
+            buffer.clear();
+            match reader.read_line(&mut buffer) {
                 Ok(0) => break, // EOF
                 Ok(_) => {
-                    // Parse SBS format: MSG,3,1,1,ICAO,1,2025/02/23,12:00:00.000,2025/02/23,12:00:00.000,Callsign,Alt,Speed,Track,Lat,Lon,...
-                    let parts: Vec<&str> = line.trim().split(',').collect();
-                    if parts.len() >= 15 && parts[0] == "MSG" {
-                        let icao = parts[4].to_string();
-                        let callsign = parts[10].trim().to_string();
-                        let alt = parts[11].parse::<i32>().unwrap_or(0);
-                        let speed = parts[12].parse::<i32>().unwrap_or(0);
-                        let track = parts[13].parse::<i32>().unwrap_or(0);
-                        let lat = parts[14].parse::<f64>().unwrap_or(0.0);
-                        let lon = parts[15].parse::<f64>().unwrap_or(0.0);
+                    let line = buffer.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    
+                    // Parse SBS format: MSG,type,1,1,ICAO,1,date,time,logged_date,logged_time,callsign,alt,speed,track,lat,lon,...
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() < 11 || parts[0] != "MSG" {
+                        continue;
+                    }
+                    
+                    let msg_type = parts[1];
+                    let icao = parts[4].to_uppercase();
+                    if icao.is_empty() {
+                        continue;
+                    }
+                    
+                    // Get or create aircraft entry
+                    let mut db = aircraft_cache.lock().unwrap();
+                    let aircraft = db.entry(icao.clone()).or_insert_with(|| Aircraft::new(icao.clone()));
+                    aircraft.last_seen = Instant::now();
+                    
+                    // Parse different message types (like Intercept)
+                    match msg_type {
+                        "1" => {
+                            // MSG,1 - Callsign
+                            if parts.len() > 10 {
+                                let callsign = parts[10].trim();
+                                if !callsign.is_empty() {
+                                    aircraft.callsign = Some(callsign.to_string());
+                                }
+                            }
+                        }
+                        "3" => {
+                            // MSG,3 - Position + Altitude
+                            if parts.len() > 15 {
+                                if let Ok(alt) = parts[11].parse::<i32>() {
+                                    aircraft.altitude = Some(alt);
+                                }
+                                if let Ok(lat) = parts[14].parse::<f64>() {
+                                    aircraft.latitude = Some(lat);
+                                }
+                                if let Ok(lon) = parts[15].parse::<f64>() {
+                                    aircraft.longitude = Some(lon);
+                                }
+                            }
+                        }
+                        "4" => {
+                            // MSG,4 - Speed + Heading + Vertical Rate
+                            if parts.len() > 16 {
+                                if let Ok(speed) = parts[12].parse::<i32>() {
+                                    aircraft.speed = Some(speed);
+                                }
+                                if let Ok(heading) = parts[13].parse::<i32>() {
+                                    aircraft.heading = Some(heading);
+                                }
+                                if let Ok(vr) = parts[16].parse::<i32>() {
+                                    aircraft.vertical_rate = Some(vr);
+                                    // Vertical rate anomaly detection (like Intercept)
+                                    if vr.abs() > 4000 {
+                                        let _ = app_handle.emit("rtl-sdr-alert", json!({
+                                            "type": "vertical_rate_anomaly",
+                                            "icao": aircraft.icao,
+                                            "callsign": aircraft.callsign,
+                                            "vertical_rate": vr
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                        "5" => {
+                            // MSG,5 - Ground position + Altitude
+                            if parts.len() > 11 {
+                                if parts.len() > 10 {
+                                    let callsign = parts[10].trim();
+                                    if !callsign.is_empty() {
+                                        aircraft.callsign = Some(callsign.to_string());
+                                    }
+                                }
+                                if let Ok(alt) = parts[11].parse::<i32>() {
+                                    aircraft.altitude = Some(alt);
+                                }
+                            }
+                        }
+                        "6" => {
+                            // MSG,6 - Squawk (transponder code)
+                            if parts.len() > 17 {
+                                let squawk = parts[17].trim();
+                                if !squawk.is_empty() {
+                                    aircraft.squawk = Some(squawk.to_string());
+                                    // Emergency squawk detection (like Intercept)
+                                    if let Some(&meaning) = emergency_squawks.get(squawk) {
+                                        let _ = app_handle.emit("rtl-sdr-alert", json!({
+                                            "type": "emergency_squawk",
+                                            "icao": aircraft.icao,
+                                            "callsign": aircraft.callsign,
+                                            "squawk": squawk,
+                                            "meaning": meaning
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    
+                    drop(db); // Release lock
+                    
+                    // Broadcast updates periodically (not on every message)
+                    if last_broadcast.elapsed() >= broadcast_interval {
+                        last_broadcast = Instant::now();
                         
-                        let aircraft = json!({
-                            "icao": icao,
-                            "callsign": callsign,
-                            "altitude": alt,
-                            "speed": speed,
-                            "heading": track,
-                            "latitude": lat,
-                            "longitude": lon
-                        });
+                        // Clean up stale aircraft (like Intercept's DataStore)
+                        let mut db = aircraft_cache.lock().unwrap();
+                        let stale_icaos: Vec<String> = db.iter()
+                            .filter(|(_, ac)| ac.is_stale())
+                            .map(|(icao, _)| icao.clone())
+                            .collect();
+                        for icao in stale_icaos {
+                            db.remove(&icao);
+                            let _ = app_handle.emit("rtl-sdr-removed", json!({"icao": icao}));
+                        }
                         
-                        let _ = app_handle.emit("rtl-sdr-aircraft", aircraft);
+                        // Broadcast all active aircraft
+                        for (_, aircraft) in db.iter() {
+                            let _ = app_handle.emit("rtl-sdr-aircraft", json!({
+                                "icao": aircraft.icao,
+                                "callsign": aircraft.callsign,
+                                "altitude": aircraft.altitude,
+                                "speed": aircraft.speed,
+                                "heading": aircraft.heading,
+                                "vertical_rate": aircraft.vertical_rate,
+                                "latitude": aircraft.latitude,
+                                "longitude": aircraft.longitude,
+                                "squawk": aircraft.squawk
+                            }));
+                        }
+                        
+                        // Emit count update
+                        let count = db.len();
+                        let _ = app_handle.emit("rtl-sdr-count", json!({"count": count}));
+                        drop(db);
                     }
                 }
                 Err(e) => {
@@ -735,6 +930,7 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
         }
         
         let _ = child.wait();
+        debug_log("[RTL-SDR] dump1090 stopped");
     });
     
     Ok("RTL-SDR started - scanning 1090 MHz for aircraft".to_string())

@@ -1064,43 +1064,98 @@ ALPHA-3 | REAR"></textarea>
                         updateAdsbDisplay();
                     });
 
-                    // RTL-SDR real aircraft listeners
+                    // RTL-SDR real aircraft listeners (Intercept-style)
                     tauriListen('rtl-sdr-status', (event) => {
                         debugLog('RTL-SDR: ' + event.payload);
                     });
 
+                    tauriListen('rtl-sdr-error', (event) => {
+                        debugLog('RTL-SDR Error: ' + event.payload);
+                    });
+
+                    // Aircraft count updates
+                    tauriListen('rtl-sdr-count', (event) => {
+                        const data = event.payload;
+                        adsbAircraftCount = data.count;
+                        document.getElementById('adsbCount').textContent = adsbAircraftCount;
+                        debugLog('Active aircraft: ' + adsbAircraftCount);
+                    });
+
+                    // Aircraft removed (stale cleanup like Intercept)
+                    tauriListen('rtl-sdr-removed', (event) => {
+                        const data = event.payload;
+                        const icao = data.icao;
+                        
+                        // Remove from array
+                        adsbAircraft = adsbAircraft.filter(a => a.icao !== icao);
+                        
+                        // Remove from map
+                        if (aircraftMarkers[icao]) {
+                            map.removeLayer(aircraftMarkers[icao]);
+                            delete aircraftMarkers[icao];
+                        }
+                        
+                        debugLog('Removed stale aircraft: ' + icao);
+                        updateAdsbDisplay();
+                    });
+
+                    // Emergency alerts (7700, 7600, 7500 like Intercept)
+                    tauriListen('rtl-sdr-alert', (event) => {
+                        const alert = event.payload;
+                        
+                        if (alert.type === 'emergency_squawk') {
+                            const msg = `🚨 EMERGENCY: ${alert.callsign || alert.icao} - Squawk ${alert.squawk} (${alert.meaning})`;
+                            debugLog(msg);
+                            // Flash the alert
+                            showPriorityAlert(msg, 'FLASH');
+                        } else if (alert.type === 'vertical_rate_anomaly') {
+                            debugLog(`⚠️ High vertical rate: ${alert.callsign || alert.icao} - ${alert.vertical_rate} fpm`);
+                        }
+                    });
+
+                    // Aircraft updates (all MSG types like Intercept)
                     tauriListen('rtl-sdr-aircraft', (event) => {
                         const ac = event.payload;
-                        debugLog('Real aircraft: ' + (ac.callsign || ac.icao) + ' at ' + ac.altitude + 'ft');
-
-                        // Add to ADS-B list
-                        const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
-                        if (existing >= 0) {
-                            adsbAircraft[existing] = { ...adsbAircraft[existing], ...ac };
+                        
+                        // Find existing or create new
+                        let existing = adsbAircraft.find(a => a.icao === ac.icao);
+                        if (existing) {
+                            // Merge data (like Intercept's DataStore)
+                            if (ac.callsign) existing.callsign = ac.callsign;
+                            if (ac.altitude !== undefined && ac.altitude !== null) existing.altitude = ac.altitude;
+                            if (ac.speed !== undefined && ac.speed !== null) existing.speed = ac.speed;
+                            if (ac.heading !== undefined && ac.heading !== null) existing.heading = ac.heading;
+                            if (ac.vertical_rate !== undefined && ac.vertical_rate !== null) existing.vertical_rate = ac.vertical_rate;
+                            if (ac.latitude !== undefined && ac.latitude !== null) existing.latitude = ac.latitude;
+                            if (ac.longitude !== undefined && ac.longitude !== null) existing.longitude = ac.longitude;
+                            if (ac.squawk) existing.squawk = ac.squawk;
+                            existing.last_seen = new Date();
                         } else {
+                            // New aircraft
                             adsbAircraft.push({
                                 icao: ac.icao,
-                                callsign: ac.callsign,
-                                altitude: ac.altitude,
-                                speed: ac.speed,
-                                heading: ac.heading,
-                                latitude: ac.latitude,
-                                longitude: ac.longitude,
+                                callsign: ac.callsign || null,
+                                altitude: ac.altitude !== undefined ? ac.altitude : null,
+                                speed: ac.speed !== undefined ? ac.speed : null,
+                                heading: ac.heading !== undefined ? ac.heading : null,
+                                vertical_rate: ac.vertical_rate !== undefined ? ac.vertical_rate : null,
+                                latitude: ac.latitude !== undefined ? ac.latitude : null,
+                                longitude: ac.longitude !== undefined ? ac.longitude : null,
+                                squawk: ac.squawk || null,
                                 last_seen: new Date()
                             });
                         }
 
-                        // Update UI
-                        updateAdsbDisplay();
-
-                        // Add to map if coordinates available
+                        // Update map if position available
                         if (ac.latitude && ac.longitude && ac.latitude !== 0) {
                             addAircraftToMap(ac);
                         }
-                    });
-
-                    tauriListen('rtl-sdr-error', (event) => {
-                        debugLog('RTL-SDR Error: ' + event.payload);
+                        
+                        // Update display periodically (not on every message)
+                        if (!window.lastAdsbUpdate || Date.now() - window.lastAdsbUpdate > 500) {
+                            window.lastAdsbUpdate = Date.now();
+                            updateAdsbDisplay();
+                        }
                     });
 
                     tauriListen('adsb-count', (event) => {
@@ -1651,40 +1706,128 @@ ALPHA-3 | REAR"></textarea>
         let aircraftMarkers = {}; // Store markers by ICAO
 
         function addAircraftToMap(ac) {
-            if (!map) return;
+            if (!map || !ac.latitude || !ac.longitude) return;
 
+            // Determine icon color based on altitude (like Intercept)
+            let iconColor = 'var(--accent-orange)'; // default
+            if (ac.altitude) {
+                if (ac.altitude < 1000) iconColor = '#ff4444'; // Red - low
+                else if (ac.altitude < 5000) iconColor = '#ffaa00'; // Orange - low-medium
+                else if (ac.altitude < 15000) iconColor = '#ffff00'; // Yellow - medium
+                else if (ac.altitude < 30000) iconColor = '#44ff44'; // Green - high
+                else iconColor = '#4444ff'; // Blue - very high
+            }
+
+            // Emergency squawk highlighting (7700, 7600, 7500 like Intercept)
+            let isEmergency = false;
+            if (ac.squawk) {
+                if (['7700', '7600', '7500'].includes(ac.squawk)) {
+                    isEmergency = true;
+                    iconColor = '#ff0000'; // Bright red for emergency
+                }
+            }
+
+            // Create rotated aircraft icon (like Intercept)
+            const heading = ac.heading || 0;
             const icon = L.divIcon({
                 className: 'adsb-aircraft-marker',
-                html: `<div style="width: 20px; height: 20px; background: var(--accent-orange); border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; transform: rotate(${ac.heading || 0}deg);">
-                    <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid white; position: absolute; top: -5px;"></div>
-                </div>`,
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
+                html: `
+                    <div style="
+                        width: 24px; 
+                        height: 24px; 
+                        background: ${iconColor}; 
+                        border: 2px solid ${isEmergency ? '#ff0000' : 'white'}; 
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transform: rotate(${heading}deg);
+                        box-shadow: ${isEmergency ? '0 0 10px #ff0000, 0 0 20px #ff0000' : '0 0 5px rgba(0,0,0,0.5)'};
+                        transition: all 0.3s ease;
+                    ">
+                        <div style="
+                            width: 0; 
+                            height: 0; 
+                            border-left: 6px solid transparent; 
+                            border-right: 6px solid transparent; 
+                            border-bottom: 12px solid white;
+                        "></div>
+                    </div>
+                `,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
             });
 
+            // Build detailed popup (like Intercept)
             const popupContent = `
-                <strong>${ac.callsign || ac.icao}</strong><br>
-                ICAO: ${ac.icao}<br>
-                Altitude: ${ac.altitude || '--'} ft<br>
-                Speed: ${ac.speed || '--'} kts<br>
-                Heading: ${ac.heading || '--'}°<br>
-                Position: ${ac.latitude?.toFixed(4)}, ${ac.longitude?.toFixed(4)}
+                <div style="font-family: var(--font-mono); font-size: 12px; min-width: 200px;">
+                    <div style="font-weight: bold; font-size: 14px; color: var(--accent-cyan); margin-bottom: 5px;">
+                        ${ac.callsign || 'Unknown'} ${isEmergency ? '🚨 EMERGENCY' : ''}
+                    </div>
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 5px 10px;">
+                        <span style="color: var(--text-muted);">ICAO:</span>
+                        <span>${ac.icao}</span>
+                        
+                        <span style="color: var(--text-muted);">Altitude:</span>
+                        <span>${ac.altitude !== null ? ac.altitude.toLocaleString() + ' ft' : '--'}</span>
+                        
+                        <span style="color: var(--text-muted);">Speed:</span>
+                        <span>${ac.speed !== null ? ac.speed + ' kts' : '--'}</span>
+                        
+                        <span style="color: var(--text-muted);">Heading:</span>
+                        <span>${ac.heading !== null ? ac.heading + '°' : '--'}</span>
+                        
+                        <span style="color: var(--text-muted);">Vertical:</span>
+                        <span>${ac.vertical_rate !== null ? (ac.vertical_rate > 0 ? '↗ ' : '↘ ') + Math.abs(ac.vertical_rate) + ' fpm' : '--'}</span>
+                        
+                        <span style="color: var(--text-muted);">Squawk:</span>
+                        <span style="color: ${isEmergency ? '#ff4444' : 'inherit'}; font-weight: ${isEmergency ? 'bold' : 'normal'};">
+                            ${ac.squawk || '--'} ${isEmergency ? '(EMERGENCY)' : ''}
+                        </span>
+                        
+                        <span style="color: var(--text-muted);">Position:</span>
+                        <span>${ac.latitude.toFixed(4)}, ${ac.longitude.toFixed(4)}</span>
+                    </div>
+                </div>
             `;
 
             if (aircraftMarkers[ac.icao]) {
-                // Update existing marker
-                aircraftMarkers[ac.icao].setLatLng([ac.latitude, ac.longitude]);
-                aircraftMarkers[ac.icao].setPopupContent(popupContent);
-                aircraftMarkers[ac.icao].setIcon(icon);
+                // Update existing marker with animation
+                const marker = aircraftMarkers[ac.icao];
+                marker.setLatLng([ac.latitude, ac.longitude]);
+                marker.setIcon(icon);
+                marker.setPopupContent(popupContent);
+                
+                // Update tooltip with basic info
+                marker.setTooltipContent(`${ac.callsign || ac.icao} - ${ac.altitude !== null ? ac.altitude + 'ft' : '?'}`);
             } else {
                 // Create new marker
                 const marker = L.marker([ac.latitude, ac.longitude], { icon })
                     .addTo(map)
-                    .bindPopup(popupContent);
+                    .bindPopup(popupContent)
+                    .bindTooltip(`${ac.callsign || ac.icao} - ${ac.altitude !== null ? ac.altitude + 'ft' : '?'}`, {
+                        permanent: false,
+                        direction: 'top',
+                        offset: [0, -15]
+                    });
+                
+                // Flash effect for new aircraft
+                if (!marker._flashAnimation) {
+                    marker._flashAnimation = true;
+                    marker.getElement()?.animate([
+                        { transform: 'scale(1)', opacity: 1 },
+                        { transform: 'scale(1.5)', opacity: 0.5 },
+                        { transform: 'scale(1)', opacity: 1 }
+                    ], {
+                        duration: 500,
+                        iterations: 2
+                    });
+                }
+                
                 aircraftMarkers[ac.icao] = marker;
             }
 
-            // Update aircraft count
+            // Update aircraft count display
             document.getElementById('adsbCount').textContent = Object.keys(aircraftMarkers).length;
         }
 
