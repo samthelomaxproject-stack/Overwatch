@@ -652,40 +652,77 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
     
     *state = Some(true);
     
-    // Start dump1090 with proper environment
+    // Start dump1090 in net-only mode (no ncurses)
     thread::spawn(move || {
         let mut child = Command::new("/opt/homebrew/bin/dump1090")
-            .args(&["--interactive", "--net"])
-            .env("TERM", "xterm-256color")
-            .stdout(Stdio::piped())
+            .args(&["--net", "--net-sbs-port", "30003", "--quiet"])
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
             .expect("Failed to start dump1090");
         
-        let _ = app_handle.emit("rtl-sdr-status", "RTL-SDR initialized - waiting for aircraft");
+        // Give dump1090 time to start
+        thread::sleep(Duration::from_secs(2));
         
-        // Read output line by line
-        if let Some(stdout) = child.stdout.take() {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    // Parse aircraft from dump1090 output
-                    if line.contains("Hex") && !line.contains("Flight") {
-                        // Parse aircraft line
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            let icao = parts[0].to_string();
-                            let _ = app_handle.emit("rtl-sdr-aircraft", json!({
-                                "icao": icao,
-                                "raw_line": line
-                            }));
-                        }
+        let _ = app_handle.emit("rtl-sdr-status", "RTL-SDR scanning 1090 MHz - waiting for aircraft...");
+        
+        // Connect to SBS output port
+        use std::net::TcpStream;
+        use std::io::Read;
+        
+        let mut retry_count = 0;
+        let stream = loop {
+            match TcpStream::connect("127.0.0.1:30003") {
+                Ok(s) => break s,
+                Err(e) => {
+                    retry_count += 1;
+                    if retry_count > 10 {
+                        let _ = app_handle.emit("rtl-sdr-status", "Failed to connect to dump1090");
+                        return;
                     }
-                    
-                    // Check for aircraft detection
-                    if line.len() > 20 && line.chars().next().map(|c| c.is_ascii_hexdigit()).unwrap_or(false) {
-                        let _ = app_handle.emit("rtl-sdr-detected", line);
+                    thread::sleep(Duration::from_millis(500));
+                }
+            }
+        };
+        
+        let _ = app_handle.emit("rtl-sdr-status", "Connected - receiving aircraft data");
+        
+        // Read SBS format messages
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    // Parse SBS format: MSG,3,1,1,ICAO,1,2025/02/23,12:00:00.000,2025/02/23,12:00:00.000,Callsign,Alt,Speed,Track,Lat,Lon,...
+                    let parts: Vec<&str> = line.trim().split(',').collect();
+                    if parts.len() >= 15 && parts[0] == "MSG" {
+                        let icao = parts[4].to_string();
+                        let callsign = parts[10].trim().to_string();
+                        let alt = parts[11].parse::<i32>().unwrap_or(0);
+                        let speed = parts[12].parse::<i32>().unwrap_or(0);
+                        let track = parts[13].parse::<i32>().unwrap_or(0);
+                        let lat = parts[14].parse::<f64>().unwrap_or(0.0);
+                        let lon = parts[15].parse::<f64>().unwrap_or(0.0);
+                        
+                        let aircraft = json!({
+                            "icao": icao,
+                            "callsign": callsign,
+                            "altitude": alt,
+                            "speed": speed,
+                            "heading": track,
+                            "latitude": lat,
+                            "longitude": lon
+                        });
+                        
+                        let _ = app_handle.emit("rtl-sdr-aircraft", aircraft);
                     }
+                }
+                Err(e) => {
+                    let _ = app_handle.emit("rtl-sdr-error", format!("Read error: {}", e));
+                    break;
                 }
             }
         }
@@ -693,7 +730,7 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
         let _ = child.wait();
     });
     
-    Ok("RTL-SDR started - looking for aircraft on 1090 MHz".to_string())
+    Ok("RTL-SDR started - scanning 1090 MHz for aircraft".to_string())
 }
 
 #[tauri::command]

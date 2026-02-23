@@ -1064,6 +1064,45 @@ ALPHA-3 | REAR"></textarea>
                         updateAdsbDisplay();
                     });
 
+                    // RTL-SDR real aircraft listeners
+                    tauriListen('rtl-sdr-status', (event) => {
+                        debugLog('RTL-SDR: ' + event.payload);
+                    });
+
+                    tauriListen('rtl-sdr-aircraft', (event) => {
+                        const ac = event.payload;
+                        debugLog('Real aircraft: ' + (ac.callsign || ac.icao) + ' at ' + ac.altitude + 'ft');
+
+                        // Add to ADS-B list
+                        const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
+                        if (existing >= 0) {
+                            adsbAircraft[existing] = { ...adsbAircraft[existing], ...ac };
+                        } else {
+                            adsbAircraft.push({
+                                icao: ac.icao,
+                                callsign: ac.callsign,
+                                altitude: ac.altitude,
+                                speed: ac.speed,
+                                heading: ac.heading,
+                                latitude: ac.latitude,
+                                longitude: ac.longitude,
+                                last_seen: new Date()
+                            });
+                        }
+
+                        // Update UI
+                        updateAdsbDisplay();
+
+                        // Add to map if coordinates available
+                        if (ac.latitude && ac.longitude && ac.latitude !== 0) {
+                            addAircraftToMap(ac);
+                        }
+                    });
+
+                    tauriListen('rtl-sdr-error', (event) => {
+                        debugLog('RTL-SDR Error: ' + event.payload);
+                    });
+
                     tauriListen('adsb-count', (event) => {
                         adsbAircraftCount = event.payload;
                         debugLog('ADS-B count: ' + adsbAircraftCount);
@@ -1609,6 +1648,45 @@ ALPHA-3 | REAR"></textarea>
         }
 
         let adsbMapMarkers = [];
+        let aircraftMarkers = {}; // Store markers by ICAO
+
+        function addAircraftToMap(ac) {
+            if (!map) return;
+
+            const icon = L.divIcon({
+                className: 'adsb-aircraft-marker',
+                html: `<div style="width: 20px; height: 20px; background: var(--accent-orange); border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; transform: rotate(${ac.heading || 0}deg);">
+                    <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid white; position: absolute; top: -5px;"></div>
+                </div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+
+            const popupContent = `
+                <strong>${ac.callsign || ac.icao}</strong><br>
+                ICAO: ${ac.icao}<br>
+                Altitude: ${ac.altitude || '--'} ft<br>
+                Speed: ${ac.speed || '--'} kts<br>
+                Heading: ${ac.heading || '--'}°<br>
+                Position: ${ac.latitude?.toFixed(4)}, ${ac.longitude?.toFixed(4)}
+            `;
+
+            if (aircraftMarkers[ac.icao]) {
+                // Update existing marker
+                aircraftMarkers[ac.icao].setLatLng([ac.latitude, ac.longitude]);
+                aircraftMarkers[ac.icao].setPopupContent(popupContent);
+                aircraftMarkers[ac.icao].setIcon(icon);
+            } else {
+                // Create new marker
+                const marker = L.marker([ac.latitude, ac.longitude], { icon })
+                    .addTo(map)
+                    .bindPopup(popupContent);
+                aircraftMarkers[ac.icao] = marker;
+            }
+
+            // Update aircraft count
+            document.getElementById('adsbCount').textContent = Object.keys(aircraftMarkers).length;
+        }
 
         function updateAdsbOnMap() {
             if (!map) return;
@@ -1647,25 +1725,28 @@ ALPHA-3 | REAR"></textarea>
 
             if (!adsbActive) {
                 try {
-                    const result = await window.__TAURI__.core.invoke('start_adsb');
-                    debugLog('ADS-B started: ' + result);
+                    const result = await window.__TAURI__.core.invoke('start_rtl_sdr');
+                    debugLog('RTL-SDR started: ' + result);
                     adsbActive = true;
                     renderSDR(); // Re-render to update button
                 } catch (e) {
-                    debugLog('Failed to start ADS-B: ' + e);
-                    alert('Failed to start ADS-B: ' + e);
+                    debugLog('Failed to start RTL-SDR: ' + e);
+                    alert('Failed to start RTL-SDR: ' + e);
                 }
             } else {
                 try {
-                    const result = await window.__TAURI__.core.invoke('stop_adsb');
-                    debugLog('ADS-B stopped: ' + result);
+                    const result = await window.__TAURI__.core.invoke('stop_rtl_sdr');
+                    debugLog('RTL-SDR stopped: ' + result);
                     adsbActive = false;
                     adsbAircraft = [];
                     adsbAircraftCount = 0;
                     adsbMaxRange = 0;
+                    // Clear aircraft from map
+                    Object.values(aircraftMarkers).forEach(m => { if(map) map.removeLayer(m); });
+                    aircraftMarkers = {};
                     renderSDR();
                 } catch (e) {
-                    debugLog('Failed to stop ADS-B: ' + e);
+                    debugLog('Failed to stop RTL-SDR: ' + e);
                 }
             }
         }
