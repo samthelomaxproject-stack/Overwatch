@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
+use serde_json::json;
 
 // Include generated protobuf code
 pub mod meshtastic_proto {
@@ -573,6 +574,36 @@ use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 
 #[tauri::command]
+fn meshtastic_cli_test_tcp(host: String) -> Result<String, String> {
+    let output = Command::new(MESHTASTIC_CLI_PATH)
+        .args(&["--host", &host, "--info"])
+        .output()
+        .map_err(|e| format!("Failed to run meshtastic CLI: {}", e))?;
+    
+    if !output.status.success() {
+        return Err(format!("meshtastic CLI failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[tauri::command]
+fn meshtastic_cli_send_tcp(host: String, text: String) -> Result<String, String> {
+    let output = Command::new(MESHTASTIC_CLI_PATH)
+        .args(&["--host", &host, "--sendtext", &text])
+        .output()
+        .map_err(|e| format!("Failed to run meshtastic CLI: {}", e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!("Failed to send. Stderr: {} | Stdout: {}", stderr, stdout));
+    }
+    
+    Ok(format!("Message sent: {}", text))
+}
+
+#[tauri::command]
 fn meshtastic_cli_test(port: String) -> Result<String, String> {
     let output = Command::new(MESHTASTIC_CLI_PATH)
         .args(&["--port", &port, "--info"])
@@ -607,6 +638,75 @@ fn meshtastic_cli_start_listen(_app_handle: tauri::AppHandle, _port: String) -> 
     // Note: --listen blocks the port, so we skip it for now
     // Messages will be polled separately if needed
     Ok("Listening disabled to allow sending".to_string())
+}
+
+// RTL-SDR / ADS-B State
+static RTL_SDR_STATE: Mutex<Option<bool>> = Mutex::new(None);
+
+#[tauri::command]
+fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let mut state = RTL_SDR_STATE.lock().unwrap();
+    if *state == Some(true) {
+        return Err("RTL-SDR already running".to_string());
+    }
+    
+    *state = Some(true);
+    
+    // Start dump1090 with proper environment
+    thread::spawn(move || {
+        let mut child = Command::new("/opt/homebrew/bin/dump1090")
+            .args(&["--interactive", "--net"])
+            .env("TERM", "xterm-256color")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to start dump1090");
+        
+        let _ = app_handle.emit("rtl-sdr-status", "RTL-SDR initialized - waiting for aircraft");
+        
+        // Read output line by line
+        if let Some(stdout) = child.stdout.take() {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    // Parse aircraft from dump1090 output
+                    if line.contains("Hex") && !line.contains("Flight") {
+                        // Parse aircraft line
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            let icao = parts[0].to_string();
+                            let _ = app_handle.emit("rtl-sdr-aircraft", json!({
+                                "icao": icao,
+                                "raw_line": line
+                            }));
+                        }
+                    }
+                    
+                    // Check for aircraft detection
+                    if line.len() > 20 && line.chars().next().map(|c| c.is_ascii_hexdigit()).unwrap_or(false) {
+                        let _ = app_handle.emit("rtl-sdr-detected", line);
+                    }
+                }
+            }
+        }
+        
+        let _ = child.wait();
+    });
+    
+    Ok("RTL-SDR started - looking for aircraft on 1090 MHz".to_string())
+}
+
+#[tauri::command]
+fn stop_rtl_sdr() -> Result<String, String> {
+    let mut state = RTL_SDR_STATE.lock().unwrap();
+    *state = Some(false);
+    
+    // Kill dump1090
+    let _ = Command::new("pkill")
+        .args(&["-9", "dump1090"])
+        .output();
+    
+    Ok("RTL-SDR stopped".to_string())
 }
 
     tauri::Builder::default()
@@ -653,7 +753,9 @@ fn meshtastic_cli_start_listen(_app_handle: tauri::AppHandle, _port: String) -> 
             get_meshtastic_messages,
             meshtastic_cli_test,
             meshtastic_cli_send,
-            meshtastic_cli_start_listen
+            meshtastic_cli_start_listen,
+            start_rtl_sdr,
+            stop_rtl_sdr
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
