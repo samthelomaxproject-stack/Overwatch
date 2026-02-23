@@ -3,6 +3,8 @@ use std::thread;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader};
 
 // Location state shared between threads
 #[derive(Clone, Copy, Default, Debug)]
@@ -116,6 +118,219 @@ mod macos_location {
     pub fn get_current_location() -> Option<(f64, f64, f64)> { None }
 }
 
+// ADS-B Module for RTL-SDR integration
+mod adsb {
+    use super::*;
+    use serde::Serialize;
+    
+    #[derive(Clone, Debug, Serialize)]
+    pub struct Aircraft {
+        pub icao: String,
+        pub callsign: Option<String>,
+        pub latitude: Option<f64>,
+        pub longitude: Option<f64>,
+        pub altitude: Option<u32>,
+        pub speed: Option<u32>,
+        pub heading: Option<u32>,
+        pub vertical_rate: Option<i32>,
+        #[serde(skip)]
+        pub last_seen: std::time::Instant,
+    }
+    
+    pub struct AdsbState {
+        pub aircraft: Arc<Mutex<Vec<Aircraft>>>,
+        pub is_running: AtomicBool,
+    }
+    
+    impl AdsbState {
+        pub fn new() -> Self {
+            Self {
+                aircraft: Arc::new(Mutex::new(Vec::new())),
+                is_running: AtomicBool::new(false),
+            }
+        }
+    }
+    
+    // Try to start dump1090 and parse output
+    pub fn start_adsb_monitoring(app_handle: tauri::AppHandle, state: Arc<AdsbState>) {
+        if state.is_running.load(Ordering::SeqCst) {
+            eprintln!("ADS-B already running");
+            return;
+        }
+        
+        state.is_running.store(true, Ordering::SeqCst);
+        let aircraft = state.aircraft.clone();
+        let state_clone = state.clone();
+        
+        thread::spawn(move || {
+            eprintln!("Starting ADS-B monitoring...");
+            
+            // Try to find dump1090 in common locations
+            let dump1090_paths = [
+                "/opt/homebrew/bin/dump1090",
+                "/usr/local/bin/dump1090",
+                "dump1090",
+                "./dump1090",
+            ];
+            
+            let mut dump1090_cmd: Option<Command> = None;
+            
+            for path in &dump1090_paths {
+                if std::path::Path::new(path).exists() || Command::new("which").arg(path).output().map(|o| o.status.success()).unwrap_or(false) {
+                    let mut cmd = Command::new(path);
+                    cmd.arg("--net")
+                       .arg("--interactive")
+                       .arg("--metric")
+                       .stdout(Stdio::piped())
+                       .stderr(Stdio::piped());
+                    dump1090_cmd = Some(cmd);
+                    eprintln!("Found dump1090 at: {}", path);
+                    break;
+                }
+            }
+            
+            if let Some(mut cmd) = dump1090_cmd {
+                match cmd.spawn() {
+                    Ok(mut child) => {
+                        eprintln!("dump1090 started successfully");
+                        
+                        if let Some(stdout) = child.stdout.take() {
+                            let reader = BufReader::new(stdout);
+                            
+                            for line in reader.lines() {
+                                if !state_clone.is_running.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                
+                                if let Ok(line) = line {
+                                    // Parse aircraft data from dump1090 output
+                                    // Example: Hex     Mode  Sqwk  Flight   Alt    Spd  Hdg  Lat      Long     Sig  Msgs   Ti|
+                                    if let Some(new_aircraft) = parse_dump1090_line(&line) {
+                                        let mut ac_list = aircraft.lock().unwrap();
+                                        
+                                        // Update or add aircraft
+                                        if let Some(existing) = ac_list.iter_mut().find(|a| a.icao == new_aircraft.icao) {
+                                            *existing = new_aircraft.clone();
+                                        } else {
+                                            ac_list.push(new_aircraft.clone());
+                                        }
+                                        
+                                        // Emit to JavaScript
+                                        let _ = app_handle.emit("adsb-aircraft", new_aircraft.clone());
+                                        
+                                        // Emit aircraft count
+                                        let count = ac_list.len();
+                                        let _ = app_handle.emit("adsb-count", count);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Cleanup
+                        let _ = child.kill();
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to start dump1090: {}", e);
+                        // Emit error to JavaScript
+                        let _ = app_handle.emit("adsb-error", format!("Failed to start dump1090: {}", e));
+                    }
+                }
+            } else {
+                eprintln!("dump1090 not found, running in simulation mode");
+                
+                // Simulation mode for testing
+                let mut counter = 0;
+                while state_clone.is_running.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_secs(2));
+                    counter += 1;
+                    
+                    // Simulate aircraft
+                    if counter % 3 == 0 {
+                        let sim_aircraft = Aircraft {
+                            icao: format!("A{:04X}", counter),
+                            callsign: Some(format!("SIM{}", counter)),
+                            latitude: Some(33.18 + (counter as f64 * 0.001)),
+                            longitude: Some(-96.88 + (counter as f64 * 0.001)),
+                            altitude: Some(5000 + (counter * 100) as u32),
+                            speed: Some(250 + (counter * 10) as u32),
+                            heading: Some((counter * 45) as u32 % 360),
+                            vertical_rate: Some(0),
+                            last_seen: std::time::Instant::now(),
+                        };
+                        
+                        {
+                            let mut ac_list = aircraft.lock().unwrap();
+                            ac_list.push(sim_aircraft.clone());
+                            if ac_list.len() > 5 {
+                                ac_list.remove(0);
+                            }
+                        }
+                        
+                        let _ = app_handle.emit("adsb-aircraft", sim_aircraft.clone());
+                        let count = aircraft.lock().unwrap().len();
+                        let _ = app_handle.emit("adsb-count", count);
+                        eprintln!("Simulated aircraft: {} (count: {})", sim_aircraft.icao, count);
+                    }
+                }
+            }
+            
+            state.is_running.store(false, Ordering::SeqCst);
+            eprintln!("ADS-B monitoring stopped");
+        });
+    }
+    
+    fn parse_dump1090_line(line: &str) -> Option<Aircraft> {
+        // Basic parsing - dump1090 output varies by version
+        // This is a simplified parser
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        
+        if parts.len() >= 2 && parts[0].starts_with("Hex") == false {
+            // Try to extract hex code (ICAO)
+            let icao = parts[0].to_string();
+            
+            // Look for flight number
+            let callsign = parts.iter().find(|&&p| p.len() >= 3 && p.chars().all(|c| c.is_alphanumeric())).map(|&s| s.to_string());
+            
+            // Look for altitude (numbers followed by 'm' or just numbers)
+            let altitude = parts.iter().find_map(|&p| {
+                if let Ok(alt) = p.parse::<u32>() {
+                    if alt > 0 && alt < 50000 { Some(alt) } else { None }
+                } else {
+                    None
+                }
+            });
+            
+            // Look for lat/lon
+            let mut latitude = None;
+            let mut longitude = None;
+            
+            for (_i, &part) in parts.iter().enumerate() {
+                if let Ok(val) = part.parse::<f64>() {
+                    if val.abs() < 90.0 && latitude.is_none() {
+                        latitude = Some(val);
+                    } else if val.abs() < 180.0 && longitude.is_none() && latitude.is_some() {
+                        longitude = Some(val);
+                    }
+                }
+            }
+            
+            Some(Aircraft {
+                icao,
+                callsign,
+                latitude,
+                longitude,
+                altitude,
+                speed: None,
+                heading: None,
+                vertical_rate: None,
+                last_seen: std::time::Instant::now(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
 // Update global atomic cache
 fn update_global_location(lat: f64, lon: f64, acc: f64) {
     *CURR_LAT.lock().unwrap() = lat;
@@ -182,7 +397,60 @@ fn request_location_permission() -> Result<(), String> {
     }
 }
 
+// ADS-B State
+static ADSB_STATE: Mutex<Option<Arc<adsb::AdsbState>>> = Mutex::new(None);
+
+// Tauri command to start ADS-B monitoring
+#[tauri::command]
+fn start_adsb(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let mut state_guard = ADSB_STATE.lock().unwrap();
+    
+    if state_guard.is_none() {
+        *state_guard = Some(Arc::new(adsb::AdsbState::new()));
+    }
+    
+    if let Some(ref state) = *state_guard {
+        adsb::start_adsb_monitoring(app_handle, state.clone());
+        Ok("ADS-B monitoring started".to_string())
+    } else {
+        Err("Failed to initialize ADS-B state".to_string())
+    }
+}
+
+// Tauri command to stop ADS-B monitoring
+#[tauri::command]
+fn stop_adsb() -> Result<String, String> {
+    let state_guard = ADSB_STATE.lock().unwrap();
+    
+    if let Some(ref state) = *state_guard {
+        state.is_running.store(false, Ordering::SeqCst);
+        Ok("ADS-B monitoring stopped".to_string())
+    } else {
+        Ok("ADS-B was not running".to_string())
+    }
+}
+
+// Tauri command to get ADS-B aircraft list
+#[tauri::command]
+fn get_adsb_aircraft() -> Result<Vec<String>, String> {
+    let state_guard = ADSB_STATE.lock().unwrap();
+    
+    if let Some(ref state) = *state_guard {
+        let aircraft = state.aircraft.lock().unwrap();
+        let icaos: Vec<String> = aircraft.iter().map(|a| a.icao.clone()).collect();
+        Ok(icaos)
+    } else {
+        Ok(vec![])
+    }
+}
+
 pub fn run() {
+    // Initialize ADS-B state
+    {
+        let mut adsb_state = ADSB_STATE.lock().unwrap();
+        *adsb_state = Some(Arc::new(adsb::AdsbState::new()));
+    }
+    
     tauri::Builder::default()
         .setup(move |app| {
             #[cfg(target_os = "macos")]
@@ -214,7 +482,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_current_location,
             check_location_permission,
-            request_location_permission
+            request_location_permission,
+            start_adsb,
+            stop_adsb,
+            get_adsb_aircraft
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

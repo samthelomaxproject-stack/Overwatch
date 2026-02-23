@@ -1018,6 +1018,12 @@ ALPHA-3 | REAR"></textarea>
             }
         }
         
+        // ADS-B tracking state
+        let adsbAircraft = [];
+        let adsbActive = false;
+        let adsbAircraftCount = 0;
+        let adsbMaxRange = 0;
+        
         // Poll for Tauri availability - it might take time to inject
         let tauriCheckCount = 0;
         const tauriCheckInterval = setInterval(() => {
@@ -1047,6 +1053,26 @@ ALPHA-3 | REAR"></textarea>
                         debugLog('Permission change: ' + event.payload);
                         gpsPermissionState = event.payload ? 'granted' : 'denied';
                         updateGPSStatus();
+                    });
+                    
+                    // ADS-B listeners
+                    tauriListen('adsb-aircraft', (event) => {
+                        const aircraft = event.payload;
+                        debugLog('ADS-B aircraft: ' + aircraft.icao);
+                        adsbAircraft.push(aircraft);
+                        if (adsbAircraft.length > 50) adsbAircraft.shift();
+                        updateAdsbDisplay();
+                    });
+                    
+                    tauriListen('adsb-count', (event) => {
+                        adsbAircraftCount = event.payload;
+                        debugLog('ADS-B count: ' + adsbAircraftCount);
+                        updateAdsbPanel();
+                    });
+                    
+                    tauriListen('adsb-error', (event) => {
+                        debugLog('ADS-B error: ' + event.payload);
+                        alert('ADS-B Error: ' + event.payload);
                     });
                     
                     debugLog('Listeners registered');
@@ -1437,18 +1463,23 @@ ALPHA-3 | REAR"></textarea>
                     <div class="tac-panel">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">ADS-B (1090 MHz)</span>
-                            <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleSDR('adsb')">START</button>
+                            <button class="tac-btn tac-btn-sm ${adsbActive ? 'tac-btn-danger' : 'tac-btn-primary'}" id="adsbBtn" onclick="toggleADSB()">
+                                ${adsbActive ? 'STOP' : 'START'}
+                            </button>
                         </div>
                         <div class="tac-panel-body">
                             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-md); text-align: center;">
                                 <div>
-                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">0</div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);" id="adsbCount">${adsbAircraftCount}</div>
                                     <div class="tac-label">AIRCRAFT</div>
                                 </div>
                                 <div>
-                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);">--</div>
-                                    <div class="tac-label">MAX RANGE</div>
+                                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);" id="adsbRange">${adsbMaxRange || '--'}</div>
+                                    <div class="tac-label">MAX RANGE (km)</div>
                                 </div>
+                            </div>
+                            <div style="margin-top: var(--space-md); max-height: 200px; overflow-y: auto;" id="adsbAircraftList">
+                                ${renderAdsbAircraftList()}
                             </div>
                         </div>
                     </div>
@@ -1474,8 +1505,132 @@ ALPHA-3 | REAR"></textarea>
             `;
         }
         
+        function renderAdsbAircraftList() {
+            if (adsbAircraft.length === 0) {
+                return '<div style="text-align: center; color: var(--text-muted); padding: var(--space-sm);">NO AIRCRAFT</div>';
+            }
+            
+            return adsbAircraft.slice(-10).reverse().map(ac => `
+                <div style="display: flex; justify-content: space-between; padding: var(--space-xs) 0; border-bottom: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 0.75rem;">
+                    <span style="color: var(--accent-cyan);">${ac.callsign || ac.icao}</span>
+                    <span style="color: var(--text-secondary);">${ac.altitude ? ac.altitude + 'm' : '--'}</span>
+                </div>
+            `).join('');
+        }
+        
+        function updateAdsbPanel() {
+            const countEl = document.getElementById('adsbCount');
+            const rangeEl = document.getElementById('adsbRange');
+            const listEl = document.getElementById('adsbAircraftList');
+            
+            if (countEl) countEl.textContent = adsbAircraftCount;
+            if (rangeEl) rangeEl.textContent = adsbMaxRange || '--';
+            if (listEl) listEl.innerHTML = renderAdsbAircraftList();
+        }
+        
+        function updateAdsbDisplay() {
+            // Calculate max range if we have GPS position
+            if (lastKnownLocation && adsbAircraft.length > 0) {
+                let maxRangeKm = 0;
+                adsbAircraft.forEach(ac => {
+                    if (ac.latitude && ac.longitude) {
+                        const range = calculateDistance(
+                            lastKnownLocation.lat, lastKnownLocation.lon,
+                            ac.latitude, ac.longitude
+                        );
+                        if (range > maxRangeKm) maxRangeKm = range;
+                    }
+                });
+                adsbMaxRange = Math.round(maxRangeKm);
+            }
+            
+            updateAdsbPanel();
+            
+            // Update map if visible
+            if (document.getElementById('view-map').classList.contains('active')) {
+                updateAdsbOnMap();
+            }
+        }
+        
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+        
+        let adsbMapMarkers = [];
+        
+        function updateAdsbOnMap() {
+            if (!map) return;
+            
+            // Clear old markers
+            adsbMapMarkers.forEach(marker => map.removeLayer(marker));
+            adsbMapMarkers = [];
+            
+            // Add aircraft markers
+            adsbAircraft.forEach(ac => {
+                if (ac.latitude && ac.longitude) {
+                    const icon = L.divIcon({
+                        className: 'adsb-aircraft-marker',
+                        html: `<div style="width: 16px; height: 16px; background: var(--accent-orange); border: 2px solid white; border-radius: 50%; transform: rotate(${ac.heading || 0}deg);">
+                            <div style="position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 8px solid var(--accent-orange);"></div>
+                        </div>`,
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    });
+                    
+                    const marker = L.marker([ac.latitude, ac.longitude], { icon })
+                        .addTo(map)
+                        .bindPopup(`<strong>${ac.callsign || ac.icao}</strong><br>Alt: ${ac.altitude || '--'}m<br>Spd: ${ac.speed || '--'}kt`);
+                    
+                    adsbMapMarkers.push(marker);
+                }
+            });
+        }
+        
+        async function toggleADSB() {
+            const tauriAvailable = checkTauriAvailable();
+            if (!tauriAvailable) {
+                alert('Tauri not available - cannot start ADS-B');
+                return;
+            }
+            
+            if (!adsbActive) {
+                try {
+                    const result = await window.__TAURI__.core.invoke('start_adsb');
+                    debugLog('ADS-B started: ' + result);
+                    adsbActive = true;
+                    renderSDR(); // Re-render to update button
+                } catch (e) {
+                    debugLog('Failed to start ADS-B: ' + e);
+                    alert('Failed to start ADS-B: ' + e);
+                }
+            } else {
+                try {
+                    const result = await window.__TAURI__.core.invoke('stop_adsb');
+                    debugLog('ADS-B stopped: ' + result);
+                    adsbActive = false;
+                    adsbAircraft = [];
+                    adsbAircraftCount = 0;
+                    adsbMaxRange = 0;
+                    renderSDR();
+                } catch (e) {
+                    debugLog('Failed to stop ADS-B: ' + e);
+                }
+            }
+        }
+        
         function toggleSDR(type) {
-            alert('SDR REQUIRES HARDWARE');
+            if (type === 'adsb') {
+                toggleADSB();
+            } else {
+                alert('AIS not yet implemented - requires additional SDR');
+            }
         }
         
         // Entity functions
