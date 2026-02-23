@@ -416,6 +416,7 @@
                         <div class="tac-layer-group">
                             <button class="tac-layer-btn active" onclick="setMapStyle('dark')">DARK</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('satellite')">SAT</button>
+                            <button class="tac-layer-btn" onclick="setMapStyle('hybrid')">HYB</button>
                             <button class="tac-layer-btn" onclick="setMapStyle('terrain')">TER</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
@@ -665,6 +666,12 @@ ALPHA-3 | REAR"></textarea>
                 attribution: '© CartoDB'
             },
             satellite: {
+                // High-res satellite imagery (Google Earth-like)
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attribution: '© Esri'
+            },
+            hybrid: {
+                // Satellite with labels
                 url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                 attribution: '© Esri'
             },
@@ -707,11 +714,37 @@ ALPHA-3 | REAR"></textarea>
         
         // Map functions
         function initMap() {
-            map = L.map('map').setView([34.0522, -118.2437], 10);
+            if (map) return; // Already initialized
+            
+            const mapContainer = document.getElementById('map');
+            if (!mapContainer) {
+                debugLog('Map container not found!');
+                return;
+            }
+            
+            // Make sure map view is visible for proper initialization
+            const mapView = document.getElementById('view-map');
+            if (mapView) {
+                mapView.classList.add('active');
+            }
+            
+            map = L.map('map', {
+                zoomControl: true,
+                attributionControl: true
+            }).setView([34.0522, -118.2437], 10);
+            
             L.tileLayer(mapStyles.dark.url, {
                 attribution: mapStyles.dark.attribution,
                 maxZoom: 19
             }).addTo(map);
+            
+            debugLog('Map initialized successfully');
+            
+            // If we have a location already, show it
+            if (lastKnownLocation) {
+                debugLog('Have stored location, updating marker');
+                updateMyLocation(lastKnownLocation.lat, lastKnownLocation.lon, lastKnownLocation.accuracy);
+            }
         }
         
         function setMapStyle(style) {
@@ -724,15 +757,26 @@ ALPHA-3 | REAR"></textarea>
             });
             
             if (map) {
+                // Remove all tile layers
                 map.eachLayer(layer => {
                     if (layer instanceof L.TileLayer) {
                         map.removeLayer(layer);
                     }
                 });
+                
+                // Add base layer
                 L.tileLayer(mapStyles[style].url, {
                     attribution: mapStyles[style].attribution,
                     maxZoom: 19
                 }).addTo(map);
+                
+                // For hybrid, add labels on top
+                if (style === 'hybrid') {
+                    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                        attribution: '© Esri',
+                        maxZoom: 19
+                    }).addTo(map);
+                }
             }
         }
         
@@ -1059,9 +1103,22 @@ ALPHA-3 | REAR"></textarea>
         }
         
         function updateMyLocation(lat, lon, accuracy) {
-            if (!map) return;
+            // Store location for later use
+            lastKnownLocation = { lat, lon, accuracy };
             
             const gridCoords = toMGRS(lat, lon);
+            
+            // Initialize map if not ready
+            if (!map) {
+                debugLog('Map not ready, initializing now...');
+                initMap();
+            }
+            
+            if (!map) {
+                debugLog('Map still not available after init');
+                return;
+            }
+            
             const myIcon = L.divIcon({
                 className: 'my-location-marker',
                 html: `<div style="width:20px;height:20px;background:var(--accent-cyan);border:3px solid white;border-radius:50%;box-shadow:0 0 15px var(--accent-cyan);position:relative;">
@@ -1073,16 +1130,22 @@ ALPHA-3 | REAR"></textarea>
             
             if (myLocationMarker) {
                 myLocationMarker.setLatLng([lat, lon]);
+                myLocationMarker.setPopupContent(`<strong>${myCallsign}</strong><br>${gridCoords}<br>Accuracy: ${Math.round(accuracy)}m`);
             } else {
                 myLocationMarker = L.marker([lat, lon], { icon: myIcon, title: myCallsign })
                     .addTo(map)
-                    .bindPopup(`<strong>${myCallsign}</strong><br>${gridCoords}`);
-                map.setView([lat, lon], 14);
+                    .bindPopup(`<strong>${myCallsign}</strong><br>${gridCoords}<br>Accuracy: ${Math.round(accuracy)}m`);
+                // Center map on location with good zoom
+                map.setView([lat, lon], 16);
+                debugLog('Marker created at ' + lat + ', ' + lon);
             }
             
             document.getElementById('statusDot').classList.remove('offline');
             document.getElementById('statusText').innerHTML = `<span class="tac-status-value">${myCallsign}</span> • ${gridCoords}`;
         }
+        
+        // Store last known location
+        let lastKnownLocation = null;
         
         // Modal functions
         function showPacketModal() {
