@@ -802,76 +802,72 @@ ALPHA-3 | REAR"></textarea>
                 cesiumDiv.style.display = 'block';
                 
                 if (!cesiumViewer) {
-                    // Initialize Cesium
-                    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE3Y2UyZC0zMDA0LTRkZTQtYjkwZi01M2Y4ZTI0N2I1Y2YiLCJpZCI6MjQ3MzM0LCJpYXQiOjE3MDI2NjQ5MTF9.qJO-cqZNmBqFeOw7x5Yj9eRh1GXq3vJ3U5ZfPvB_X-I';
-                    
-                    cesiumViewer = new Cesium.Viewer('cesiumContainer', {
-                        terrain: Cesium.Terrain.fromWorldTerrain(),
-                        imageryProvider: new Cesium.IonImageryProvider({ assetId: 2 }), // Bing Maps Aerial
-                        baseLayerPicker: true,
-                        geocoder: true,
-                        homeButton: true,
-                        sceneModePicker: true,
-                        navigationHelpButton: false,
-                        animation: false,
-                        timeline: false,
-                        fullscreenButton: false
-                    });
-                    
-                    // Style Cesium for tactical theme
-                    cesiumViewer.scene.globe.depthTestAgainstTerrain = true;
-                    cesiumViewer.scene.globe.enableLighting = true;
-                    
-                    debugLog('Cesium 3D initialized');
+                    debugLog('Creating Cesium viewer...');
+                    try {
+                        // Use simplest possible Cesium setup with built-in imagery
+                        cesiumViewer = new Cesium.Viewer('cesiumContainer', {
+                            imageryProvider: new Cesium.TileMapServiceImageryProvider({
+                                url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')
+                            }),
+                            baseLayerPicker: false,
+                            geocoder: false,
+                            homeButton: false,
+                            sceneModePicker: false,
+                            navigationHelpButton: false,
+                            animation: false,
+                            timeline: false,
+                            fullscreenButton: false
+                        });
+                        debugLog('Cesium viewer created successfully');
+                    } catch (e) {
+                        debugLog('ERROR creating Cesium: ' + e.message);
+                        return;
+                    }
                 }
                 
-                // Always fly from a close starting position to target
+                // Get target coordinates
                 const targetLat = lastKnownLocation ? lastKnownLocation.lat : 39.8283;
                 const targetLon = lastKnownLocation ? lastKnownLocation.lon : -98.5795;
+                debugLog('Target: ' + targetLat + ', ' + targetLon);
                 
-                debugLog('Flying to: ' + targetLat + ', ' + targetLon);
+                // Use flyTo for smooth animation to location
+                try {
+                    cesiumViewer.camera.flyTo({
+                        destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 5000),
+                        orientation: {
+                            heading: 0.0,
+                            pitch: -Cesium.Math.PI_OVER_FOUR,
+                            roll: 0.0
+                        },
+                        duration: 3
+                    });
+                    debugLog('Camera flyTo called');
+                } catch (e) {
+                    debugLog('ERROR in flyTo: ' + e.message);
+                }
                 
-                // Set camera to 1km altitude - should be close enough to see ground details
-                const cameraHeight = 1000; // 1km up
-                debugLog('Setting camera to: ' + targetLat + ', ' + targetLon + ' at ' + cameraHeight + 'm');
-                
-                cesiumViewer.camera.setView({
-                    destination: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, cameraHeight),
-                    orientation: {
-                        heading: Cesium.Math.toRadians(0.0),
-                        pitch: Cesium.Math.toRadians(-30.0),
-                        roll: 0.0
-                    }
-                });
-                
-                debugLog('Camera setView called');
-                
-                // Remove old entities
-                cesiumViewer.entities.removeAll();
-                
-                // Add marker at target
-                cesiumViewer.entities.add({
-                    position: Cesium.Cartesian3.fromDegrees(targetLon, targetLat),
-                    point: {
-                        pixelSize: 20,
-                        color: Cesium.Color.CYAN,
-                        outlineColor: Cesium.Color.WHITE,
-                        outlineWidth: 3,
-                        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-                    },
-                    label: {
-                        text: myCallsign,
-                        font: '14px monospace',
-                        fillColor: Cesium.Color.CYAN,
-                        outlineColor: Cesium.Color.BLACK,
-                        outlineWidth: 2,
-                        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                        pixelOffset: new Cesium.Cartesian2(0, -25)
-                    }
-                });
-                
-                debugLog('Entity added');
+                // Add marker
+                try {
+                    cesiumViewer.entities.removeAll();
+                    cesiumViewer.entities.add({
+                        position: Cesium.Cartesian3.fromDegrees(targetLon, targetLat),
+                        point: {
+                            pixelSize: 20,
+                            color: Cesium.Color.CYAN,
+                            outlineColor: Cesium.Color.WHITE,
+                            outlineWidth: 3
+                        },
+                        label: {
+                            text: myCallsign,
+                            font: '14px monospace',
+                            fillColor: Cesium.Color.CYAN,
+                            pixelOffset: new Cesium.Cartesian2(0, -30)
+                        }
+                    });
+                    debugLog('Entity added');
+                } catch (e) {
+                    debugLog('ERROR adding entity: ' + e.message);
+                }
                 
                 is3DMode = true;
                 event.target.classList.add('active');
