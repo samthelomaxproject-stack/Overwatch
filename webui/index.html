@@ -624,26 +624,26 @@
         </div>
     </div>
 
-    <!-- New Squad Modal -->
+    <!-- Squad Modal (create & edit) -->
     <div class="tac-modal" id="squadModal">
         <div class="tac-modal-content">
             <div class="tac-modal-header">
-                <span class="tac-modal-title">Create Squad</span>
-                <button class="tac-modal-close" onclick="hideModal('squadModal')">&times;</button>
+                <span class="tac-modal-title" id="squadModalTitle">Create Squad</span>
+                <button class="tac-modal-close" onclick="hideSquadModal()">&times;</button>
             </div>
             <div class="tac-modal-body">
-                <form id="squadForm" onsubmit="createSquad(event)">
+                <form id="squadForm" onsubmit="saveSquad(event)">
                     <div class="tac-form-group">
                         <label class="tac-label">Squad Name</label>
                         <input type="text" class="tac-input" id="squadName" placeholder="ALPHA" required>
                     </div>
                     <div class="tac-form-group">
-                        <label class="tac-label">Members (callsign | role)</label>
+                        <label class="tac-label">Members (callsign | role, one per line)</label>
                         <textarea class="tac-textarea" id="squadMembers" placeholder="ALPHA-1 | TEAM LEAD
 ALPHA-2 | POINT
 ALPHA-3 | REAR"></textarea>
                     </div>
-                    <button type="submit" class="tac-btn tac-btn-primary" style="width: 100%;">CREATE SQUAD</button>
+                    <button type="submit" class="tac-btn tac-btn-primary" style="width: 100%;" id="squadSubmitBtn">CREATE SQUAD</button>
                 </form>
             </div>
         </div>
@@ -656,10 +656,7 @@ ALPHA-3 | REAR"></textarea>
         let myLocationMarker = null;
         let myCallsign = 'ALPHA-1';
         let packets = [];
-        let squads = [
-            { name: 'ALPHA', members: [{ callsign: 'ALPHA-1', role: 'TEAM LEAD' }, { callsign: 'ALPHA-2', role: 'POINT' }, { callsign: 'ALPHA-3', role: 'REAR' }] },
-            { name: 'BRAVO', members: [{ callsign: 'BRAVO-1', role: 'TEAM LEAD' }, { callsign: 'BRAVO-2', role: 'MEDIC' }] }
-        ];
+        let squads = [];
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
 
@@ -784,8 +781,32 @@ ALPHA-3 | REAR"></textarea>
             }
         }
 
+        // Layer visibility state (mirrors button active state)
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false };
+
         function toggleLayer(layer) {
+            layerVisible[layer] = !layerVisible[layer];
             event.target.classList.toggle('active');
+
+            if (layer === 'adsb') {
+                Object.entries(aircraftMarkers).forEach(([icao, marker]) => {
+                    if (layerVisible.adsb) {
+                        if (map && !map.hasLayer(marker)) marker.addTo(map);
+                    } else {
+                        if (map && map.hasLayer(marker)) marker.remove();
+                    }
+                });
+            }
+
+            if (layer === 'units') {
+                Object.entries(entityMarkers).forEach(([uid, marker]) => {
+                    if (layerVisible.units) {
+                        if (map && !map.hasLayer(marker)) marker.addTo(map);
+                    } else {
+                        if (map && map.hasLayer(marker)) marker.remove();
+                    }
+                });
+            }
         }
 
         // 3D Cesium View
@@ -1079,17 +1100,7 @@ ALPHA-3 | REAR"></textarea>
                     
                     debugLog('🔧 RTL-SDR event listeners registered');
                     
-                    // Simple status display updater
-                    function updateStatus(text, color) {
-                        const el = document.getElementById('adsbStatus');
-                        if (el) {
-                            el.textContent = text;
-                            el.style.color = color || 'var(--text-muted)';
-                        }
-                        debugLog('STATUS: ' + text);
-                    }
-                    
-                    tauriListen('rtl-sdr-status', (event) => {
+                                        tauriListen('rtl-sdr-status', (event) => {
                         const status = event.payload;
                         // ALWAYS show critical status in debug panel
                         if (status.includes('TCP Connected')) {
@@ -1500,7 +1511,16 @@ ALPHA-3 | REAR"></textarea>
         }
 
         function showSquadModal() {
+            document.getElementById('squadModalTitle').textContent = 'Create Squad';
+            document.getElementById('squadSubmitBtn').textContent = 'CREATE SQUAD';
+            document.getElementById('squadName').value = '';
+            document.getElementById('squadMembers').value = '';
+            delete document.getElementById('squadForm').dataset.editIndex;
             document.getElementById('squadModal').classList.add('active');
+        }
+
+        function hideSquadModal() {
+            document.getElementById('squadModal').classList.remove('active');
         }
 
         function hideModal(id) {
@@ -1578,32 +1598,47 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Squad functions
-        function createSquad(e) {
+        function saveSquad(e) {
             e.preventDefault();
             const name = document.getElementById('squadName').value.toUpperCase();
             const membersText = document.getElementById('squadMembers').value;
-
             const members = membersText.split('\n').filter(line => line.trim()).map(line => {
                 const [callsign, role] = line.split('|').map(s => s.trim().toUpperCase());
                 return { callsign: callsign || 'UNKNOWN', role: role || 'MEMBER' };
             });
 
-            squads.push({ name, members });
+            const editIndex = document.getElementById('squadForm').dataset.editIndex;
+            if (editIndex !== undefined) {
+                squads[parseInt(editIndex)] = { name, members };
+            } else {
+                squads.push({ name, members });
+            }
             renderSquads();
-            hideModal('squadModal');
-            document.getElementById('squadForm').reset();
+            hideSquadModal();
         }
 
         function renderSquads() {
             const grid = document.getElementById('squadGrid');
+            if (squads.length === 0) {
+                grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:var(--space-xl);color:var(--text-muted);">
+                    NO SQUADS DEFINED<br>
+                    <span style="font-size:0.75rem;opacity:0.6;">Create squads to organize your units</span>
+                </div>`;
+                return;
+            }
             grid.innerHTML = squads.map((squad, index) => `
                 <div class="tac-squad">
                     <div class="tac-squad-header">
                         <span class="tac-squad-name">${squad.name}</span>
-                        <button class="tac-btn tac-btn-sm tac-btn-danger" onclick="deleteSquad(${index})">✕</button>
+                        <div style="display:flex;gap:4px;">
+                            <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="editSquad(${index})">✎</button>
+                            <button class="tac-btn tac-btn-sm tac-btn-danger" onclick="deleteSquad(${index})">✕</button>
+                        </div>
                     </div>
                     <div class="tac-squad-members">
-                        ${squad.members.map(m => `
+                        ${squad.members.length === 0
+                            ? '<div style="color:var(--text-muted);font-size:0.75rem;padding:4px 0;">No members</div>'
+                            : squad.members.map(m => `
                             <div class="tac-squad-member">
                                 <span class="tac-squad-callsign">${m.callsign}</span>
                                 <span class="tac-squad-role">${m.role}</span>
@@ -1615,10 +1650,34 @@ ALPHA-3 | REAR"></textarea>
         }
 
         function deleteSquad(index) {
-            if (confirm('DELETE SQUAD?')) {
+            if (confirm('DELETE SQUAD: ' + squads[index].name + '?')) {
                 squads.splice(index, 1);
                 renderSquads();
             }
+        }
+
+        function editSquad(index) {
+            const squad = squads[index];
+            document.getElementById('squadName').value = squad.name;
+            document.getElementById('squadMembers').value = squad.members.map(m => m.callsign + ' | ' + m.role).join('\n');
+            document.getElementById('squadModalTitle').textContent = 'Edit Squad';
+            document.getElementById('squadForm').dataset.editIndex = index;
+            showModal('squadModal');
+        }
+
+        // SDR status state — persists across renderSDR() calls
+        let adsbStatusText = 'DISCONNECTED';
+        let adsbStatusColor = 'var(--text-muted)';
+
+        function updateStatus(text, color) {
+            adsbStatusText = text;
+            adsbStatusColor = color || 'var(--text-muted)';
+            const el = document.getElementById('adsbStatus');
+            if (el) {
+                el.textContent = text;
+                el.style.color = adsbStatusColor;
+            }
+            debugLog('STATUS: ' + text);
         }
 
         // SDR functions
@@ -1640,7 +1699,7 @@ ALPHA-3 | REAR"></textarea>
                                     <div class="tac-label">AIRCRAFT</div>
                                 </div>
                                 <div>
-                                    <div style="font-size: 1rem; font-weight: 700; color: var(--text-muted);" id="adsbStatus">DISCONNECTED</div>
+                                    <div style="font-size: 1rem; font-weight: 700; color: ${adsbStatusColor};" id="adsbStatus">${adsbStatusText}</div>
                                     <div class="tac-label">STATUS</div>
                                 </div>
                                 <div>
@@ -1874,29 +1933,27 @@ ALPHA-3 | REAR"></textarea>
                 // Update tooltip with basic info
                 marker.setTooltipContent(`${ac.callsign || ac.icao} - ${ac.altitude !== null ? ac.altitude + 'ft' : '?'}`);
             } else {
-                // Create new marker
+                // Create new marker — only add to map if ADS-B layer is visible
                 const marker = L.marker([ac.latitude, ac.longitude], { icon })
-                    .addTo(map)
                     .bindPopup(popupContent)
                     .bindTooltip(`${ac.callsign || ac.icao} - ${ac.altitude !== null ? ac.altitude + 'ft' : '?'}`, {
                         permanent: false,
                         direction: 'top',
                         offset: [0, -15]
                     });
-                
-                // Flash effect for new aircraft
-                if (!marker._flashAnimation) {
-                    marker._flashAnimation = true;
-                    marker.getElement()?.animate([
-                        { transform: 'scale(1)', opacity: 1 },
-                        { transform: 'scale(1.5)', opacity: 0.5 },
-                        { transform: 'scale(1)', opacity: 1 }
-                    ], {
-                        duration: 500,
-                        iterations: 2
-                    });
+
+                if (layerVisible.adsb) {
+                    marker.addTo(map);
+                    // Flash effect for new aircraft
+                    setTimeout(() => {
+                        marker.getElement()?.animate([
+                            { transform: 'scale(1)', opacity: 1 },
+                            { transform: 'scale(1.5)', opacity: 0.5 },
+                            { transform: 'scale(1)', opacity: 1 }
+                        ], { duration: 500, iterations: 2 });
+                    }, 50);
                 }
-                
+
                 aircraftMarkers[ac.icao] = marker;
             }
 
@@ -2387,37 +2444,90 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Entity functions
+        // === ENTITY STATE ===
+        // Populated dynamically from PLI (Position Location Information) received via mesh
+        let trackedEntities = [];
+        let entityFilter = 'all';
+        let entityMarkers = {}; // map markers keyed by entity uid
+
+        function ingestPLI(pli) {
+            // pli = { uid, callsign, type, affiliation, lat, lon, altitude, speed, course, mgrs, timestamp }
+            const existing = trackedEntities.findIndex(e => e.uid === pli.uid);
+            if (existing >= 0) {
+                trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now() };
+            } else {
+                trackedEntities.push({ ...pli, lastSeen: Date.now() });
+            }
+            renderEntities();
+            updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
+        }
+
         function renderEntities() {
             const list = document.getElementById('entityList');
-            const entities = [
-                { name: 'ALPHA-1', type: 'INFANTRY', affiliation: 'friendly', coords: '11SNU 12345 67890' },
-                { name: 'BRAVO-1', type: 'ARMOR', affiliation: 'friendly', coords: '11SNU 12350 67895' },
-                { name: 'UNKNOWN-1', type: 'AIR', affiliation: 'unknown', coords: '11SNU 12400 67900' }
-            ];
+            const filtered = entityFilter === 'all'
+                ? trackedEntities
+                : trackedEntities.filter(e => e.affiliation === entityFilter);
 
-            list.innerHTML = entities.map(e => `
-                <div class="tac-entity">
-                    <div class="tac-symbol tac-symbol-${e.affiliation}">${e.type[0]}</div>
+            if (filtered.length === 0) {
+                list.innerHTML = `<div style="text-align:center;padding:var(--space-xl);color:var(--text-muted);">
+                    NO ENTITIES TRACKED<br>
+                    <span style="font-size:0.75rem;opacity:0.6;">Entities appear when PLI is received from connected EUDs via mesh</span>
+                </div>`;
+                return;
+            }
+
+            const affilSymbol = { friendly: '◈', hostile: '◉', neutral: '◐', unknown: '◆' };
+            list.innerHTML = filtered.map(e => {
+                const age = Math.floor((Date.now() - e.lastSeen) / 1000);
+                const ageStr = age < 60 ? `${age}s ago` : `${Math.floor(age/60)}m ago`;
+                const stale = age > 120;
+                return `
+                <div class="tac-entity" style="opacity:${stale ? 0.5 : 1};">
+                    <div class="tac-symbol tac-symbol-${e.affiliation}">${affilSymbol[e.affiliation] || '◆'}</div>
                     <div class="tac-entity-info">
-                        <div class="tac-entity-name">${e.name}</div>
-                        <div class="tac-entity-meta">${e.type}</div>
+                        <div class="tac-entity-name">${e.callsign || e.uid}</div>
+                        <div class="tac-entity-meta">${e.type || 'UNKNOWN'} · ${ageStr}${stale ? ' · STALE' : ''}</div>
                     </div>
-                    <div class="tac-entity-coords">${e.coords}</div>
-                </div>
-            `).join('');
+                    <div class="tac-entity-coords" style="font-size:0.7rem;">${e.mgrs || (e.lat && e.lon ? e.lat.toFixed(4)+', '+e.lon.toFixed(4) : '--')}</div>
+                </div>`;
+            }).join('');
         }
 
         function filterEntities(type) {
-            console.log('Filter entities:', type);
+            entityFilter = type;
+            document.querySelectorAll('#view-entities .tac-quick-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            renderEntities();
+        }
+
+        function updateEntityOnMap(entity) {
+            if (!map || !entity || !entity.lat || !entity.lon) return;
+            const affilColor = { friendly: 'var(--tac-friendly)', hostile: 'var(--tac-hostile)', neutral: 'var(--tac-neutral)', unknown: 'var(--tac-unknown)' };
+            const color = affilColor[entity.affiliation] || 'var(--tac-unknown)';
+            const icon = L.divIcon({
+                className: 'entity-marker',
+                html: `<div style="width:20px;height:20px;background:${color};border:2px solid white;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:white;">${(entity.callsign||'?')[0]}</div>`,
+                iconSize: [20, 20], iconAnchor: [10, 10]
+            });
+            if (entityMarkers[entity.uid]) {
+                entityMarkers[entity.uid].setLatLng([entity.lat, entity.lon]);
+                entityMarkers[entity.uid].setIcon(icon);
+            } else {
+                entityMarkers[entity.uid] = L.marker([entity.lat, entity.lon], { icon })
+                    .addTo(map)
+                    .bindTooltip(entity.callsign || entity.uid, { permanent: false, direction: 'top' });
+            }
+            // Apply current layer visibility
+            if (!layerVisible.units) {
+                entityMarkers[entity.uid].remove();
+            }
         }
 
         // SATCOM functions
         function renderSATCOM() {
             const list = document.getElementById('satList');
             const sats = [
-                { name: 'ISS', elev: '45°', az: '180°', status: 'VISIBLE' },
-                { name: 'NOAA 19', elev: '12°', az: '270°', status: 'VISIBLE' },
-                { name: 'AO-91', elev: '--', az: '--', status: 'AOS 23MIN' }
+                { name: 'ISS', elev: '--', az: '--', status: 'LOAD TLEs' }
             ];
 
             list.innerHTML = sats.map(s => `
