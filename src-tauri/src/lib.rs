@@ -14,6 +14,7 @@ pub mod meshtastic_proto {
 }
 
 mod meshtastic;
+mod rtl_sdr_test;
 
 // Location state shared between threads
 #[derive(Clone, Copy, Default, Debug)]
@@ -643,6 +644,9 @@ fn meshtastic_cli_start_listen(_app_handle: tauri::AppHandle, _port: String) -> 
 
 // RTL-SDR / ADS-B State
 static RTL_SDR_STATE: Mutex<Option<bool>> = Mutex::new(None);
+static RTL_SDR_PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+static RTL_SDR_STATUS: Mutex<String> = Mutex::new(String::new());
+static RTL_SDR_AIRCRAFT: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
 
 // Aircraft database with TTL cleanup (like Intercept's DataStore)
 use std::collections::HashMap;
@@ -694,252 +698,160 @@ fn debug_log(msg: &str) {
 
 #[tauri::command]
 fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let mut state = RTL_SDR_STATE.lock().unwrap();
-    if *state == Some(true) {
-        return Err("RTL-SDR already running".to_string());
+    // First, kill any existing instances
+    {
+        let mut pids = RTL_SDR_PIDS.lock().unwrap();
+        for pid in pids.iter() {
+            let _ = std::process::Command::new("kill")
+                .args(&["-9", &pid.to_string()])
+                .output();
+        }
+        pids.clear();
+        
+        // Also kill any orphaned Python bridges
+        let _ = std::process::Command::new("pkill")
+            .args(&["-9", "-f", "rtl_sdr_socket.py"])
+            .output();
     }
     
+    let mut state = RTL_SDR_STATE.lock().unwrap();
+    if *state == Some(true) {
+        return Err("Already running".to_string());
+    }
     *state = Some(true);
     
-    // Aircraft database - shared between threads
-    let aircraft_cache: Arc<Mutex<HashMap<String, Aircraft>>> = Arc::new(Mutex::new(HashMap::new()));
+    // Clone for thread
+    let app_handle_thread = app_handle.clone();
     
-    // Emergency squawks (like Intercept)
-    let emergency_squawks: HashMap<&str, &str> = [
-        ("7700", "General Emergency"),
-        ("7600", "Radio Failure"),
-        ("7500", "Hijack"),
-    ].iter().cloned().collect();
-    
-    thread::spawn(move || {
-        debug_log("[RTL-SDR] Starting dump1090...");
-        
-        let child_result = Command::new("/opt/homebrew/bin/dump1090")
+    std::thread::spawn(move || {
+        // Start dump1090 first
+        if let Ok(child) = std::process::Command::new("/opt/homebrew/bin/dump1090")
             .args(&["--net", "--net-sbs-port", "30003", "--quiet"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn();
-        
-        let mut child = match child_result {
-            Ok(c) => {
-                debug_log(&format!("[RTL-SDR] dump1090 started, PID: {:?}", c.id()));
-                c
-            }
-            Err(e) => {
-                let _ = app_handle.emit("rtl-sdr-error", format!("Failed to start dump1090: {}", e));
-                return;
-            }
-        };
-        
-        thread::sleep(Duration::from_secs(2));
-        let _ = app_handle.emit("rtl-sdr-status", "RTL-SDR scanning 1090 MHz - connecting...");
-        
-        // Connect to SBS output port
-        use std::net::TcpStream;
-        use std::io::Read;
-        
-        let addr = match "127.0.0.1:30003".parse() {
-            Ok(a) => a,
-            Err(e) => {
-                let _ = app_handle.emit("rtl-sdr-error", format!("Invalid address: {}", e));
-                return;
-            }
-        };
-        
-        let mut retry_count = 0;
-        let stream = loop {
-            match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
-                Ok(s) => {
-                    debug_log(&format!("[RTL-SDR] Connected on attempt {}", retry_count + 1));
-                    break s;
-                }
-                Err(e) => {
-                    retry_count += 1;
-                    let _ = app_handle.emit("rtl-sdr-status", format!("Connection attempt {}: {:?}", retry_count, e));
-                    if retry_count > 10 {
-                        let _ = app_handle.emit("rtl-sdr-error", "Failed to connect after 10 retries");
-                        return;
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                }
-            }
-        };
-        
-        let _ = app_handle.emit("rtl-sdr-status", "Connected - receiving aircraft data");
-        
-        // Read SBS format messages (like Intercept)
-        let mut reader = BufReader::new(stream);
-        let mut buffer = String::new();
-        let mut last_broadcast = Instant::now();
-        let broadcast_interval = Duration::from_millis(500); // Update every 500ms
-        
-        loop {
-            buffer.clear();
-            match reader.read_line(&mut buffer) {
-                Ok(0) => break, // EOF
-                Ok(_) => {
-                    let line = buffer.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    
-                    // Parse SBS format: MSG,type,1,1,ICAO,1,date,time,logged_date,logged_time,callsign,alt,speed,track,lat,lon,...
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() < 11 || parts[0] != "MSG" {
-                        continue;
-                    }
-                    
-                    let msg_type = parts[1];
-                    let icao = parts[4].to_uppercase();
-                    if icao.is_empty() {
-                        continue;
-                    }
-                    
-                    // Get or create aircraft entry
-                    let mut db = aircraft_cache.lock().unwrap();
-                    let aircraft = db.entry(icao.clone()).or_insert_with(|| Aircraft::new(icao.clone()));
-                    aircraft.last_seen = Instant::now();
-                    
-                    // Parse different message types (like Intercept)
-                    match msg_type {
-                        "1" => {
-                            // MSG,1 - Callsign
-                            if parts.len() > 10 {
-                                let callsign = parts[10].trim();
-                                if !callsign.is_empty() {
-                                    aircraft.callsign = Some(callsign.to_string());
-                                }
-                            }
-                        }
-                        "3" => {
-                            // MSG,3 - Position + Altitude
-                            if parts.len() > 15 {
-                                if let Ok(alt) = parts[11].parse::<i32>() {
-                                    aircraft.altitude = Some(alt);
-                                }
-                                if let Ok(lat) = parts[14].parse::<f64>() {
-                                    aircraft.latitude = Some(lat);
-                                }
-                                if let Ok(lon) = parts[15].parse::<f64>() {
-                                    aircraft.longitude = Some(lon);
-                                }
-                            }
-                        }
-                        "4" => {
-                            // MSG,4 - Speed + Heading + Vertical Rate
-                            if parts.len() > 16 {
-                                if let Ok(speed) = parts[12].parse::<i32>() {
-                                    aircraft.speed = Some(speed);
-                                }
-                                if let Ok(heading) = parts[13].parse::<i32>() {
-                                    aircraft.heading = Some(heading);
-                                }
-                                if let Ok(vr) = parts[16].parse::<i32>() {
-                                    aircraft.vertical_rate = Some(vr);
-                                    // Vertical rate anomaly detection (like Intercept)
-                                    if vr.abs() > 4000 {
-                                        let _ = app_handle.emit("rtl-sdr-alert", json!({
-                                            "type": "vertical_rate_anomaly",
-                                            "icao": aircraft.icao,
-                                            "callsign": aircraft.callsign,
-                                            "vertical_rate": vr
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                        "5" => {
-                            // MSG,5 - Ground position + Altitude
-                            if parts.len() > 11 {
-                                if parts.len() > 10 {
-                                    let callsign = parts[10].trim();
-                                    if !callsign.is_empty() {
-                                        aircraft.callsign = Some(callsign.to_string());
-                                    }
-                                }
-                                if let Ok(alt) = parts[11].parse::<i32>() {
-                                    aircraft.altitude = Some(alt);
-                                }
-                            }
-                        }
-                        "6" => {
-                            // MSG,6 - Squawk (transponder code)
-                            if parts.len() > 17 {
-                                let squawk = parts[17].trim();
-                                if !squawk.is_empty() {
-                                    aircraft.squawk = Some(squawk.to_string());
-                                    // Emergency squawk detection (like Intercept)
-                                    if let Some(&meaning) = emergency_squawks.get(squawk) {
-                                        let _ = app_handle.emit("rtl-sdr-alert", json!({
-                                            "type": "emergency_squawk",
-                                            "icao": aircraft.icao,
-                                            "callsign": aircraft.callsign,
-                                            "squawk": squawk,
-                                            "meaning": meaning
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    
-                    drop(db); // Release lock
-                    
-                    // Broadcast updates periodically (not on every message)
-                    if last_broadcast.elapsed() >= broadcast_interval {
-                        last_broadcast = Instant::now();
-                        
-                        // Clean up stale aircraft (like Intercept's DataStore)
-                        let mut db = aircraft_cache.lock().unwrap();
-                        let stale_icaos: Vec<String> = db.iter()
-                            .filter(|(_, ac)| ac.is_stale())
-                            .map(|(icao, _)| icao.clone())
-                            .collect();
-                        for icao in stale_icaos {
-                            db.remove(&icao);
-                            let _ = app_handle.emit("rtl-sdr-removed", json!({"icao": icao}));
-                        }
-                        
-                        // Broadcast all active aircraft
-                        for (_, aircraft) in db.iter() {
-                            let _ = app_handle.emit("rtl-sdr-aircraft", json!({
-                                "icao": aircraft.icao,
-                                "callsign": aircraft.callsign,
-                                "altitude": aircraft.altitude,
-                                "speed": aircraft.speed,
-                                "heading": aircraft.heading,
-                                "vertical_rate": aircraft.vertical_rate,
-                                "latitude": aircraft.latitude,
-                                "longitude": aircraft.longitude,
-                                "squawk": aircraft.squawk
-                            }));
-                        }
-                        
-                        // Emit count update
-                        let count = db.len();
-                        let _ = app_handle.emit("rtl-sdr-count", json!({"count": count}));
-                        drop(db);
-                    }
-                }
-                Err(e) => {
-                    let _ = app_handle.emit("rtl-sdr-error", format!("Read error: {}", e));
-                    break;
-                }
-            }
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn() {
+            let id = child.id();
+            let mut pids = RTL_SDR_PIDS.lock().unwrap();
+            pids.push(id);
         }
         
-        let _ = child.wait();
-        debug_log("[RTL-SDR] dump1090 stopped");
+        // Helper macro to set status in static and emit
+        macro_rules! set_status {
+            ($msg:expr) => {
+                {
+                    let msg = $msg.to_string();
+                    if let Ok(mut s) = RTL_SDR_STATUS.lock() {
+                        *s = msg.clone();
+                    }
+                    let _ = app_handle_thread.emit("rtl-sdr-status", msg);
+                }
+            };
+        }
+
+        // Wait for dump1090 to start
+        set_status!("STARTING");
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        
+        // Spawn Python bridge
+        set_status!("BRIDGE_STARTING");
+        
+        let child = std::process::Command::new("python3")
+            .arg("/Users/thelomaxproject/Overwatch/rtl_sdr_socket.py")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+        
+        match child {
+            Ok(mut child) => {
+                set_status!("BRIDGE_UP");
+                
+                // Open log file for Rust-side logging
+                use std::fs::OpenOptions;
+                use std::io::Write;
+                
+                let mut rust_log = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/adsb_rust.log")
+                    .ok();
+                
+                if let Some(ref mut log) = rust_log {
+                    let _ = writeln!(log, "[{}] Rust: Started reading from Python bridge", 
+                        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+                }
+                
+                // TCP CONNECTION
+                std::thread::sleep(std::time::Duration::from_secs(4));
+                use std::net::TcpStream;
+                set_status!("CONNECTING");
+                
+                match TcpStream::connect("127.0.0.1:30004") {
+                    Ok(stream) => {
+                        set_status!("CONNECTED");
+                        let reader = BufReader::new(stream);
+                        for line in reader.lines() {
+                            if let Ok(line) = line {
+                                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                                    if let Some(aircraft) = json.get("aircraft") {
+                                        // Store in static for polling
+                                        if let Ok(mut db) = RTL_SDR_AIRCRAFT.lock() {
+                                            let icao = aircraft.get("icao").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            if let Some(pos) = db.iter().position(|a| a.get("icao").and_then(|v| v.as_str()) == Some(&icao)) {
+                                                db[pos] = aircraft.clone();
+                                            } else {
+                                                db.push(aircraft.clone());
+                                                if db.len() > 200 { db.remove(0); }
+                                            }
+                                        }
+                                        let _ = app_handle_thread.emit("rtl-sdr-aircraft", aircraft.clone());
+                                    }
+                                }
+                            }
+                        }
+                        set_status!("DISCONNECTED");
+                    }
+                    Err(e) => {
+                        let msg = format!("TCP_ERROR: {:?}", e);
+                        set_status!(msg.as_str());
+                        let _ = app_handle_thread.emit("rtl-sdr-error", msg);
+                    }
+                }
+            }
+            Err(e) => {
+                let msg = format!("BRIDGE_ERROR: {}", e);
+                set_status!(msg.as_str());
+                let _ = app_handle_thread.emit("rtl-sdr-error", msg);
+            }
+        }
     });
     
-    Ok("RTL-SDR started - scanning 1090 MHz for aircraft".to_string())
+    Ok("RTL-SDR streaming started".to_string())
+}
+
+#[tauri::command]
+fn get_rtl_sdr_status() -> serde_json::Value {
+    let status = RTL_SDR_STATUS.lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let aircraft = RTL_SDR_AIRCRAFT.lock()
+        .map(|db| db.clone())
+        .unwrap_or_default();
+    serde_json::json!({
+        "status": status,
+        "aircraft": aircraft,
+        "count": aircraft.len()
+    })
 }
 
 #[tauri::command]
 fn stop_rtl_sdr() -> Result<String, String> {
     let mut state = RTL_SDR_STATE.lock().unwrap();
     *state = Some(false);
+    
+    // Kill Python bridge
+    let _ = Command::new("pkill")
+        .args(&["-9", "-f", "rtl_sdr_poll.py"])
+        .output();
     
     // Kill dump1090
     let _ = Command::new("pkill")
@@ -995,7 +907,8 @@ fn stop_rtl_sdr() -> Result<String, String> {
             meshtastic_cli_send,
             meshtastic_cli_start_listen,
             start_rtl_sdr,
-            stop_rtl_sdr
+            stop_rtl_sdr,
+            get_rtl_sdr_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

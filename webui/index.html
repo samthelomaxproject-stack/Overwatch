@@ -1012,7 +1012,9 @@ ALPHA-3 | REAR"></textarea>
 
         function getTauriListener() {
             try {
-                return window.__TAURI__?.event?.listen;
+                const listen = window.__TAURI__?.event?.listen;
+                if (listen) return listen.bind(window.__TAURI__.event);
+                return null;
             } catch (e) {
                 return null;
             }
@@ -1066,8 +1068,75 @@ ALPHA-3 | REAR"></textarea>
 
                     // RTL-SDR real aircraft listeners (Intercept-style)
                     tauriListen('rtl-sdr-status', (event) => {
-                        debugLog('RTL-SDR: ' + event.payload);
+                        const status = event.payload;
+                        debugLog('RTL-SDR: ' + status);
+                        console.log('[RTL-SDR STATUS]', status);
                     });
+
+                    // TCP connection status
+                    let tcpConnected = false;
+                    let lastAircraftTime = Date.now();
+                    
+                    debugLog('🔧 RTL-SDR event listeners registered');
+                    
+                    // Simple status display updater
+                    function updateStatus(text, color) {
+                        const el = document.getElementById('adsbStatus');
+                        if (el) {
+                            el.textContent = text;
+                            el.style.color = color || 'var(--text-muted)';
+                        }
+                        debugLog('STATUS: ' + text);
+                    }
+                    
+                    tauriListen('rtl-sdr-status', (event) => {
+                        const status = event.payload;
+                        // ALWAYS show critical status in debug panel
+                        if (status.includes('TCP Connected')) {
+                            tcpConnected = true;
+                            updateStatus('TCP CONNECTED', 'var(--accent-cyan)');
+                            debugLog('✅ TCP CONNECTED - Data should flow now!');
+                        } else if (status.includes('Starting')) {
+                            updateStatus('STARTING...', 'var(--accent-yellow)');
+                            debugLog('🚀 Starting RTL-SDR...');
+                        } else if (status.includes('Connecting to TCP')) {
+                            updateStatus('CONNECTING...', 'var(--accent-orange)');
+                            debugLog('⏳ Connecting to TCP server (127.0.0.1:30004)...');
+                        } else {
+                            debugLog('RTL-SDR: ' + status);
+                        }
+                    });
+                    
+                    // IMMEDIATE DEBUG for aircraft with counters
+                    tauriListen('rtl-sdr-aircraft', (event) => {
+                        const ac = event.payload;
+                        lastAircraftTime = Date.now();
+                        
+                        // Update counter display
+                        const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
+                        if (existing >= 0) {
+                            adsbAircraft[existing] = {...adsbAircraft[existing], ...ac};
+                        } else {
+                            adsbAircraft.push(ac);
+                        }
+                        
+                        // Real-time display
+                        document.getElementById('adsbCount').textContent = adsbAircraft.length;
+                        debugLog(`✈️ ${ac.callsign || ac.icao} @ ${ac.altitude || '?'}ft`);
+                        
+                        // Update map
+                        if (ac.latitude && ac.longitude) {
+                            addAircraftToMap(ac);
+                        }
+                    });
+                    
+                    // Connection health check
+                    setInterval(() => {
+                        if (tcpConnected && Date.now() - lastAircraftTime > 10000) {
+                            document.getElementById('adsbStatus').textContent = 'CONNECTED - NO DATA';
+                            document.getElementById('adsbStatus').style.color = 'var(--accent-orange)';
+                        }
+                    }, 5000);
 
                     tauriListen('rtl-sdr-error', (event) => {
                         debugLog('RTL-SDR Error: ' + event.payload);
@@ -1571,6 +1640,10 @@ ALPHA-3 | REAR"></textarea>
                                     <div class="tac-label">AIRCRAFT</div>
                                 </div>
                                 <div>
+                                    <div style="font-size: 1rem; font-weight: 700; color: var(--text-muted);" id="adsbStatus">DISCONNECTED</div>
+                                    <div class="tac-label">STATUS</div>
+                                </div>
+                                <div>
                                     <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-cyan);" id="adsbRange">${adsbMaxRange || '--'}</div>
                                     <div class="tac-label">MAX RANGE (km)</div>
                                 </div>
@@ -1859,6 +1932,55 @@ ALPHA-3 | REAR"></textarea>
             });
         }
 
+        let rtlSdrPoller = null;
+
+        async function startRtlSdrPoller() {
+            if (rtlSdrPoller) clearInterval(rtlSdrPoller);
+            let lastStatus = '';
+            let lastCount = 0;
+            rtlSdrPoller = setInterval(async () => {
+                try {
+                    const result = await window.__TAURI__.core.invoke('get_rtl_sdr_status');
+                    const { status, aircraft, count } = result;
+
+                    if (status !== lastStatus) {
+                        lastStatus = status;
+                        debugLog('📡 RTL-SDR status: ' + status);
+                        if (status === 'CONNECTED') {
+                            updateStatus('CONNECTED', 'var(--accent-cyan)');
+                        } else if (status === 'CONNECTING') {
+                            updateStatus('CONNECTING...', 'var(--accent-orange)');
+                        } else if (status === 'STARTING' || status === 'BRIDGE_STARTING' || status === 'BRIDGE_UP') {
+                            updateStatus('STARTING...', 'var(--accent-yellow)');
+                        } else if (status.includes('ERROR') || status === 'DISCONNECTED') {
+                            updateStatus(status, 'var(--accent-red)');
+                        }
+                    }
+
+                    if (count !== lastCount) {
+                        lastCount = count;
+                        debugLog(`✈️ Aircraft count: ${count}`);
+                    }
+
+                    // Merge polled aircraft into local state
+                    if (aircraft && aircraft.length > 0) {
+                        for (const ac of aircraft) {
+                            const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
+                            if (existing >= 0) {
+                                adsbAircraft[existing] = { ...adsbAircraft[existing], ...ac };
+                            } else {
+                                adsbAircraft.push(ac);
+                            }
+                            if (ac.latitude && ac.longitude) addAircraftToMap(ac);
+                        }
+                        document.getElementById('adsbCount').textContent = adsbAircraft.length;
+                    }
+                } catch (e) {
+                    // silent
+                }
+            }, 1000);
+        }
+
         async function toggleADSB() {
             const tauriAvailable = checkTauriAvailable();
             if (!tauriAvailable) {
@@ -1867,13 +1989,15 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (!adsbActive) {
+                debugLog('🖱️ START button clicked - invoking start_rtl_sdr...');
                 try {
                     const result = await window.__TAURI__.core.invoke('start_rtl_sdr');
-                    debugLog('RTL-SDR started: ' + result);
+                    debugLog('✅ start_rtl_sdr returned: ' + result);
                     adsbActive = true;
+                    startRtlSdrPoller();
                     renderSDR(); // Re-render to update button
                 } catch (e) {
-                    debugLog('Failed to start RTL-SDR: ' + e);
+                    debugLog('❌ Failed to start RTL-SDR: ' + e);
                     alert('Failed to start RTL-SDR: ' + e);
                 }
             } else {
@@ -1881,9 +2005,11 @@ ALPHA-3 | REAR"></textarea>
                     const result = await window.__TAURI__.core.invoke('stop_rtl_sdr');
                     debugLog('RTL-SDR stopped: ' + result);
                     adsbActive = false;
+                    if (rtlSdrPoller) { clearInterval(rtlSdrPoller); rtlSdrPoller = null; }
                     adsbAircraft = [];
                     adsbAircraftCount = 0;
                     adsbMaxRange = 0;
+                    updateStatus('DISCONNECTED', 'var(--text-muted)');
                     // Clear aircraft from map
                     Object.values(aircraftMarkers).forEach(m => { if(map) map.removeLayer(m); });
                     aircraftMarkers = {};
