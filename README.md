@@ -377,15 +377,79 @@ def broadcast(self, message):
 #### Verification
 After fix: connected raw socket to port `30004` → immediately received live aircraft JSON (UAL584, EJA744, SKW5336, etc. with lat/lon/altitude/speed). 16 aircraft in DB, data streaming at 2Hz.
 
+### ADS-B — Tauri Event Delivery Failure + Unbound Listener (Fixed 2026-02-24)
+
+#### Symptom
+Even after the Python bridge deadlock was resolved and aircraft data was confirmed flowing over TCP, the ADS-B panel still showed **DISCONNECTED** and zero aircraft. No `rtl-sdr-status` or `rtl-sdr-aircraft` messages appeared in the debug log — despite `location-update` events from the same app working fine.
+
+#### Root Cause 1 — Unreliable `emit()` from Background Threads
+
+Tauri v2's `AppHandle::emit()` is fire-and-forget. When called from a `std::thread::spawn` context, events are not guaranteed to be delivered if the WebView's event loop is busy or the listener hasn't fully registered. The location events worked because they were emitted from the `setup()` closure thread, which uses a different internal dispatch path.
+
+The RTL-SDR status events were emitted at specific moments (after 3s sleep, after 4s sleep) — if the WebView wasn't ready at that exact instant, the event was silently dropped.
+
+#### Root Cause 2 — Unbound `listen` Function Reference
+
+```javascript
+// BROKEN — listen() loses its 'this' binding when called as a bare function
+function getTauriListener() {
+    return window.__TAURI__?.event?.listen;  // detached reference
+}
+const tauriListen = getTauriListener();
+tauriListen('rtl-sdr-status', handler);     // 'this' is undefined → silent failure
+```
+
+```javascript
+// FIXED — bind preserves the correct 'this' context
+function getTauriListener() {
+    const listen = window.__TAURI__?.event?.listen;
+    if (listen) return listen.bind(window.__TAURI__.event);
+    return null;
+}
+```
+
+#### Fix — Invoke-Based Polling
+
+Replaced one-shot `emit()` calls with a shared Rust static (`RTL_SDR_STATUS`, `RTL_SDR_AIRCRAFT`) that the background thread writes to on every state change. Added a `get_rtl_sdr_status` Tauri command that JS calls every second via `invoke()`.
+
+`invoke()` is synchronous and request/response — guaranteed delivery regardless of timing or WebView state.
+
+```rust
+// Rust: write status to shared static on every transition
+static RTL_SDR_STATUS: Mutex<String> = Mutex::new(String::new());
+static RTL_SDR_AIRCRAFT: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
+
+#[tauri::command]
+fn get_rtl_sdr_status() -> serde_json::Value {
+    serde_json::json!({
+        "status": RTL_SDR_STATUS.lock().map(|s| s.clone()).unwrap_or_default(),
+        "aircraft": RTL_SDR_AIRCRAFT.lock().map(|db| db.clone()).unwrap_or_default(),
+    })
+}
+```
+
+```javascript
+// JS: poll every 1 second via invoke instead of waiting for events
+setInterval(async () => {
+    const { status, aircraft } = await window.__TAURI__.core.invoke('get_rtl_sdr_status');
+    // update UI from polled state
+}, 1000);
+```
+
+#### Status Flow (After Fix)
+```
+START clicked → STARTING (yellow, 3s) → BRIDGE_UP → CONNECTING (orange, 1s) → CONNECTED (cyan) → aircraft appear
+```
+
 ---
 
 ## Changelog
 
 ### v0.2.2 (2026-02-24) — ADS-B Live Tracking Fix
 - ✅ **Fixed ADS-B dead silence bug** — threading deadlock in Python TCP bridge caused zero aircraft data to reach UI
-- Root cause: `flush_to_clients()` held `self.lock` while calling `broadcast()`, which also tried to acquire `self.lock` — instant deadlock on first 500ms tick
-- Fix: snapshot aircraft data under lock, release lock, broadcast outside lock
-- Verified: 16+ live aircraft streaming in real-time after fix (UAL584, EJA744, SKW5336, etc.)
+- ✅ **Fixed Tauri event delivery** — background thread `emit()` calls were unreliable; replaced with invoke-based polling (`get_rtl_sdr_status`) guaranteed to reach JS
+- ✅ **Fixed unbound event listener** — `window.__TAURI__.event.listen` was stored without `.bind()`, silently failing to register listeners
+- ✅ **Live aircraft now display** — status progresses STARTING → CONNECTING → CONNECTED with real-time aircraft on map
 - See [Troubleshooting & Post-Mortems](#troubleshooting--post-mortems) for full details
 
 ### v0.2.0 (2026-02-23) — Tactical UI Overhaul + Native GPS + 3D View
