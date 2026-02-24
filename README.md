@@ -8,8 +8,8 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 
 ## Status
 
-**Version:** 0.2.1  
-**Status:** Production-ready desktop app with Meshtastic mesh network support
+**Version:** 0.2.2  
+**Status:** Production-ready desktop app with Meshtastic mesh network support and live ADS-B tracking
 
 ### What's New in v0.2.1
 - ✅ **Meshtastic CLI integration** — Connect to Meshtastic mesh networks via official CLI
@@ -309,7 +309,84 @@ MIT
 
 ---
 
+---
+
+## Troubleshooting & Post-Mortems
+
+### ADS-B TCP Bridge — Silent Deadlock (Fixed 2026-02-24)
+
+#### Symptom
+Clicking **START** in the ADS-B panel appeared to work:
+- Rust command returned `"RTL-SDR streaming started"` ✅
+- `dump1090` started and connected to the RTL-SDR dongle ✅
+- Python bridge (`rtl_sdr_socket.py`) launched and connected to `dump1090:30003` ✅
+- Rust made a TCP connection to `127.0.0.1:30004` ✅
+- Aircraft count stayed at **0** — no data ever appeared in the UI ❌
+
+#### Root Cause
+A **threading deadlock** in `rtl_sdr_socket.py`.
+
+`flush_to_clients()` held `self.lock` while iterating the aircraft database, then called `self.broadcast()` — which also tried to acquire the **same** `self.lock`. Python's `threading.Lock` is not reentrant: the second acquisition blocks forever.
+
+```python
+# BROKEN — deadlock on first broadcast tick (500ms after start)
+def flush_to_clients(self):
+    while True:
+        time.sleep(0.5)
+        with self.lock:                  # ← acquires lock
+            ...
+            for icao, data in self.aircraft_db.items():
+                self.broadcast(msg)      # ← tries to re-acquire self.lock → DEADLOCK
+
+def broadcast(self, message):
+    with self.lock:                      # ← blocks forever
+        ...
+```
+
+The broadcast thread silently hung on the very first iteration. No exception, no log entry — just silence. `dump1090` was streaming real aircraft data, the Python parser was populating `aircraft_db` correctly, Rust was connected and waiting — but zero bytes ever left the bridge.
+
+#### Diagnosis Steps
+1. Manually connected a raw Python socket to port `30004` → confirmed zero bytes received
+2. Confirmed `dump1090:30003` was actively streaming (16+ aircraft)
+3. Ran the parsing logic in isolation → `aircraft_db` populated correctly with full aircraft data
+4. Identified that `flush_to_clients` held the lock while calling `broadcast` → classic non-reentrant deadlock
+
+#### Fix
+Build a snapshot of the aircraft data **under** the lock, release the lock, then broadcast **outside** the lock:
+
+```python
+# FIXED — build snapshot under lock, broadcast outside lock
+def flush_to_clients(self):
+    while True:
+        time.sleep(0.5)
+        with self.lock:
+            # Remove stale, build message list
+            messages = [json.dumps({"aircraft": {...}}) for data in self.aircraft_db.values()]
+        # Lock released — now safe to call broadcast
+        for msg in messages:
+            self.broadcast(msg)
+
+def broadcast(self, message):
+    with self.lock:
+        clients_snapshot = list(self.clients)
+    # Send outside lock
+    for client in clients_snapshot:
+        client.send((message + "\n").encode('utf-8'))
+```
+
+#### Verification
+After fix: connected raw socket to port `30004` → immediately received live aircraft JSON (UAL584, EJA744, SKW5336, etc. with lat/lon/altitude/speed). 16 aircraft in DB, data streaming at 2Hz.
+
+---
+
 ## Changelog
+
+### v0.2.2 (2026-02-24) — ADS-B Live Tracking Fix
+- ✅ **Fixed ADS-B dead silence bug** — threading deadlock in Python TCP bridge caused zero aircraft data to reach UI
+- Root cause: `flush_to_clients()` held `self.lock` while calling `broadcast()`, which also tried to acquire `self.lock` — instant deadlock on first 500ms tick
+- Fix: snapshot aircraft data under lock, release lock, broadcast outside lock
+- Verified: 16+ live aircraft streaming in real-time after fix (UAL584, EJA744, SKW5336, etc.)
+- See [Troubleshooting & Post-Mortems](#troubleshooting--post-mortems) for full details
 
 ### v0.2.0 (2026-02-23) — Tactical UI Overhaul + Native GPS + 3D View
 - Complete visual redesign with Anduril Lattice inspiration
