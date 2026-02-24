@@ -1,6 +1,6 @@
 [package]
 name = "overwatch"
-version = "0.1.0"
+version = "0.2.2"
 description = "Tactical Operations Center - Offline-first mesh communications"
 authors = ["TheLomax"]
 license = "MIT"
