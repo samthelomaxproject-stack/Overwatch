@@ -789,6 +789,7 @@ ALPHA-3 | REAR"></textarea>
             event.target.classList.toggle('active');
 
             if (layer === 'adsb') {
+                // 2D Leaflet markers
                 Object.entries(aircraftMarkers).forEach(([icao, marker]) => {
                     if (layerVisible.adsb) {
                         if (map && !map.hasLayer(marker)) marker.addTo(map);
@@ -796,6 +797,15 @@ ALPHA-3 | REAR"></textarea>
                         if (map && map.hasLayer(marker)) marker.remove();
                     }
                 });
+                // 3D Cesium entities
+                if (cesiumViewer) {
+                    if (layerVisible.adsb) {
+                        // Re-add any missing
+                        adsbAircraft.forEach(ac => addAircraftToCesium(ac));
+                    } else {
+                        Object.values(cesiumAircraftEntities).forEach(e => { e.show = false; });
+                    }
+                }
             }
 
             if (layer === 'units') {
@@ -812,6 +822,8 @@ ALPHA-3 | REAR"></textarea>
         // 3D Cesium View
         let cesiumViewer = null;
         let is3DMode = false;
+        let cesiumPlayerEntity = null;   // Our own position marker
+        let cesiumAircraftEntities = {}; // keyed by ICAO
 
         function toggle3D() {
             const mapDiv = document.getElementById('map');
@@ -874,10 +886,12 @@ ALPHA-3 | REAR"></textarea>
                     debugLog('ERROR in flyTo: ' + e.message);
                 }
 
-                // Add marker
+                // Add player marker
                 try {
-                    cesiumViewer.entities.removeAll();
-                    cesiumViewer.entities.add({
+                    if (cesiumPlayerEntity) {
+                        cesiumViewer.entities.remove(cesiumPlayerEntity);
+                    }
+                    cesiumPlayerEntity = cesiumViewer.entities.add({
                         position: Cesium.Cartesian3.fromDegrees(targetLon, targetLat),
                         point: {
                             pixelSize: 20,
@@ -892,9 +906,14 @@ ALPHA-3 | REAR"></textarea>
                             pixelOffset: new Cesium.Cartesian2(0, -30)
                         }
                     });
-                    debugLog('Entity added');
+                    debugLog('Player entity added');
                 } catch (e) {
                     debugLog('ERROR adding entity: ' + e.message);
+                }
+
+                // Populate any already-tracked aircraft into 3D view
+                if (layerVisible.adsb) {
+                    adsbAircraft.forEach(ac => addAircraftToCesium(ac));
                 }
 
                 is3DMode = true;
@@ -1479,28 +1498,105 @@ ALPHA-3 | REAR"></textarea>
         function updateCesiumLocation(lat, lon) {
             if (!cesiumViewer || !is3DMode) return;
 
-            debugLog('Updating Cesium with new location');
+            const pos = Cesium.Cartesian3.fromDegrees(lon, lat);
+            if (cesiumPlayerEntity) {
+                cesiumPlayerEntity.position = new Cesium.ConstantPositionProperty(pos);
+            } else {
+                cesiumPlayerEntity = cesiumViewer.entities.add({
+                    position: pos,
+                    point: {
+                        pixelSize: 20,
+                        color: Cesium.Color.CYAN,
+                        outlineColor: Cesium.Color.WHITE,
+                        outlineWidth: 3,
+                        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+                    },
+                    label: {
+                        text: myCallsign,
+                        font: '14px monospace',
+                        fillColor: Cesium.Color.CYAN,
+                        outlineColor: Cesium.Color.BLACK,
+                        outlineWidth: 2,
+                        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                        pixelOffset: new Cesium.Cartesian2(0, -25)
+                    }
+                });
+            }
+        }
 
-            // Remove old entities and add new one
-            cesiumViewer.entities.removeAll();
-            cesiumViewer.entities.add({
-                position: Cesium.Cartesian3.fromDegrees(lon, lat),
-                point: {
-                    pixelSize: 20,
-                    color: Cesium.Color.CYAN,
-                    outlineColor: Cesium.Color.WHITE,
-                    outlineWidth: 3,
-                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-                },
-                label: {
-                    text: myCallsign,
-                    font: '14px monospace',
-                    fillColor: Cesium.Color.CYAN,
-                    outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 2,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                    pixelOffset: new Cesium.Cartesian2(0, -25)
+        // Add/update an aircraft in the Cesium 3D view
+        function addAircraftToCesium(ac) {
+            if (!cesiumViewer || !ac.latitude || !ac.longitude) return;
+
+            // Altitude in meters (ADS-B reports in feet)
+            const altMeters = ac.altitude ? ac.altitude * 0.3048 : 1000;
+            const heading = ac.heading || 0;
+
+            // Color by altitude (matches 2D map)
+            let color;
+            if (!ac.altitude)               color = Cesium.Color.ORANGE;
+            else if (ac.altitude < 1000)    color = Cesium.Color.RED;
+            else if (ac.altitude < 5000)    color = Cesium.Color.fromCssColorString('#ffaa00');
+            else if (ac.altitude < 15000)   color = Cesium.Color.YELLOW;
+            else if (ac.altitude < 30000)   color = Cesium.Color.LIME;
+            else                            color = Cesium.Color.fromCssColorString('#4488ff');
+
+            const label = (ac.callsign || ac.icao) + '\n' + (ac.altitude ? ac.altitude.toLocaleString() + 'ft' : '?');
+
+            if (cesiumAircraftEntities[ac.icao]) {
+                // Update existing
+                const entity = cesiumAircraftEntities[ac.icao];
+                entity.position = new Cesium.ConstantPositionProperty(
+                    Cesium.Cartesian3.fromDegrees(ac.longitude, ac.latitude, altMeters)
+                );
+                if (entity.label) entity.label.text = new Cesium.ConstantProperty(label);
+                if (entity.point) entity.point.color = new Cesium.ConstantProperty(color);
+            } else {
+                // Create new
+                cesiumAircraftEntities[ac.icao] = cesiumViewer.entities.add({
+                    id: 'aircraft_' + ac.icao,
+                    position: Cesium.Cartesian3.fromDegrees(ac.longitude, ac.latitude, altMeters),
+                    point: {
+                        pixelSize: 10,
+                        color: color,
+                        outlineColor: Cesium.Color.WHITE,
+                        outlineWidth: 1,
+                        scaleByDistance: new Cesium.NearFarScalar(1e4, 1.5, 1e7, 0.5)
+                    },
+                    label: {
+                        text: label,
+                        font: '11px monospace',
+                        fillColor: color,
+                        outlineColor: Cesium.Color.BLACK,
+                        outlineWidth: 2,
+                        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                        pixelOffset: new Cesium.Cartesian2(0, -14),
+                        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000)
+                    },
+                    // Vertical line to ground so you can see altitude
+                    polyline: {
+                        positions: [
+                            Cesium.Cartesian3.fromDegrees(ac.longitude, ac.latitude, 0),
+                            Cesium.Cartesian3.fromDegrees(ac.longitude, ac.latitude, altMeters)
+                        ],
+                        width: 1,
+                        material: new Cesium.ColorMaterialProperty(color.withAlpha(0.4)),
+                        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 500000)
+                    }
+                });
+            }
+        }
+
+        // Remove stale aircraft from Cesium that are no longer in adsbAircraft
+        function syncCesiumAircraft() {
+            if (!cesiumViewer) return;
+            const activeIcaos = new Set(adsbAircraft.map(a => a.icao));
+            Object.keys(cesiumAircraftEntities).forEach(icao => {
+                if (!activeIcaos.has(icao)) {
+                    cesiumViewer.entities.remove(cesiumAircraftEntities[icao]);
+                    delete cesiumAircraftEntities[icao];
                 }
             });
         }
@@ -1959,6 +2055,11 @@ ALPHA-3 | REAR"></textarea>
 
             // Update aircraft count display
             document.getElementById('adsbCount').textContent = Object.keys(aircraftMarkers).length;
+
+            // Mirror to 3D Cesium view if active and layer visible
+            if (is3DMode && layerVisible.adsb) {
+                addAircraftToCesium(ac);
+            }
         }
 
         function updateAdsbOnMap() {
@@ -2067,9 +2168,14 @@ ALPHA-3 | REAR"></textarea>
                     adsbAircraftCount = 0;
                     adsbMaxRange = 0;
                     updateStatus('DISCONNECTED', 'var(--text-muted)');
-                    // Clear aircraft from map
+                    // Clear 2D aircraft markers
                     Object.values(aircraftMarkers).forEach(m => { if(map) map.removeLayer(m); });
                     aircraftMarkers = {};
+                    // Clear 3D Cesium aircraft
+                    if (cesiumViewer) {
+                        Object.values(cesiumAircraftEntities).forEach(e => cesiumViewer.entities.remove(e));
+                    }
+                    cesiumAircraftEntities = {};
                     renderSDR();
                 } catch (e) {
                     debugLog('Failed to stop RTL-SDR: ' + e);
