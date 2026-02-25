@@ -1,0 +1,14 @@
+/Users/thelomaxproject/Overwatch/sigint/target/debug/deps/serde-b85691a9158e8ba2.d: /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/thelomaxproject/Overwatch/sigint/target/debug/build/serde-5e78f8b7a72a1689/out/private.rs
+
+/Users/thelomaxproject/Overwatch/sigint/target/debug/deps/libserde-b85691a9158e8ba2.rlib: /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/thelomaxproject/Overwatch/sigint/target/debug/build/serde-5e78f8b7a72a1689/out/private.rs
+
+/Users/thelomaxproject/Overwatch/sigint/target/debug/deps/libserde-b85691a9158e8ba2.rmeta: /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/thelomaxproject/Overwatch/sigint/target/debug/build/serde-5e78f8b7a72a1689/out/private.rs
+
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/thelomaxproject/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/thelomaxproject/Overwatch/sigint/target/debug/build/serde-5e78f8b7a72a1689/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/thelomaxproject/Overwatch/sigint/target/debug/build/serde-5e78f8b7a72a1689/out
