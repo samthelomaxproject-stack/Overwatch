@@ -33,10 +33,13 @@
 
 pub mod collector;
 pub mod confidence;
+pub mod crypto;
 pub mod error;
 pub mod gps;
 pub mod hub;
+pub mod manet;
 pub mod rf;
+pub mod sanitize;
 pub mod storage;
 pub mod sync;
 pub mod wifi;

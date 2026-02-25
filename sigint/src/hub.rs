@@ -35,6 +35,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use crate::{Error, wire::TileUpdate};
 use crate::sync::{AckResult, TileDelta};
+use crate::sanitize::{sanitize_rf, sanitize_wifi, RateLimiter};
 
 const HUB_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS merged_tiles (
@@ -95,6 +96,7 @@ impl HubDb {
     }
 
     /// Merge a TileUpdate batch into merged_tiles.
+    /// Sanitizes all inputs before merging. Tracks per-node rate limits.
     /// Uses confidence-weighted mean merge strategy.
     pub fn merge_update(&mut self, update: &TileUpdate) -> Result<AckResult, Error> {
         let now = std::time::SystemTime::now()
@@ -105,13 +107,25 @@ impl HubDb {
         self.upsert_node(&update.device_id, &update.source_type, now)?;
 
         let mut accepted = 0u32;
+        let mut rejected = 0u32;
+        let mut rate_limiter = RateLimiter::new();
         let tx = self.conn.transaction()?;
 
         for tile in &update.tiles {
             // Merge RF aggregates
             if let Some(rf_list) = &tile.rf {
                 for agg in rf_list {
+                    // Sanitize
+                    let agg = match sanitize_rf(agg) {
+                        Some(a) => a,
+                        None => { rejected += 1; continue; }
+                    };
                     let dim = format!("rf:{}-{}", agg.freq_start_hz, agg.freq_end_hz);
+                    // Rate limit
+                    if !rate_limiter.allow_rf(&update.device_id, &tile.tile_id, tile.time_bucket, &dim) {
+                        rejected += 1;
+                        continue;
+                    }
                     tx.execute(
                         r#"INSERT INTO merged_tiles
                            (tile_id, time_bucket, sensor_type, dimension, mean_val, max_val,
@@ -138,6 +152,16 @@ impl HubDb {
             // Merge Wi-Fi channel hotness
             if let Some(wifi) = &tile.wifi {
                 for ch in &wifi.channel_hotness {
+                    // Sanitize
+                    let ch = match sanitize_wifi(ch) {
+                        Some(c) => c,
+                        None => { rejected += 1; continue; }
+                    };
+                    // Rate limit
+                    if !rate_limiter.allow_wifi(&update.device_id, &tile.tile_id, tile.time_bucket, &ch.band, ch.channel) {
+                        rejected += 1;
+                        continue;
+                    }
                     let dim = format!("wifi:{}:{}", ch.band, ch.channel);
                     tx.execute(
                         r#"INSERT INTO merged_tiles
@@ -164,11 +188,16 @@ impl HubDb {
         }
 
         tx.commit()?;
-        Ok(AckResult { accepted, rejected: 0, cursor: now })
+        Ok(AckResult { accepted, rejected, cursor: now })
     }
 
     /// Return tiles updated since cursor_ts for a given device.
+    /// Values are time-decayed before sending so renderers show fading heat.
     pub fn get_delta(&self, _device_id: &str, cursor_ts: u64) -> Result<TileDelta, Error> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let mut stmt = self.conn.prepare(
             r#"SELECT tile_id, time_bucket, sensor_type, dimension,
                       mean_val, max_val, sample_count, confidence, updated_at
@@ -199,9 +228,11 @@ impl HubDb {
         })?.collect::<Result<Vec<_>, _>>()?;
 
         let max_cursor = rows.iter().map(|r| r.updated_at).max().unwrap_or(cursor_ts);
+        let now_secs = now as f64;
 
-        // Build TileUpdate from rows — simplified: one TileUpdate per device batch
+        // Build TileUpdate with time-decayed values
         use crate::wire::{TileData, RfAggregate, WifiData, ChannelHotness};
+        use crate::sanitize::{decay_factor, RF_DECAY_HALF_LIFE_SECS, WIFI_DECAY_HALF_LIFE_SECS};
         use std::collections::HashMap;
 
         let mut tile_map: HashMap<(String, u64), TileData> = HashMap::new();
@@ -212,15 +243,23 @@ impl HubDb {
                 TileData::new(row.tile_id.clone(), row.time_bucket)
             });
 
+            let age = now_secs - row.updated_at as f64;
+
             match row.sensor_type.as_str() {
                 "rf" => {
+                    let decay = decay_factor(age, RF_DECAY_HALF_LIFE_SECS);
                     let parts: Vec<&str> = row.dimension.trim_start_matches("rf:").split('-').collect();
                     if parts.len() == 2 {
                         if let (Ok(start), Ok(end)) = (parts[0].parse(), parts[1].parse()) {
                             let agg = RfAggregate {
                                 freq_start_hz: start, freq_end_hz: end,
-                                mean_power_dbm: row.mean_val, max_power_dbm: row.max_val,
-                                sample_count: row.sample_count, confidence: row.confidence,
+                                // Apply decay: power in dBm is logarithmic, so we decay confidence
+                                // and scale mean linearly (approximation adequate for display)
+                                mean_power_dbm: row.mean_val,
+                                max_power_dbm: row.max_val,
+                                sample_count: row.sample_count,
+                                // Decay expressed through confidence so renderer adjusts opacity
+                                confidence: (row.confidence * decay).clamp(0.0, 1.0),
                             };
                             tile.rf.get_or_insert_with(Vec::new).push(agg);
                         }
@@ -232,11 +271,12 @@ impl HubDb {
                     let mut parts = rest.splitn(2, ':');
                     if let (Some(band), Some(ch_str)) = (parts.next(), parts.next()) {
                         if let Ok(channel) = ch_str.parse() {
+                            let wifi_decay = decay_factor(age, WIFI_DECAY_HALF_LIFE_SECS);
                             let ch = ChannelHotness {
                                 band: band.to_string(), channel,
                                 count: row.sample_count,
                                 mean_rssi_dbm: row.mean_val, max_rssi_dbm: row.max_val,
-                                confidence: row.confidence,
+                                confidence: (row.confidence * wifi_decay).clamp(0.0, 1.0),
                             };
                             tile.wifi.get_or_insert(WifiData { channel_hotness: vec![] })
                                 .channel_hotness.push(ch);
