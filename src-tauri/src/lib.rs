@@ -793,15 +793,30 @@ fn start_rtl_sdr(app_handle: tauri::AppHandle) -> Result<String, String> {
                             if let Ok(line) = line {
                                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                                     if let Some(aircraft) = json.get("aircraft") {
-                                        // Store in static for polling
+                                        let now_secs = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_secs();
+
+                                        // Stamp with last_seen and upsert into static db
                                         if let Ok(mut db) = RTL_SDR_AIRCRAFT.lock() {
                                             let icao = aircraft.get("icao").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let mut entry = aircraft.clone();
+                                            entry["_last_seen"] = serde_json::json!(now_secs);
+
                                             if let Some(pos) = db.iter().position(|a| a.get("icao").and_then(|v| v.as_str()) == Some(&icao)) {
-                                                db[pos] = aircraft.clone();
+                                                db[pos] = entry;
                                             } else {
-                                                db.push(aircraft.clone());
-                                                if db.len() > 200 { db.remove(0); }
+                                                db.push(entry);
                                             }
+
+                                            // Prune stale entries (>60s) right here
+                                            db.retain(|a| {
+                                                a.get("_last_seen")
+                                                    .and_then(|t| t.as_u64())
+                                                    .map(|t| now_secs.saturating_sub(t) < 60)
+                                                    .unwrap_or(false)
+                                            });
                                         }
                                         let _ = app_handle_thread.emit("rtl-sdr-aircraft", aircraft.clone());
                                     }
@@ -833,13 +848,23 @@ fn get_rtl_sdr_status() -> serde_json::Value {
     let status = RTL_SDR_STATUS.lock()
         .map(|s| s.clone())
         .unwrap_or_default();
-    let aircraft = RTL_SDR_AIRCRAFT.lock()
-        .map(|db| db.clone())
+    let aircraft: Vec<serde_json::Value> = RTL_SDR_AIRCRAFT.lock()
+        .map(|db| {
+            db.iter().map(|ac| {
+                // Strip internal _last_seen before sending to JS
+                let mut clean = ac.clone();
+                if let Some(obj) = clean.as_object_mut() {
+                    obj.remove("_last_seen");
+                }
+                clean
+            }).collect()
+        })
         .unwrap_or_default();
+    let count = aircraft.len();
     serde_json::json!({
         "status": status,
         "aircraft": aircraft,
-        "count": aircraft.len()
+        "count": count
     })
 }
 
