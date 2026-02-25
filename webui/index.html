@@ -429,6 +429,8 @@
                             <button class="tac-layer-btn active" onclick="toggleLayer('zones')">ZONES</button>
                             <button class="tac-layer-btn" onclick="toggleLayer('adsb')">ADS-B</button>
                             <button class="tac-layer-btn" onclick="toggleLayer('ais')">AIS</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('rf')">RF</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('wifi')">Wi-Fi</button>
                         </div>
                     </div>
                 </div>
@@ -649,6 +651,7 @@ ALPHA-3 | REAR"></textarea>
         </div>
     </div>
 
+    <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // State
@@ -782,7 +785,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false };
 
         function toggleLayer(layer) {
             layerVisible[layer] = !layerVisible[layer];
@@ -816,6 +819,13 @@ ALPHA-3 | REAR"></textarea>
                         if (map && map.hasLayer(marker)) marker.remove();
                     }
                 });
+            }
+
+            if (layer === 'rf') {
+                layerVisible.rf ? renderHexLayer('rf') : clearHexLayer('rf');
+            }
+            if (layer === 'wifi') {
+                layerVisible.wifi ? renderHexLayer('wifi') : clearHexLayer('wifi');
             }
         }
 
@@ -1270,6 +1280,9 @@ ALPHA-3 | REAR"></textarea>
 
                     debugLog('Listeners registered');
 
+                    // Start SIGINT hub polling
+                    startHubPoller();
+
                     // Setup Meshtastic listeners
                     setupMeshtasticListeners();
                 }
@@ -1493,6 +1506,230 @@ ALPHA-3 | REAR"></textarea>
 
         // Store last known location
         let lastKnownLocation = null;
+
+        // ── SIGINT Hex Overlay ──────────────────────────────────────────────────
+
+        // Hub connection config — set via Settings in Phase 4
+        let hubUrl = 'http://localhost:8789';
+
+        // Hex tile state keyed by H3 cell id
+        const hexTiles = { rf: {}, wifi: {} };
+        // Leaflet polygon layers keyed by H3 cell id
+        const hexPolygons = { rf: {}, wifi: {} };
+
+        // Selected tile for detail panel
+        let selectedTile = null;
+
+        // Color ramps
+        function rfColor(meanDbm, confidence) {
+            // -100 dBm (weak) → blue, -40 dBm (strong) → red
+            const t = Math.max(0, Math.min(1, (meanDbm + 100) / 60));
+            const r = Math.round(t * 220);
+            const b = Math.round((1 - t) * 220);
+            const alpha = 0.25 + confidence * 0.45;
+            return `rgba(${r}, 30, ${b}, ${alpha})`;
+        }
+
+        function wifiColor(count, confidence) {
+            // 1 network → blue, 10+ → orange
+            const t = Math.max(0, Math.min(1, count / 10));
+            const r = Math.round(t * 255);
+            const g = Math.round(t * 100);
+            const alpha = 0.25 + confidence * 0.45;
+            return `rgba(${r}, ${g}, 20, ${alpha})`;
+        }
+
+        function renderHexLayer(type) {
+            if (!map || !window.h3) return;
+            const tiles = hexTiles[type];
+            Object.entries(tiles).forEach(([cellId, data]) => {
+                drawHexTile(type, cellId, data);
+            });
+        }
+
+        function clearHexLayer(type) {
+            Object.values(hexPolygons[type]).forEach(p => { if (map) map.removeLayer(p); });
+            hexPolygons[type] = {};
+        }
+
+        function drawHexTile(type, cellId, data) {
+            if (!map || !window.h3) return;
+
+            // Get boundary from h3-js
+            const boundary = h3.cellToBoundary(cellId); // [[lat,lng], ...]
+            const latLngs = boundary.map(([lat, lng]) => [lat, lng]);
+
+            const color = type === 'rf'
+                ? rfColor(data.mean_val, data.confidence)
+                : wifiColor(data.sample_count, data.confidence);
+
+            const borderColor = type === 'rf' ? '#4488ff' : '#ff8800';
+
+            if (hexPolygons[type][cellId]) {
+                hexPolygons[type][cellId].setStyle({ fillColor: color, color: borderColor });
+                return;
+            }
+
+            const poly = L.polygon(latLngs, {
+                fillColor: color,
+                fillOpacity: 1,
+                color: borderColor,
+                weight: 1,
+                opacity: 0.6
+            });
+
+            poly.on('click', () => {
+                selectedTile = { type, cellId, data };
+                showTileDetail(type, cellId, data);
+            });
+
+            poly.bindTooltip(buildHexTooltip(type, data), { sticky: true });
+
+            if (layerVisible[type]) poly.addTo(map);
+            hexPolygons[type][cellId] = poly;
+        }
+
+        function buildHexTooltip(type, data) {
+            if (type === 'rf') {
+                return `<span style="font-family:monospace;font-size:11px;">
+                    RF · ${data.dimension || ''}<br>
+                    Mean: ${data.mean_val?.toFixed(1)} dBm<br>
+                    Max: ${data.max_val?.toFixed(1)} dBm<br>
+                    Samples: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
+                </span>`;
+            } else {
+                return `<span style="font-family:monospace;font-size:11px;">
+                    Wi-Fi · ${data.dimension || ''}<br>
+                    Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
+                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
+                </span>`;
+            }
+        }
+
+        function showTileDetail(type, cellId, data) {
+            // Switch to SDR/SIGINT view and highlight the tile
+            document.querySelectorAll('.tac-nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelector('[data-view="sdr"]')?.classList.add('active');
+            document.querySelectorAll('.tac-view').forEach(v => v.classList.remove('active'));
+            document.getElementById('view-sdr')?.classList.add('active');
+
+            // Update detail panel
+            const panel = document.getElementById(type === 'rf' ? 'rfDetailPanel' : 'wifiDetailPanel');
+            if (!panel) return;
+            const ago = data.updated_at ? Math.floor((Date.now()/1000 - data.updated_at)) + 's ago' : '--';
+            panel.innerHTML = `
+                <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">Cell: ${cellId}</div>
+                <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--accent-cyan);margin-bottom:var(--space-sm);">${data.dimension || ''}</div>
+                <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:0.75rem;">
+                    <span style="color:var(--text-muted);">Mean</span><span>${data.mean_val?.toFixed(1)} dBm</span>
+                    <span style="color:var(--text-muted);">Max</span><span>${data.max_val?.toFixed(1)} dBm</span>
+                    <span style="color:var(--text-muted);">Samples</span><span>${data.sample_count}</span>
+                    <span style="color:var(--text-muted);">Confidence</span><span>${(data.confidence * 100).toFixed(0)}%</span>
+                    <span style="color:var(--text-muted);">Updated</span><span>${ago}</span>
+                </div>
+            `;
+        }
+
+        // ── Hub polling ─────────────────────────────────────────────────────────
+
+        let hubPollCursor = 0;
+        let hubPoller = null;
+
+        function startHubPoller() {
+            if (hubPoller) clearInterval(hubPoller);
+            hubPoller = setInterval(pollHub, 5000);
+            pollHub(); // immediate first poll
+        }
+
+        async function pollHub() {
+            if (!window.__TAURI__) return; // Only in Tauri context
+            try {
+                const result = await window.__TAURI__.core.invoke('get_sigint_delta', {
+                    cursor: hubPollCursor
+                });
+                if (result && result.tiles) {
+                    ingestSigintDelta(result);
+                    if (result.cursor > hubPollCursor) {
+                        hubPollCursor = result.cursor;
+                    }
+                }
+            } catch (e) {
+                // Hub not running — silently ignore
+            }
+        }
+
+        function ingestSigintDelta(delta) {
+            if (!delta.tiles) return;
+            for (const update of delta.tiles) {
+                if (!update.tiles) continue;
+                for (const tile of update.tiles) {
+                    const cellId = tile.tile_id;
+
+                    // RF
+                    if (tile.rf) {
+                        for (const agg of tile.rf) {
+                            const dim = `${agg.freq_start_hz}-${agg.freq_end_hz}`;
+                            const key = `${cellId}:${dim}`;
+                            hexTiles.rf[key] = {
+                                ...agg,
+                                cellId,
+                                dimension: formatFreq(agg.freq_start_hz, agg.freq_end_hz),
+                                updated_at: Math.floor(Date.now() / 1000)
+                            };
+                            if (layerVisible.rf) drawHexTile('rf', cellId, hexTiles.rf[key]);
+                        }
+                    }
+
+                    // Wi-Fi
+                    if (tile.wifi && tile.wifi.channel_hotness) {
+                        for (const ch of tile.wifi.channel_hotness) {
+                            const dim = `${ch.band}GHz Ch${ch.channel}`;
+                            const key = `${cellId}:${ch.band}:${ch.channel}`;
+                            hexTiles.wifi[key] = {
+                                ...ch,
+                                cellId,
+                                dimension: dim,
+                                mean_val: ch.mean_rssi_dbm,
+                                max_val: ch.max_rssi_dbm,
+                                updated_at: Math.floor(Date.now() / 1000)
+                            };
+                            if (layerVisible.wifi) drawHexTile('wifi', cellId, hexTiles.wifi[key]);
+                        }
+                    }
+                }
+            }
+            updateSigintStats();
+        }
+
+        function formatFreq(startHz, endHz) {
+            const toMhz = hz => (hz / 1e6).toFixed(0);
+            return `${toMhz(startHz)}–${toMhz(endHz)} MHz`;
+        }
+
+        function updateSigintStats() {
+            const rfCount = Object.keys(hexTiles.rf).length;
+            const wifiCount = Object.keys(hexTiles.wifi).length;
+            const rfEl = document.getElementById('rfTileCount');
+            const wifiEl = document.getElementById('wifiTileCount');
+            if (rfEl) rfEl.textContent = rfCount;
+            if (wifiEl) wifiEl.textContent = wifiCount;
+
+            // Peak RF power across all tiles
+            let peakDbm = null;
+            Object.values(hexTiles.rf).forEach(t => {
+                if (peakDbm === null || t.max_val > peakDbm) peakDbm = t.max_val;
+            });
+            const rfPeakEl = document.getElementById('rfPeakPower');
+            if (rfPeakEl) rfPeakEl.textContent = peakDbm !== null ? peakDbm.toFixed(1) + ' dBm' : '--';
+
+            // Hottest Wi-Fi channel
+            let hottestCh = null;
+            Object.values(hexTiles.wifi).forEach(t => {
+                if (!hottestCh || t.sample_count > hottestCh.sample_count) hottestCh = t;
+            });
+            const wifiHotEl = document.getElementById('wifiHotChannel');
+            if (wifiHotEl) wifiHotEl.textContent = hottestCh ? hottestCh.dimension : '--';
+        }
 
         // Update Cesium when location changes if in 3D mode
         function updateCesiumLocation(lat, lon) {
@@ -1826,6 +2063,66 @@ ALPHA-3 | REAR"></textarea>
                             </div>
                         </div>
                     </div>
+                    <!-- RF Environment Panel -->
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">RF Environment</span>
+                            <div style="display:flex;gap:4px;">
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleLayer('rf');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP</button>
+                            </div>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-md);text-align:center;margin-bottom:var(--space-md);">
+                                <div>
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--accent-cyan);" id="rfTileCount">0</div>
+                                    <div class="tac-label">TILES</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="rfPeakPower">--</div>
+                                    <div class="tac-label">PEAK</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);">HackRF</div>
+                                    <div class="tac-label">SOURCE</div>
+                                </div>
+                            </div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:var(--space-xs);">SELECTED TILE</div>
+                            <div id="rfDetailPanel" style="min-height:60px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
+                                Click a hex on the map to see detail
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Wi-Fi Density Panel -->
+                    <div class="tac-panel">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">Wi-Fi Density</span>
+                            <div style="display:flex;gap:4px;">
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleLayer('wifi');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP</button>
+                            </div>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-md);text-align:center;margin-bottom:var(--space-md);">
+                                <div>
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--accent-cyan);" id="wifiTileCount">0</div>
+                                    <div class="tac-label">TILES</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.75rem;font-weight:700;color:var(--accent-cyan);" id="wifiHotChannel">--</div>
+                                    <div class="tac-label">HOTTEST</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);">Mode A</div>
+                                    <div class="tac-label">PRIVACY</div>
+                                </div>
+                            </div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:var(--space-xs);">SELECTED TILE</div>
+                            <div id="wifiDetailPanel" style="min-height:60px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
+                                Click a hex on the map to see detail
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="tac-panel" style="grid-column: 1 / -1;">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">Meshtastic (LoRa 915 MHz)</span>

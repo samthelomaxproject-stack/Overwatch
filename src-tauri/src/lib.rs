@@ -868,6 +868,22 @@ fn get_rtl_sdr_status() -> serde_json::Value {
     })
 }
 
+/// Fetch SIGINT delta from the local hub-api (runs on localhost:8789).
+/// Returns merged tile data since the given cursor timestamp.
+/// JS polls this every 5 seconds when hub is running.
+#[tauri::command]
+fn get_sigint_delta(cursor: u64) -> serde_json::Value {
+    let url = format!("http://127.0.0.1:8789/api/delta?device_id=overwatch-ui&cursor={cursor}");
+    match ureq::get(&url).call() {
+        Ok(resp) => {
+            let body = resp.into_string().unwrap_or_default();
+            serde_json::from_str::<serde_json::Value>(&body)
+                .unwrap_or(serde_json::json!({"tiles": [], "cursor": cursor}))
+        }
+        Err(_) => serde_json::json!({"tiles": [], "cursor": cursor})
+    }
+}
+
 #[tauri::command]
 fn stop_rtl_sdr() -> Result<String, String> {
     let mut state = RTL_SDR_STATE.lock().unwrap();
@@ -933,7 +949,8 @@ fn stop_rtl_sdr() -> Result<String, String> {
             meshtastic_cli_start_listen,
             start_rtl_sdr,
             stop_rtl_sdr,
-            get_rtl_sdr_status
+            get_rtl_sdr_status,
+            get_sigint_delta
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
