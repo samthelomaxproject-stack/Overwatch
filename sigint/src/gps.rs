@@ -12,11 +12,15 @@ pub struct GpsFix {
 }
 
 impl GpsFix {
-    /// Derive the H3 tile_id string for this fix at a given resolution.
-    /// NOTE: h3o will be wired in Phase 2. For now returns a placeholder.
-    pub fn tile_id(&self, _resolution: u8) -> String {
-        // Phase 2: use h3o::CellIndex::from_lat_lng(...)
-        format!("tile_{:.4}_{:.4}", self.lat, self.lon)
+    /// Derive the H3 tile_id string for this fix at a given resolution (0–15).
+    /// Returns the H3 cell index as a hex string.
+    pub fn tile_id(&self, resolution: u8) -> String {
+        use h3o::{CellIndex, LatLng, Resolution};
+        let res = Resolution::try_from(resolution).unwrap_or(Resolution::Ten);
+        let ll = LatLng::new(self.lat, self.lon)
+            .expect("lat/lon out of range");
+        let cell: CellIndex = ll.to_cell(res);
+        format!("{cell}")
     }
 
     /// Time bucket: floor to nearest 60-second boundary
@@ -89,6 +93,20 @@ mod tests {
         let fix = gps.current_fix().unwrap();
         assert!((fix.lat - 33.18).abs() < 1e-9);
         assert!((fix.accuracy_m - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tile_id_returns_h3_hex() {
+        let fix = GpsFix {
+            lat: 33.18, lon: -96.88, accuracy_m: 5.0,
+            altitude_m: None, speed_mps: None,
+            timestamp_utc: 1740000000,
+        };
+        let tile = fix.tile_id(10);
+        // H3 cell ids are 15-char hex strings
+        assert_eq!(tile.len(), 15, "H3 cell id should be 15 chars, got: {tile}");
+        // Must be valid hex
+        assert!(u64::from_str_radix(&tile, 16).is_ok(), "Not valid hex: {tile}");
     }
 
     #[test]

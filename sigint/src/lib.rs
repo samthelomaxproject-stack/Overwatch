@@ -31,11 +31,14 @@
 //!                                              SyncTransport → hub-api
 //! ```
 
+pub mod collector;
 pub mod confidence;
 pub mod error;
 pub mod gps;
+pub mod hub;
 pub mod rf;
 pub mod storage;
+pub mod sync;
 pub mod wifi;
 pub mod wire;
 
