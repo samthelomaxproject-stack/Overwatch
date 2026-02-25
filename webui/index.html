@@ -2092,6 +2092,34 @@ ALPHA-3 | REAR"></textarea>
 
         let rtlSdrPoller = null;
 
+        const AIRCRAFT_TTL_MS = 60000; // Match Python bridge's 60s stale timeout
+
+        function pruneStaleAircraft() {
+            const now = Date.now();
+            const staleIcaos = adsbAircraft
+                .filter(ac => (now - (ac._lastSeen || 0)) > AIRCRAFT_TTL_MS)
+                .map(ac => ac.icao);
+
+            if (staleIcaos.length === 0) return;
+
+            staleIcaos.forEach(icao => {
+                // Remove from 2D map
+                if (aircraftMarkers[icao]) {
+                    if (map && map.hasLayer(aircraftMarkers[icao])) map.removeLayer(aircraftMarkers[icao]);
+                    delete aircraftMarkers[icao];
+                }
+                // Remove from 3D Cesium
+                if (cesiumAircraftEntities[icao] && cesiumViewer) {
+                    cesiumViewer.entities.remove(cesiumAircraftEntities[icao]);
+                    delete cesiumAircraftEntities[icao];
+                }
+                debugLog(`🗑️ Pruned stale aircraft: ${icao}`);
+            });
+
+            adsbAircraft = adsbAircraft.filter(ac => !staleIcaos.includes(ac.icao));
+            document.getElementById('adsbCount').textContent = Object.keys(aircraftMarkers).length;
+        }
+
         async function startRtlSdrPoller() {
             if (rtlSdrPoller) clearInterval(rtlSdrPoller);
             let lastStatus = '';
@@ -2120,9 +2148,11 @@ ALPHA-3 | REAR"></textarea>
                         debugLog(`✈️ Aircraft count: ${count}`);
                     }
 
-                    // Merge polled aircraft into local state
+                    // Merge polled aircraft into local state, stamp last seen time
                     if (aircraft && aircraft.length > 0) {
+                        const now = Date.now();
                         for (const ac of aircraft) {
+                            ac._lastSeen = now;
                             const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
                             if (existing >= 0) {
                                 adsbAircraft[existing] = { ...adsbAircraft[existing], ...ac };
@@ -2133,6 +2163,10 @@ ALPHA-3 | REAR"></textarea>
                         }
                         document.getElementById('adsbCount').textContent = adsbAircraft.length;
                     }
+
+                    // Prune aircraft not seen in AIRCRAFT_TTL_MS
+                    pruneStaleAircraft();
+
                 } catch (e) {
                     // silent
                 }
