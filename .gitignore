@@ -1,0 +1,30 @@
+# Rust build artifacts
+src-tauri/target/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Dev/debug scripts (superseded by rtl_sdr_socket.py)
+rtl_sdr_bridge.py
+rtl_sdr_bridge_debug.py
+rtl_sdr_bridge_rate_limited.py
+rtl_sdr_poll.py
+rtl_sdr_socket_debug.py
+
+# Leftover dev files
+src-tauri/src/lib.rs.backup
+src-tauri/src/rtl_sdr_fixed.rs
+src-tauri/src/rtl_sdr_test.rs
+src-tauri/src/start_rtl_sdr_new.txt
+test_pipeline.sh
+test_serial.py
+meshtastic_bridge.py
+
+# Node
+node_modules/
