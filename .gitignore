@@ -1,5 +1,6 @@
 # Rust build artifacts
 src-tauri/target/
+sigint/target/
 
 # macOS
 .DS_Store
