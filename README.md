@@ -9,7 +9,18 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 ## Status
 
 **Version:** 0.2.2  
-**Status:** Production-ready desktop app with Meshtastic mesh network support and live ADS-B tracking
+**Status:** Production-ready desktop app with live ADS-B, Meshtastic, and SIGINT RF/Wi-Fi heatmap foundation
+
+### What's New in v0.2.2 (2026-02-24–25)
+- ✅ **ADS-B live tracking** — HackRF/dump1090 integration with real-time aircraft on 2D and 3D maps
+- ✅ **ADS-B on Cesium 3D** — Aircraft shown at real altitude with vertical drop-lines and color-by-altitude
+- ✅ **Stale aircraft pruning** — Aircraft disappear after 60s of no transmissions on both 2D and 3D maps
+- ✅ **SIGINT foundation crate** — New `sigint/` Rust crate: RF heatmap collection and aggregation (see below)
+- ✅ **Dynamic Entities** — `ingestPLI()` hook ready for EUD mesh PLI data
+- ✅ **Squad management** — Full add/edit/delete with modal, empty state
+- ✅ **Map layer toggles** — UNITS, ADS-B, RF, Wi-Fi buttons actually toggle marker/hex visibility
+- ✅ **RF + Wi-Fi heatmap panels** — New SDR/SIGINT sidebar panels with tile count, peak power, detail view
+- ✅ **H3 hex overlay** — h3-js renders live hexagons on the tactical map, click for tile detail
 
 ### What's New in v0.2.1
 - ✅ **Meshtastic CLI integration** — Connect to Meshtastic mesh networks via official CLI
@@ -180,7 +191,7 @@ Overwatch/
 - [x] Sidebar navigation with keyboard shortcuts
 - [x] Packet creation and display
 - [x] Tactical map with Leaflet
-- [x] Squad management
+- [x] Squad management with add/edit/delete
 - [x] GPS tracking with MGRS
 - [x] **v0.2.0: Tactical UI overhaul — glassmorphism, military symbols, priority indicators**
 
@@ -198,21 +209,76 @@ Overwatch/
 - [ ] Transport abstraction layer
 
 ### Phase 4: Advanced Features (v0.5)
-- [ ] SATCOM tracking with TLE propagation
-- [ ] AIS/ADS-B SDR hardware integration
+- [x] **ADS-B live tracking** — HackRF/dump1090, TCP bridge, real-time map, 60s stale pruning — **v0.2.2**
+- [x] **ADS-B on 3D Cesium** — aircraft at real altitude, vertical drop-lines, color-by-altitude — **v0.2.2**
+- [ ] AIS vessel tracking (hardware ready, integration planned)
+- [ ] SATCOM tracking with TLE propagation (ISS panel scaffolded)
 - [ ] ATAK KML/CoT import/export
 - [ ] Zone editor with polygon drawing
 - [ ] SECURE mode encryption (AES-256)
 
-### Phase 5: Lattice/ATAK Integration (v0.6)
+### Phase 5: SIGINT RF + Wi-Fi Heatmap ✅ (Foundation Complete)
+
+**`sigint/` Rust crate — 78 tests, 0 failures**
+
+#### Phase 5.1 — Foundation (complete)
+- [x] `wire.rs` — TileUpdate JSON wire format (schema v1)
+- [x] `confidence.rs` — GPS × sample × dwell × speed scoring formula, 11 tests
+- [x] `gps.rs` — GpsProvider trait, real h3o cell lookup at H3 resolution 10
+- [x] `rf.rs` — hackrf_sweep CSV parser, ring buffer, Welford online mean, tile bucket
+- [x] `wifi.rs` — WifiScanner trait, macOS airport impl, Privacy Mode A filter, tile bucket
+- [x] `storage.rs` — Node SQLite DB (WAL), upsert with ON CONFLICT merge, sync cursor
+
+#### Phase 5.2 — Hub + Sync (complete)
+- [x] `sync.rs` — SyncTransport trait; HttpSyncTransport (VPN/LAN), NullSyncTransport
+- [x] `hub.rs` — HubDb (merged_tiles, node_registry, delta_cursors), hub-api HTTP server
+  - Routes: `GET /health`, `POST /api/push`, `GET /api/delta`
+  - Confidence-weighted mean merge with ON CONFLICT upsert
+  - Cursor-based delta queries
+- [x] `collector.rs` — Full collection loop: GPS → RF flush (5s) → Wi-Fi scan (30s) → sync push/pull (30s)
+
+#### Phase 5.3 — Visualization (complete)
+- [x] h3-js hex overlay on Leaflet tactical map
+- [x] RF color ramp: blue (weak, −100 dBm) → red (strong, −40 dBm), opacity by confidence
+- [x] Wi-Fi color ramp: blue (sparse) → orange (dense), opacity by confidence
+- [x] Hover tooltip: mean/max/samples/confidence
+- [x] Click-to-detail: hex click switches to SDR view, populates detail panel
+- [x] RF Environment + Wi-Fi Density panels in SDR/SIGINT sidebar
+- [x] `get_sigint_delta` Tauri command — polls hub-api every 5s, graceful fallback
+
+#### Phase 5.4 — Hardening (complete)
+- [x] `crypto.rs` — Ed25519 keypair generation, `device_id` derived from public key
+  - `sign_payload()` / `verify_payload()` — canonical JSON → sign → base64
+- [x] `sanitize.rs` — Anti-poisoning pipeline
+  - RF: freq bounds (10 MHz–6 GHz), power clamp (−120–0 dBm), mean>max rejection
+  - Wi-Fi: RSSI clamp (−100–−10 dBm), band validation, mean>max rejection
+  - GPS: lat/lon bounds, accuracy >500m rejected, speed >300 m/s rejected
+  - `RateLimiter`: 200 RF / 20 Wi-Fi contributions per node per tile per bucket
+  - `decay_factor()`: exponential decay, RF 5min half-life, Wi-Fi 2min half-life
+  - Time decay applied in `get_delta()` — confidence fades with age for opacity rendering
+- [x] `manet.rs` — MANET/Reticulum transport stub (drop-in for Phase 6)
+  - `transport_from_config("http"|"manet"|"null")` factory
+
+#### Phase 5.5 — Remaining
+- [ ] Wire Ed25519 signing into sync push path (keys generated, signing functions ready)
+- [ ] Hub signature verification on merge (skeleton in place)
+- [ ] hackrf_sweep spawner thread (parser complete, spawner integration pending)
+- [ ] Android EUD collector client (same sigint crate, platform Wi-Fi scanner impl)
+
+### Phase 6: MANET + Android (v0.7)
+- [ ] Reticulum LXMF transport implementation (ManetSyncTransport stub ready)
+- [ ] Android version — PLI + SIGINT collector sharing over mesh
+- [ ] Key rotation (device_id stable, rotation hook documented)
+- [ ] Full MIL-STD-2525 symbol support
+
+### Phase 7: Lattice/ATAK Integration (v0.8)
 - [ ] Anduril Lattice entity data model
 - [x] CoT (Cursor on Target) message parsing/generation — **v0.2.1**
 - [x] ATAK mode for Meshtastic — **v0.2.1**
 - [ ] TAK server connection (TCP/UDP)
-- [ ] Full MIL-STD-2525 symbol support
 - [ ] Real-time entity synchronization
 
-### Phase 6: Security (v0.7)
+### Phase 8: AI + Security (v0.9)
 - [ ] Gjallarhorn security integration
 - [ ] AI-powered threat detection
 - [ ] Anomaly detection in packet patterns
@@ -445,12 +511,52 @@ START clicked → STARTING (yellow, 3s) → BRIDGE_UP → CONNECTING (orange, 1s
 
 ## Changelog
 
-### v0.2.2 (2026-02-24) — ADS-B Live Tracking Fix
-- ✅ **Fixed ADS-B dead silence bug** — threading deadlock in Python TCP bridge caused zero aircraft data to reach UI
-- ✅ **Fixed Tauri event delivery** — background thread `emit()` calls were unreliable; replaced with invoke-based polling (`get_rtl_sdr_status`) guaranteed to reach JS
-- ✅ **Fixed unbound event listener** — `window.__TAURI__.event.listen` was stored without `.bind()`, silently failing to register listeners
-- ✅ **Live aircraft now display** — status progresses STARTING → CONNECTING → CONNECTED with real-time aircraft on map
-- See [Troubleshooting & Post-Mortems](#troubleshooting--post-mortems) for full details
+### v0.2.2 (2026-02-24–25) — ADS-B + SIGINT Foundation
+
+#### ADS-B
+- ✅ **Fixed ADS-B dead silence bug** — threading deadlock in Python TCP bridge (`flush_to_clients` held lock while calling `broadcast`)
+- ✅ **Fixed Tauri event delivery** — background thread `emit()` unreliable; replaced with `get_rtl_sdr_status` invoke polling
+- ✅ **Fixed unbound event listener** — `window.__TAURI__.event.listen` stored without `.bind()` — silent registration failure
+- ✅ **Live aircraft on 2D and 3D maps** — status STARTING → CONNECTING → CONNECTED, color-by-altitude, vertical drop-lines on Cesium
+- ✅ **60s stale pruning** — aircraft removed from both maps and aircraft count synchronized to on-screen truth
+- ✅ **ADS-B layer toggle** — RF/Wi-Fi/ADS-B/Units buttons actually show/hide markers
+
+#### UI Improvements
+- ✅ **Dynamic entities** — `ingestPLI()` ready for EUD mesh PLI data; empty state with mesh hint
+- ✅ **Squad CRUD** — add, edit (pre-filled modal), delete with confirm
+- ✅ **SATCOM** — ISS only (NOAA 19 decommissioned, AO-91 inactive removed)
+- ✅ **SDR status persistence** — status text survives `renderSDR()` re-renders
+
+#### SIGINT RF + Wi-Fi Heatmap (`sigint/` crate)
+
+**Phase 5.1 — Foundation** (78 tests, 0 failures across all phases)
+- New Rust crate `sigint/` — portable, no Tauri dependency, Linux/Android-ready
+- `wire.rs`: TileUpdate schema v1 wire format (serde, versioned)
+- `confidence.rs`: GPS × sample × dwell × speed scoring, 11 boundary tests
+- `gps.rs`: GpsProvider trait + real h3o H3 cell lookup at resolution 10
+- `rf.rs`: hackrf_sweep CSV parser, RingBuffer, Welford online mean, RfTileBucket
+- `wifi.rs`: WifiScanner trait, macOS `airport` impl, Privacy Mode A, WifiTileBucket
+- `storage.rs`: NodeDb SQLite (WAL), ON CONFLICT weighted-mean merge, sync cursors
+
+**Phase 5.2 — Hub + Sync**
+- `sync.rs`: SyncTransport trait — HttpSyncTransport (VPN/LAN), NullSyncTransport
+- `hub.rs`: HubDb (merged_tiles, node_registry, delta_cursors), minimal HTTP server
+  - `POST /api/push` → sanitize → rate-limit → merge
+  - `GET /api/delta?cursor=` → time-decayed confidence → TileDelta
+- `collector.rs`: full collection loop — RF flush every 5s, Wi-Fi scan every 30s, sync push/pull every 30s
+
+**Phase 5.3 — Visualization**
+- h3-js@4.1.0 hex overlay on Leaflet via `h3.cellToBoundary()`
+- RF: blue (−100 dBm) → red (−40 dBm), opacity by confidence
+- Wi-Fi: blue → orange density, opacity by confidence
+- Hover tooltip: mean/max/samples/confidence/band
+- Click hex → SDR view detail panel with cell id, dimension, stats, age
+- `get_sigint_delta` Tauri command polls hub every 5s, graceful fallback if hub not running
+
+**Phase 5.4 — Hardening**
+- `crypto.rs`: Ed25519 keypair, device_id from public key, sign/verify pipeline, 5 tests
+- `sanitize.rs`: anti-poisoning (RF freq/power bounds, Wi-Fi RSSI/band, GPS validity), per-node rate limiter (200 RF / 20 Wi-Fi per tile per bucket), exponential time decay (RF 5min, Wi-Fi 2min half-life), 20 tests
+- `manet.rs`: Reticulum MANET transport stub with `transport_from_config()` factory
 
 ### v0.2.0 (2026-02-23) — Tactical UI Overhaul + Native GPS + 3D View
 - Complete visual redesign with Anduril Lattice inspiration
