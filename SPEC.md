@@ -479,3 +479,38 @@ Overwatch/
 ---
 
 *This spec is a living document. Updates will be made as the project evolves.*
+
+---
+
+## SIGINT / RF + Wi-Fi Heatmap System
+
+### Finalized Parameters
+| Parameter | Value |
+|-----------|-------|
+| H3 resolution | 10 (collection), 8–10 served by zoom |
+| Time bucket | 60 seconds |
+| Raw flush window | 5 seconds (hackrf_sweep → observation) |
+| Privacy default | Mode A (channel hotness only) |
+| RF source | `hackrf_sweep` CLI (HackRF One/Portapack USB) |
+| Wi-Fi source | OS-native (airport/iw/WifiManager) |
+| Transport | HTTP MVP, interface-abstracted for MANET/VPN/Starlink |
+| Hub OS | Linux-ready from day one |
+| Hub host model | Standalone `hub-api` binary, Tauri spawns it on Mac |
+| VPN/Network | Ubiquiti Dream Machine Pro via Wifiman |
+| PLI transport | Meshtastic (low-bandwidth, always-on) |
+| Tile sync transport | HTTP over VPN (30s intervals) |
+
+### Build Order
+**Phase 1 — Foundation:** Wire format → confidence formula → hackrf_sweep parser → GPS provider → RF aggregation → Wi-Fi scanner → Wi-Fi aggregation
+**Phase 2 — Hub + Sync:** hub-api binary → node sync client → Tauri integration
+**Phase 3 — Visualization:** h3-js Leaflet overlay → color ramp → sidebar panels
+**Phase 4 — Hardening:** Ed25519 → anti-poisoning → time decay → MANET transport
+
+### Confidence Formula
+```
+confidence = GPS_factor × sample_factor × dwell_factor × speed_factor
+GPS_factor    = clamp(1 − (gps_accuracy_m / 20.0), 0, 1)
+sample_factor = min(sample_count / 10.0, 1.0)
+dwell_factor  = min(dwell_seconds / 30.0, 1.0)
+speed_factor  = clamp(1 − (speed_mps / 30.0), 0, 1)
+```
