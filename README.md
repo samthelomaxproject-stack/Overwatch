@@ -9,7 +9,7 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 ## Status
 
 **Version:** 0.2.2  
-**Status:** Production-ready desktop app with live ADS-B, Meshtastic, and SIGINT RF/Wi-Fi heatmap foundation
+**Status:** Production-ready desktop app — live ADS-B tracking, Meshtastic mesh, full SIGINT RF/Wi-Fi heatmap pipeline (Phases 5.1–5.5 complete)
 
 ### What's New in v0.2.2 (2026-02-24–25)
 - ✅ **ADS-B live tracking** — HackRF/dump1090 integration with real-time aircraft on 2D and 3D maps
@@ -259,11 +259,25 @@ Overwatch/
 - [x] `manet.rs` — MANET/Reticulum transport stub (drop-in for Phase 6)
   - `transport_from_config("http"|"manet"|"null")` factory
 
-#### Phase 5.5 — Remaining
-- [ ] Wire Ed25519 signing into sync push path (keys generated, signing functions ready)
-- [ ] Hub signature verification on merge (skeleton in place)
-- [ ] hackrf_sweep spawner thread (parser complete, spawner integration pending)
-- [ ] Android EUD collector client (same sigint crate, platform Wi-Fi scanner impl)
+#### Phase 5.5 — Complete ✅
+- [x] **hackrf_sweep spawner** — `Sweeper::run()` spawns per-band, streams CSV into ring buffer. Binary auto-detected at `/opt/homebrew/bin/hackrf_sweep` (installed)
+- [x] **Ed25519 signing on push** — `sync_push()` signs every batch; signature embedded in `TileUpdate.signature`
+- [x] **Hub signature verification** — `merge_update()` verifies against stored node public key; rejects invalid; first-contact grace for new nodes
+- [x] **Hub auto-start** — `start_hub()` Tauri command; binds `0.0.0.0:8789`; auto-started on app launch
+- [x] **Node collector auto-start** — `start_collector()` Tauri command; GPS + CoreWLAN + sync loop in background thread
+- [x] **RF sweep toggle** — `start_sweeper()` Tauri command; ⚡ START RF button in Hub panel
+- [x] **PLI from Meshtastic → Entities** — `meshtastic-position` event feeds `ingestPLI()` directly
+- [x] **CoreWLAN scanner** — `airport` CLI removed in macOS 15; replaced with `scan_wifi.swift` (CWWiFiClient)
+- [x] **Live GPS → collector** — `SHARED_GPS_FIX` static bridges Tauri CoreLocation thread to collector
+- [x] **Leaflet heatmap** — `leaflet-heat` replaces hex polygons; RF blue→red, Wi-Fi blue→orange; semi-transparent with map visible
+- [x] **Privacy mode selector** — Mode A/B/C in Settings; live switch without restart via `SHARED_PRIVACY_MODE` static
+  - Mode A: channel + RSSI only (default, no network identity)
+  - Mode B: salted FNV-1a hashed BSSID/SSID
+  - Mode C: raw SSID + BSSID (explicit opt-in)
+- [x] **Live Wi-Fi panel** — `get_wifi_scan_results` Tauri command; bypasses hub aggregation; shows real SSIDs in Mode C, hashes in B, channels in A
+- [x] **Location following** — GPS cell change resets hub poll cursor; new area tiles appear automatically
+- [x] **Full-width scrollable panels** — RF Environment + Wi-Fi Density span full grid, 280px scrollable with sticky headers
+- [x] **Android EUD** — same sigint crate, platform scanner impl (pending hardware)
 
 ### Phase 6: MANET + Android (v0.7)
 - [ ] Reticulum LXMF transport implementation (ManetSyncTransport stub ready)
@@ -511,52 +525,59 @@ START clicked → STARTING (yellow, 3s) → BRIDGE_UP → CONNECTING (orange, 1s
 
 ## Changelog
 
-### v0.2.2 (2026-02-24–25) — ADS-B + SIGINT Foundation
+### v0.2.2 (2026-02-24–25) — ADS-B Live + Full SIGINT Pipeline
 
 #### ADS-B
-- ✅ **Fixed ADS-B dead silence bug** — threading deadlock in Python TCP bridge (`flush_to_clients` held lock while calling `broadcast`)
+- ✅ **Fixed ADS-B dead silence** — threading deadlock in Python TCP bridge (`flush_to_clients` held lock while calling `broadcast`)
 - ✅ **Fixed Tauri event delivery** — background thread `emit()` unreliable; replaced with `get_rtl_sdr_status` invoke polling
-- ✅ **Fixed unbound event listener** — `window.__TAURI__.event.listen` stored without `.bind()` — silent registration failure
-- ✅ **Live aircraft on 2D and 3D maps** — status STARTING → CONNECTING → CONNECTED, color-by-altitude, vertical drop-lines on Cesium
-- ✅ **60s stale pruning** — aircraft removed from both maps and aircraft count synchronized to on-screen truth
-- ✅ **ADS-B layer toggle** — RF/Wi-Fi/ADS-B/Units buttons actually show/hide markers
+- ✅ **Fixed unbound event listener** — `window.__TAURI__.event.listen` without `.bind()` — silent failure
+- ✅ **Live aircraft on 2D and 3D maps** — STARTING → CONNECTING → CONNECTED, color-by-altitude, Cesium drop-lines
+- ✅ **60s stale pruning** — aircraft removed from both maps simultaneously, count reflects on-screen truth
+- ✅ **ADS-B layer toggle** — toolbar buttons actually show/hide Leaflet markers and Cesium entities
 
 #### UI Improvements
-- ✅ **Dynamic entities** — `ingestPLI()` ready for EUD mesh PLI data; empty state with mesh hint
-- ✅ **Squad CRUD** — add, edit (pre-filled modal), delete with confirm
-- ✅ **SATCOM** — ISS only (NOAA 19 decommissioned, AO-91 inactive removed)
-- ✅ **SDR status persistence** — status text survives `renderSDR()` re-renders
+- ✅ **Dynamic PLI entities** — `ingestPLI()` populates Tracked Entities and map markers from Meshtastic position events
+- ✅ **Squad CRUD** — add, edit (pre-filled modal), delete with confirm; starts empty
+- ✅ **SATCOM** — ISS only; NOAA 19 (decommissioned) and AO-91 (inactive) removed
+- ✅ **Map layer toggles** — UNITS, ADS-B, RF, Wi-Fi buttons all functional
 
-#### SIGINT RF + Wi-Fi Heatmap (`sigint/` crate)
+#### SIGINT RF + Wi-Fi Heatmap (`sigint/` crate — 84 tests, 0 failures)
 
-**Phase 5.1 — Foundation** (78 tests, 0 failures across all phases)
-- New Rust crate `sigint/` — portable, no Tauri dependency, Linux/Android-ready
-- `wire.rs`: TileUpdate schema v1 wire format (serde, versioned)
-- `confidence.rs`: GPS × sample × dwell × speed scoring, 11 boundary tests
-- `gps.rs`: GpsProvider trait + real h3o H3 cell lookup at resolution 10
+**Phase 5.1 — Foundation**
+- `sigint/` Rust crate — portable, no Tauri dependency, Linux/Android-ready
+- `wire.rs`: TileUpdate JSON wire format (schema v1, Ed25519 signature field)
+- `confidence.rs`: GPS × sample × dwell × speed formula, 11 boundary tests
+- `gps.rs`: GpsProvider trait, h3o cell lookup at H3 resolution 10, SHARED_GPS_FIX static
 - `rf.rs`: hackrf_sweep CSV parser, RingBuffer, Welford online mean, RfTileBucket
-- `wifi.rs`: WifiScanner trait, macOS `airport` impl, Privacy Mode A, WifiTileBucket
+- `wifi.rs`: WifiScanner trait, CoreWLAN via `scan_wifi.swift` (airport CLI removed in macOS 15), Privacy Modes A/B/C, WifiTileBucket
 - `storage.rs`: NodeDb SQLite (WAL), ON CONFLICT weighted-mean merge, sync cursors
 
 **Phase 5.2 — Hub + Sync**
 - `sync.rs`: SyncTransport trait — HttpSyncTransport (VPN/LAN), NullSyncTransport
-- `hub.rs`: HubDb (merged_tiles, node_registry, delta_cursors), minimal HTTP server
-  - `POST /api/push` → sanitize → rate-limit → merge
-  - `GET /api/delta?cursor=` → time-decayed confidence → TileDelta
-- `collector.rs`: full collection loop — RF flush every 5s, Wi-Fi scan every 30s, sync push/pull every 30s
+- `hub.rs`: HubDb, minimal std::net HTTP server on `0.0.0.0:8789` — `POST /api/push`, `GET /api/delta`
+- `collector.rs`: RF flush 5s, Wi-Fi scan 30s, sync push/pull 30s
 
 **Phase 5.3 — Visualization**
-- h3-js@4.1.0 hex overlay on Leaflet via `h3.cellToBoundary()`
-- RF: blue (−100 dBm) → red (−40 dBm), opacity by confidence
-- Wi-Fi: blue → orange density, opacity by confidence
-- Hover tooltip: mean/max/samples/confidence/band
-- Click hex → SDR view detail panel with cell id, dimension, stats, age
-- `get_sigint_delta` Tauri command polls hub every 5s, graceful fallback if hub not running
+- Leaflet.heat heatmap — RF: blue→red (−100→−40 dBm), Wi-Fi: blue→orange (sparse→dense)
+- Semi-transparent so map remains visible; confidence drives opacity floor (min 0.3)
+- Hub auto-start on app launch, collector auto-start after hub
+- `get_sigint_delta` polls hub every 5s; location change resets cursor for new area
+- Full-width scrollable RF + Wi-Fi panels with sticky column headers
 
 **Phase 5.4 — Hardening**
-- `crypto.rs`: Ed25519 keypair, device_id from public key, sign/verify pipeline, 5 tests
-- `sanitize.rs`: anti-poisoning (RF freq/power bounds, Wi-Fi RSSI/band, GPS validity), per-node rate limiter (200 RF / 20 Wi-Fi per tile per bucket), exponential time decay (RF 5min, Wi-Fi 2min half-life), 20 tests
-- `manet.rs`: Reticulum MANET transport stub with `transport_from_config()` factory
+- `crypto.rs`: Ed25519 keypair, device_id from public key, sign/verify, 5 tests
+- `sanitize.rs`: RF freq/power bounds, Wi-Fi RSSI/band validation, GPS bounds, per-node rate limiter, exponential time decay (RF 5min, Wi-Fi 2min), 20 tests
+- `manet.rs`: Reticulum transport stub, `transport_from_config()` factory
+
+**Phase 5.5 — Integration Complete**
+- `sweeper.rs`: `hackrf_sweep` spawner, auto-detects binary, per-band ring buffer feed
+- Ed25519 signing wired into `sync_push()`; hub verifies on merge
+- CoreWLAN scanner via bundled `scan_wifi.swift` (replaces removed `airport` CLI)
+- `SHARED_GPS_FIX` bridges CoreLocation → collector thread (real GPS positions)
+- `SHARED_PRIVACY_MODE` bridges Settings UI → collector thread (live mode switch)
+- Privacy mode selector in Settings: A (channel only) / B (hashed IDs) / C (raw SSIDs)
+- `get_wifi_scan_results` Tauri command — bypasses hub aggregation, returns live scan data formatted per privacy mode; panel updates every 5s
+- Hub URL configurable in Settings with instant reconnect
 
 ### v0.2.0 (2026-02-23) — Tactical UI Overhaul + Native GPS + 3D View
 - Complete visual redesign with Anduril Lattice inspiration
