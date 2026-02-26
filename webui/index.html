@@ -1460,9 +1460,25 @@ ALPHA-3 | REAR"></textarea>
             return `${zone}${letter} ${easting.toString().slice(-5)} ${northing.toString().slice(-5)}`;
         }
 
+        // Track last cell so we only re-render hexes when we move to a new cell
+        let lastSigintCell = null;
+
         function updateMyLocation(lat, lon, accuracy) {
             // Store location for later use
             lastKnownLocation = { lat, lon, accuracy };
+
+            // Re-center hex overlay when user moves to a new H3 cell
+            if (window.h3 && hubRunning) {
+                try {
+                    const currentCell = h3.latLngToCell(lat, lon, 10);
+                    if (currentCell !== lastSigintCell) {
+                        lastSigintCell = currentCell;
+                        // Reset cursor so next poll fetches fresh tiles for new area
+                        hubPollCursor = 0;
+                        debugLog(`📍 Moved to cell ${currentCell} — refreshing SIGINT tiles`);
+                    }
+                } catch (e) { /* h3 not loaded yet */ }
+            }
 
             const gridCoords = toMGRS(lat, lon);
 
@@ -1803,26 +1819,61 @@ ALPHA-3 | REAR"></textarea>
         function updateSigintStats() {
             const rfCount = Object.keys(hexTiles.rf).length;
             const wifiCount = Object.keys(hexTiles.wifi).length;
-            const rfEl = document.getElementById('rfTileCount');
-            const wifiEl = document.getElementById('wifiTileCount');
-            if (rfEl) rfEl.textContent = rfCount;
-            if (wifiEl) wifiEl.textContent = wifiCount;
+            ['rfTileCount','rfTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = rfCount; });
+            ['wifiTileCount','wifiTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = wifiCount; });
 
-            // Peak RF power across all tiles
+            // Peak RF + band breakdown
             let peakDbm = null;
+            const rfByBand = {};
             Object.values(hexTiles.rf).forEach(t => {
                 if (peakDbm === null || t.max_val > peakDbm) peakDbm = t.max_val;
+                const band = t.dimension || 'unknown';
+                if (!rfByBand[band] || t.max_val > rfByBand[band].max_val) rfByBand[band] = t;
             });
             const rfPeakEl = document.getElementById('rfPeakPower');
             if (rfPeakEl) rfPeakEl.textContent = peakDbm !== null ? peakDbm.toFixed(1) + ' dBm' : '--';
 
-            // Hottest Wi-Fi channel
+            const rfBandEl = document.getElementById('rfBandList');
+            if (rfBandEl) {
+                if (Object.keys(rfByBand).length === 0) {
+                    rfBandEl.textContent = sweeperRunning ? 'Sweeping… waiting for data' : 'Start RF sweep to see spectrum';
+                } else {
+                    rfBandEl.innerHTML = Object.entries(rfByBand).map(([band, t]) => {
+                        const bar = '█'.repeat(Math.max(1, Math.round((t.max_val + 120) / 10)));
+                        const color = t.max_val > -60 ? 'var(--accent-red, #f56565)' : t.max_val > -80 ? 'var(--accent-orange)' : 'var(--accent-cyan)';
+                        return `<div style="display:flex;justify-content:space-between;margin-bottom:2px;">
+                            <span style="color:var(--text-muted)">${band}</span>
+                            <span style="color:${color}">${bar} ${t.max_val.toFixed(0)} dBm</span>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // Hottest Wi-Fi channel + channel list
             let hottestCh = null;
-            Object.values(hexTiles.wifi).forEach(t => {
-                if (!hottestCh || t.sample_count > hottestCh.sample_count) hottestCh = t;
-            });
+            const chBySorted = Object.values(hexTiles.wifi)
+                .sort((a, b) => b.sample_count - a.sample_count);
+            if (chBySorted.length > 0) hottestCh = chBySorted[0];
             const wifiHotEl = document.getElementById('wifiHotChannel');
             if (wifiHotEl) wifiHotEl.textContent = hottestCh ? hottestCh.dimension : '--';
+
+            const wifiChEl = document.getElementById('wifiChannelList');
+            if (wifiChEl) {
+                if (chBySorted.length === 0) {
+                    wifiChEl.textContent = collectorRunning ? 'Scanning… 30s interval' : 'Start collector to scan';
+                } else {
+                    // Show top 6 channels across all tiles
+                    const top = chBySorted.slice(0, 6);
+                    wifiChEl.innerHTML = top.map(t => {
+                        const rssiBar = '█'.repeat(Math.max(1, Math.round((t.mean_val + 100) / 8)));
+                        const conf = Math.round(t.confidence * 100);
+                        return `<div style="display:flex;justify-content:space-between;margin-bottom:2px;">
+                            <span style="color:var(--text-muted)">${t.dimension}</span>
+                            <span style="color:var(--accent-cyan)">${rssiBar} ${t.mean_val.toFixed(0)} dBm · ${t.sample_count} nets</span>
+                        </div>`;
+                    }).join('');
+                }
+            }
         }
 
         // Update Cesium when location changes if in 3D mode
@@ -2202,29 +2253,32 @@ ALPHA-3 | REAR"></textarea>
                     <!-- RF Environment Panel -->
                     <div class="tac-panel">
                         <div class="tac-panel-header">
-                            <span class="tac-panel-title">RF Environment</span>
-                            <div style="display:flex;gap:4px;">
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleLayer('rf');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP</button>
-                            </div>
+                            <span class="tac-panel-title">⚡ RF Environment</span>
+                            <button class="tac-btn tac-btn-sm tac-btn-secondary" id="rfMapBtn" onclick="toggleLayer('rf');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP OFF</button>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-md);text-align:center;margin-bottom:var(--space-md);">
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-sm);text-align:center;margin-bottom:var(--space-md);">
                                 <div>
                                     <div style="font-size:1.5rem;font-weight:700;color:var(--accent-cyan);" id="rfTileCount">0</div>
                                     <div class="tac-label">TILES</div>
                                 </div>
                                 <div>
-                                    <div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="rfPeakPower">--</div>
+                                    <div style="font-size:0.85rem;font-weight:700;color:var(--accent-cyan);" id="rfPeakPower">--</div>
                                     <div class="tac-label">PEAK</div>
                                 </div>
                                 <div>
-                                    <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);">HackRF</div>
+                                    <div style="font-size:0.85rem;font-weight:700;" id="rfSource" style="color:var(--text-muted);">${sweeperRunning ? '<span style="color:var(--accent-orange)">LIVE</span>' : '<span style="color:var(--text-muted)">IDLE</span>'}</div>
                                     <div class="tac-label">SOURCE</div>
                                 </div>
                             </div>
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:var(--space-xs);">SELECTED TILE</div>
-                            <div id="rfDetailPanel" style="min-height:60px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
-                                Click a hex on the map to see detail
+                            <!-- Live RF band breakdown -->
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">BANDS OBSERVED</div>
+                            <div id="rfBandList" style="font-family:var(--font-mono);font-size:0.72rem;margin-bottom:var(--space-md);min-height:32px;color:var(--text-secondary);">
+                                No RF data yet — start sweeper
+                            </div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">SELECTED TILE DETAIL</div>
+                            <div id="rfDetailPanel" style="min-height:48px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.72rem;color:var(--text-secondary);">
+                                Click a hex on the map
                             </div>
                         </div>
                     </div>
@@ -2232,13 +2286,11 @@ ALPHA-3 | REAR"></textarea>
                     <!-- Wi-Fi Density Panel -->
                     <div class="tac-panel">
                         <div class="tac-panel-header">
-                            <span class="tac-panel-title">Wi-Fi Density</span>
-                            <div style="display:flex;gap:4px;">
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleLayer('wifi');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP</button>
-                            </div>
+                            <span class="tac-panel-title">📶 Wi-Fi Density</span>
+                            <button class="tac-btn tac-btn-sm tac-btn-secondary" id="wifiMapBtn" onclick="toggleLayer('wifi');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP OFF</button>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-md);text-align:center;margin-bottom:var(--space-md);">
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-sm);text-align:center;margin-bottom:var(--space-md);">
                                 <div>
                                     <div style="font-size:1.5rem;font-weight:700;color:var(--accent-cyan);" id="wifiTileCount">0</div>
                                     <div class="tac-label">TILES</div>
@@ -2248,13 +2300,18 @@ ALPHA-3 | REAR"></textarea>
                                     <div class="tac-label">HOTTEST</div>
                                 </div>
                                 <div>
-                                    <div style="font-size:0.75rem;font-weight:700;color:var(--text-muted);">Mode A</div>
+                                    <div style="font-size:0.75rem;font-weight:700;color:var(--accent-green);">Mode A</div>
                                     <div class="tac-label">PRIVACY</div>
                                 </div>
                             </div>
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:var(--space-xs);">SELECTED TILE</div>
-                            <div id="wifiDetailPanel" style="min-height:60px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
-                                Click a hex on the map to see detail
+                            <!-- Live channel breakdown -->
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">CHANNEL ACTIVITY (current tile)</div>
+                            <div id="wifiChannelList" style="font-family:var(--font-mono);font-size:0.72rem;margin-bottom:var(--space-md);min-height:48px;color:var(--text-secondary);">
+                                No Wi-Fi data yet — collector scanning…
+                            </div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">SELECTED TILE DETAIL</div>
+                            <div id="wifiDetailPanel" style="min-height:48px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.72rem;color:var(--text-secondary);">
+                                Click a hex on the map
                             </div>
                         </div>
                     </div>
