@@ -18,7 +18,7 @@ use crate::{
     crypto::{DeviceKeys, sign_payload},
     gps::GpsProvider,
     rf::{RingBuffer, RfObservation, flush_to_aggregates},
-    wifi::{WifiScanner, apply_privacy_mode_a},
+    wifi::{WifiScanner, apply_privacy, PrivacyMode},
     storage::{NodeDb, TileRow},
     sync::{SyncTransport, SyncCursor},
     wire::{TileUpdate, TileData, WifiData},
@@ -43,6 +43,8 @@ pub struct CollectorConfig {
     pub keys: DeviceKeys,
     /// Source type for TileUpdates
     pub source_type: String,
+    /// Wi-Fi privacy mode (default A)
+    pub privacy_mode: PrivacyMode,
 }
 
 impl Default for CollectorConfig {
@@ -57,6 +59,7 @@ impl Default for CollectorConfig {
             confidence: ConfidenceConfig::default(),
             keys,
             source_type: "entity".to_string(),
+            privacy_mode: PrivacyMode::A,
         }
     }
 }
@@ -152,7 +155,7 @@ impl Collector {
         let tile_id = fix.tile_id(self.config.h3_resolution);
         let time_bucket = fix.time_bucket();
 
-        let observations = apply_privacy_mode_a(networks); // Mode A: strip BSSID/SSID
+        let observations = apply_privacy(networks, self.config.privacy_mode); // configurable mode
 
         let conf = confidence::compute(
             fix.accuracy_m,

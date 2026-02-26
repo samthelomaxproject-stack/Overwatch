@@ -925,6 +925,23 @@ fn hub_status() -> serde_json::Value {
 }
 
 static COLLECTOR_RUNNING: Mutex<bool> = Mutex::new(false);
+static PRIVACY_MODE: Mutex<String> = Mutex::new(String::new());
+
+#[tauri::command]
+fn set_privacy_mode(mode: String) -> Result<String, String> {
+    let validated = match mode.to_uppercase().as_str() {
+        "A" | "B" | "C" => mode.to_uppercase(),
+        _ => return Err(format!("Invalid mode: {mode} — must be A, B, or C")),
+    };
+    *PRIVACY_MODE.lock().unwrap() = validated.clone();
+    log::info!("Wi-Fi privacy mode set to {validated}");
+    Ok(format!("Privacy mode set to {validated}"))
+}
+
+fn current_privacy_mode() -> sigint::wifi::PrivacyMode {
+    let s = PRIVACY_MODE.lock().unwrap();
+    sigint::wifi::PrivacyMode::from_str(if s.is_empty() { "A" } else { s.as_str() })
+}
 
 /// Start the local SIGINT node collector.
 /// Spawns threads for: Wi-Fi scanning, GPS, and sync push/pull loop.
@@ -945,9 +962,10 @@ fn start_collector(hub_url: String) -> Result<String, String> {
         use sigint::storage::NodeDb;
         use sigint::sync::HttpSyncTransport;
 
-        let config = CollectorConfig::default();
+        let mut config = CollectorConfig::default();
+        config.privacy_mode = current_privacy_mode();
         let device_id = config.keys.device_id.clone();
-        log::info!("Collector device_id: {}", device_id);
+        log::info!("Collector device_id: {}, privacy_mode: {}", device_id, config.privacy_mode.as_str());
 
         let db_path = format!("{}/sigint_node.db",
             std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
@@ -1081,6 +1099,7 @@ fn stop_rtl_sdr() -> Result<String, String> {
             hub_status,
             start_collector,
             start_sweeper,
+            set_privacy_mode,
             get_rtl_sdr_status,
             get_sigint_delta
         ])

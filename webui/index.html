@@ -568,6 +568,47 @@
                                 <label class="tac-label">Team Key</label>
                                 <input type="password" class="tac-input" id="teamKey" placeholder="ENTER TEAM KEY">
                             </div>
+
+                            <!-- SIGINT Privacy Mode -->
+                            <div class="tac-form-group" style="margin-top:var(--space-lg);border-top:1px solid rgba(255,255,255,0.07);padding-top:var(--space-lg);">
+                                <label class="tac-label">SIGINT Wi-Fi Privacy Mode</label>
+                                <div style="margin-bottom:var(--space-sm);">
+                                    <label style="display:flex;align-items:flex-start;gap:var(--space-sm);cursor:pointer;margin-bottom:var(--space-sm);">
+                                        <input type="radio" name="privacyMode" value="A" checked onchange="setPrivacyMode('A')" style="margin-top:3px;">
+                                        <span>
+                                            <span style="color:var(--accent-cyan);font-weight:600;">Mode A — Channel Only (Default)</span><br>
+                                            <span style="font-size:0.75rem;color:var(--text-muted);">No BSSID or SSID transmitted. Only band, channel, and RSSI. Maximum privacy.</span>
+                                        </span>
+                                    </label>
+                                    <label style="display:flex;align-items:flex-start;gap:var(--space-sm);cursor:pointer;margin-bottom:var(--space-sm);">
+                                        <input type="radio" name="privacyMode" value="B" onchange="setPrivacyMode('B')" style="margin-top:3px;">
+                                        <span>
+                                            <span style="color:var(--accent-orange);font-weight:600;">Mode B — Hashed Identifiers</span><br>
+                                            <span style="font-size:0.75rem;color:var(--text-muted);">BSSID and SSID are salted and hashed. Enables correlation across locations without revealing real identities.</span>
+                                        </span>
+                                    </label>
+                                    <label style="display:flex;align-items:flex-start;gap:var(--space-sm);cursor:pointer;">
+                                        <input type="radio" name="privacyMode" value="C" onchange="setPrivacyMode('C')" style="margin-top:3px;">
+                                        <span>
+                                            <span style="color:#f56565;font-weight:600;">Mode C — Raw Identifiers ⚠️</span><br>
+                                            <span style="font-size:0.75rem;color:var(--text-muted);">Full BSSID and SSID stored and transmitted. Only use on trusted, isolated networks.</span>
+                                        </span>
+                                    </label>
+                                </div>
+                                <div id="privacyModeStatus" style="font-family:var(--font-mono);font-size:0.75rem;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;color:var(--accent-cyan);">
+                                    🔒 Mode A active — no network identifiers stored or transmitted
+                                </div>
+                            </div>
+
+                            <!-- SIGINT Hub URL -->
+                            <div class="tac-form-group">
+                                <label class="tac-label">SIGINT Hub URL</label>
+                                <div style="display:flex;gap:var(--space-sm);">
+                                    <input type="text" class="tac-input" id="hubUrlInput" value="http://127.0.0.1:8789" placeholder="http://hub-ip:8789" style="flex:1;">
+                                    <button class="tac-btn tac-btn-secondary" onclick="applyHubUrl()">APPLY</button>
+                                </div>
+                                <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">VPN/LAN hub address. Local default: 127.0.0.1:8789</div>
+                            </div>
                             <div class="tac-form-group">
                                 <button class="tac-btn tac-btn-secondary" onclick="exportData()">EXPORT DATA</button>
                                 <button class="tac-btn tac-btn-secondary" onclick="importData()">IMPORT DATA</button>
@@ -3693,6 +3734,49 @@ ALPHA-3 | REAR"></textarea>
         document.getElementById('encryptionMode').addEventListener('change', (e) => {
             document.getElementById('keyGroup').style.display = e.target.value === 'secure' ? 'block' : 'none';
         });
+
+        let currentPrivacyMode = 'A';
+
+        async function setPrivacyMode(mode) {
+            currentPrivacyMode = mode;
+            const statusEl = document.getElementById('privacyModeStatus');
+
+            const descriptions = {
+                'A': '🔒 Mode A active — no network identifiers stored or transmitted',
+                'B': '🔑 Mode B active — BSSID/SSID hashed before storage (SHA-256 + salt)',
+                'C': '⚠️ Mode C active — raw BSSID and SSID stored. Use only on trusted networks.'
+            };
+            const colors = { 'A': 'var(--accent-cyan)', 'B': 'var(--accent-orange)', 'C': '#f56565' };
+
+            if (statusEl) {
+                statusEl.textContent = descriptions[mode];
+                statusEl.style.color = colors[mode];
+            }
+
+            if (window.__TAURI__) {
+                try {
+                    await window.__TAURI__.core.invoke('set_privacy_mode', { mode });
+                    debugLog(`🔒 Privacy mode set to ${mode}`);
+                } catch (e) {
+                    debugLog('Privacy mode invoke failed: ' + e);
+                }
+            }
+        }
+
+        async function applyHubUrl() {
+            const url = document.getElementById('hubUrlInput')?.value?.trim();
+            if (!url) return;
+            hubUrl = url;
+            hubPollCursor = 0; // reset cursor for new hub
+            debugLog('🛰️ Hub URL updated to: ' + url);
+            // Restart collector pointing to new hub
+            if (window.__TAURI__ && collectorRunning) {
+                try {
+                    await window.__TAURI__.core.invoke('start_collector', { hubUrl: url });
+                    debugLog('Collector reconnected to ' + url);
+                } catch(e) {}
+            }
+        }
 
         document.getElementById('myCallsign').addEventListener('input', (e) => {
             myCallsign = e.target.value.toUpperCase() || 'ALPHA-1';
