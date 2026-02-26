@@ -521,6 +521,59 @@ setInterval(async () => {
 START clicked → STARTING (yellow, 3s) → BRIDGE_UP → CONNECTING (orange, 1s) → CONNECTED (cyan) → aircraft appear
 ```
 
+### SIGINT Troubleshooting Log — 2026-02-25
+
+#### 1) No hex/heatmap visible despite hub running
+**Symptom:** No RF/Wi-Fi colors appeared on map, but hub health endpoint responded.
+
+**Root causes:**
+- Hub had little/no local data because collector and sweeper startup path was incomplete.
+- Early test tiles were inserted in the wrong geography (far from local map area).
+- Heatmap intensity used `intensity *= confidence`; decayed confidence reached 0.0 and made layers effectively invisible.
+
+**Fixes:**
+- Added/verified Tauri commands for `start_hub`, `start_collector`, `start_sweeper` and auto-start flow in UI.
+- Seeded/validated local-area test tiles for debugging, then removed test-only dependency.
+- Reworked heatmap intensity model:
+  - signal strength drives intensity
+  - confidence affects opacity floor (min 0.3), not hard-zero multiplier
+  - added semi-transparent gradients so basemap remains visible.
+
+#### 2) Wi-Fi scanner broke on current macOS
+**Symptom:** `airport -s` path unavailable, scanner returned no data.
+
+**Root cause:** Apple removed/deprecated the old `airport` CLI path on current macOS.
+
+**Fix:** Replaced scanner backend with CoreWLAN via bundled `scan_wifi.swift` helper (`CWWiFiClient.scanForNetworks`).
+
+#### 3) Collector had no live GPS fix
+**Symptom:** collector skipped useful aggregation because provider returned no fix.
+
+**Root cause:** `MacosGpsProvider` lacked a real bridge from Tauri location thread.
+
+**Fix:** Added `SHARED_GPS_FIX` in `sigint::gps` and updated Tauri `update_global_location()` to publish fixes into shared state consumed by collector.
+
+#### 4) Privacy mode looked "stuck" on Mode A
+**Symptom:** switching to Mode B/C in Settings did not change displayed Wi-Fi detail.
+
+**Root causes:**
+- Collector read privacy mode only at startup (static config snapshot).
+- Hub aggregate schema (`ChannelHotness`) is intentionally channel-centric and does not carry SSID/BSSID detail.
+
+**Fixes:**
+- Added `SHARED_PRIVACY_MODE`; collector reads it each scan cycle (no restart required).
+- Added direct live-scan feed for panel detail:
+  - `get_wifi_scan_results` Tauri command
+  - panel renders per-mode output immediately:
+    - Mode A: channel-only
+    - Mode B: hashed identifiers
+    - Mode C: raw SSID/BSSID.
+
+#### 5) SDR panel usability issues
+**Symptom:** RF/Wi-Fi findings were cramped and hard to review.
+
+**Fix:** Converted both RF Environment and Wi-Fi Density to full-width, scrollable panels with sticky headers and expanded finding tables.
+
 ---
 
 _Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT phase sync)_
