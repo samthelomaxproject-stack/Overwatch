@@ -523,6 +523,8 @@ START clicked → STARTING (yellow, 3s) → BRIDGE_UP → CONNECTING (orange, 1s
 
 ---
 
+_Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT phase sync)_
+
 ## Changelog
 
 ### v0.2.2 (2026-02-24–25) — ADS-B Live + Full SIGINT Pipeline
