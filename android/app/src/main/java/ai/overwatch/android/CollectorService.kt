@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -35,10 +36,16 @@ class CollectorService : Service() {
     private var loopJob: Job? = null
     private val client = OkHttpClient()
 
+    @Volatile
+    private var latestLocation: Location? = null
+
+    private val gpsListener = LocationListener { loc -> latestLocation = loc }
+
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Collector starting…"))
+        startLocationUpdates()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -56,6 +63,7 @@ class CollectorService : Service() {
 
     override fun onDestroy() {
         loopJob?.cancel()
+        stopLocationUpdates()
         super.onDestroy()
     }
 
@@ -99,7 +107,7 @@ class CollectorService : Service() {
         runCatching {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
-                updateNotification("$callsign • pushed ${wifiScan.size} Wi-Fi obs • ${location.latitude.format(4)}, ${location.longitude.format(4)}")
+                updateNotification("$callsign • pushed ${wifiScan.size} Wi-Fi obs • ${location.latitude.format(4)}, ${location.longitude.format(4)} • $tileId")
             }
         }.onFailure {
             updateNotification("Push failed: ${it.message}")
@@ -114,6 +122,9 @@ class CollectorService : Service() {
                 return emptyList()
             }
         }
+
+        // Request a fresh scan (Android may throttle in background; we still read latest cache)
+        runCatching { wifiManager.startScan() }
 
         @Suppress("DEPRECATION")
         val results = wifiManager.scanResults ?: emptyList()
@@ -196,7 +207,46 @@ class CollectorService : Service() {
         }
     }
 
+    private fun startLocationUpdates() {
+        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        runCatching {
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                lm.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    5_000L,
+                    5f,
+                    gpsListener
+                )
+            }
+        }
+
+        runCatching {
+            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                lm.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    5_000L,
+                    5f,
+                    gpsListener
+                )
+            }
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        runCatching { lm.removeUpdates(gpsListener) }
+    }
+
     private fun getBestLocation(): Location? {
+        // Prefer actively updated location first
+        latestLocation?.let { return it }
+
         val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
@@ -210,6 +260,7 @@ class CollectorService : Service() {
             val loc = runCatching { lm.getLastKnownLocation(p) }.getOrNull() ?: continue
             if (best == null || loc.accuracy < best!!.accuracy) best = loc
         }
+        latestLocation = best
         return best
     }
 
