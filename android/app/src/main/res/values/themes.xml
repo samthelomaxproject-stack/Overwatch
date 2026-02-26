@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.OverwatchAndroid" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#00BCD4</item>
+        <item name="colorPrimaryVariant">#00838F</item>
+        <item name="colorOnPrimary">#000000</item>
+        <item name="android:statusBarColor" tools:targetApi="l">#111111</item>
+    </style>
+</resources>

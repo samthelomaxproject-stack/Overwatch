@@ -183,6 +183,24 @@ Overwatch/
 
 ---
 
+## Android Installer (MVP)
+
+An Android scaffold now exists in `android/`.
+
+### Build & Download APK from GitHub
+
+1. Open GitHub → **Actions**
+2. Run workflow: **Android APK** (or push changes under `android/`)
+3. Download artifact: **`overwatch-eud-debug-apk`**
+4. Install `app-debug.apk` on Android (allow unknown sources)
+
+Current Android MVP includes:
+- Hub URL configuration
+- Wi-Fi privacy mode selector (A/B/C)
+- Collector/map control placeholders
+
+> Note: this is a scaffold installer for iterative testing. Full tactical map + collector service wiring is the next step.
+
 ## Development Roadmap
 
 ### Phase 1: Core UI (v0.1-0.2) ✅
@@ -281,7 +299,12 @@ Overwatch/
 
 ### Phase 6: MANET + Android (v0.7)
 - [ ] Reticulum LXMF transport implementation (ManetSyncTransport stub ready)
-- [ ] Android version — PLI + SIGINT collector sharing over mesh
+- [x] Android MVP scaffold committed (`android/`)
+  - Kotlin app shell (hub URL + privacy mode config)
+  - Collector/map controls scaffolded in UI
+  - GitHub Actions APK workflow (`.github/workflows/android-apk.yml`)
+  - Downloadable debug APK artifact on each Android-related push/workflow dispatch
+- [ ] Android version — PLI + SIGINT collector sharing over mesh (full implementation)
 - [ ] Key rotation (device_id stable, rotation hook documented)
 - [ ] Full MIL-STD-2525 symbol support
 
