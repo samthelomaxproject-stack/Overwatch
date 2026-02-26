@@ -155,7 +155,9 @@ impl Collector {
         let tile_id = fix.tile_id(self.config.h3_resolution);
         let time_bucket = fix.time_bucket();
 
-        let observations = apply_privacy(networks, self.config.privacy_mode); // configurable mode
+        // Read shared mode every cycle so UI changes take effect immediately
+        let mode = crate::wifi::get_shared_privacy_mode();
+        let observations = apply_privacy(networks, mode);
 
         let conf = confidence::compute(
             fix.accuracy_m,

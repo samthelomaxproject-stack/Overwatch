@@ -934,6 +934,8 @@ fn set_privacy_mode(mode: String) -> Result<String, String> {
         _ => return Err(format!("Invalid mode: {mode} — must be A, B, or C")),
     };
     *PRIVACY_MODE.lock().unwrap() = validated.clone();
+    // Update shared static read by the collector thread on every scan cycle
+    sigint::wifi::set_shared_privacy_mode(sigint::wifi::PrivacyMode::from_str(&validated));
     log::info!("Wi-Fi privacy mode set to {validated}");
     Ok(format!("Privacy mode set to {validated}"))
 }

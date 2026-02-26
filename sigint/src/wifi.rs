@@ -40,6 +40,26 @@ pub struct ChannelObservation {
     pub ssid: Option<String>,
 }
 
+use std::sync::Mutex as StdMutex;
+
+// ── Shared privacy mode (written by Tauri, read by collector on every scan) ──
+
+/// Global privacy mode — updated at runtime via set_privacy_mode() Tauri command.
+/// Collector reads this every scan cycle so changes take effect immediately.
+static SHARED_PRIVACY_MODE: StdMutex<PrivacyMode> = StdMutex::new(PrivacyMode::A);
+
+/// Called by the Tauri set_privacy_mode command to update the active mode.
+pub fn set_shared_privacy_mode(mode: PrivacyMode) {
+    if let Ok(mut m) = SHARED_PRIVACY_MODE.lock() {
+        *m = mode;
+    }
+}
+
+/// Read the current shared privacy mode.
+pub fn get_shared_privacy_mode() -> PrivacyMode {
+    SHARED_PRIVACY_MODE.lock().map(|m| *m).unwrap_or(PrivacyMode::A)
+}
+
 /// SIGINT Wi-Fi privacy mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PrivacyMode {
