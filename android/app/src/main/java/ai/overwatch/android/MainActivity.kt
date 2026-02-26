@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var callsignInput: EditText
     private lateinit var hubUrlInput: EditText
     private lateinit var privacySpinner: Spinner
     private lateinit var statusText: TextView
@@ -35,10 +36,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        callsignInput = findViewById(R.id.callsignInput)
         hubUrlInput = findViewById(R.id.hubUrlInput)
         privacySpinner = findViewById(R.id.privacySpinner)
         statusText = findViewById(R.id.statusText)
 
+        callsignInput.setText(ConfigStore.getCallsign(this))
         hubUrlInput.setText(ConfigStore.getHubUrl(this))
 
         val privacyModes = listOf(
@@ -64,10 +67,12 @@ class MainActivity : AppCompatActivity() {
                 2 -> "C"
                 else -> "A"
             }
+            val callsign = callsignInput.text.toString().trim().ifEmpty { "ANDROID-EUD" }
             val hub = hubUrlInput.text.toString().trim()
+            ConfigStore.setCallsign(this, callsign)
             ConfigStore.setHubUrl(this, hub)
             ConfigStore.setPrivacyMode(this, mode)
-            statusText.text = "Config saved • Hub: $hub • Privacy: $mode"
+            statusText.text = "Config saved • $callsign • Hub: $hub • Privacy: $mode"
         }
 
         findViewById<Button>(R.id.startCollectorBtn).setOnClickListener {

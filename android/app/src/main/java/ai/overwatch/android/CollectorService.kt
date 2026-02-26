@@ -64,6 +64,7 @@ class CollectorService : Service() {
     private fun runCollectorCycle() {
         val hubUrl = ConfigStore.getHubUrl(this).trimEnd('/')
         val privacyMode = ConfigStore.getPrivacyMode(this)
+        val callsign = ConfigStore.getCallsign(this)
         val now = Instant.now().epochSecond
         val bucket = (now / 60) * 60
 
@@ -82,8 +83,8 @@ class CollectorService : Service() {
         }
 
         val payload = buildTileUpdate(
-            deviceId = "android-eud",
-            sourceType = "handheld",
+            deviceId = callsign,
+            sourceType = "handheld", 
             timestampUtc = now,
             tileId = tileId,
             timeBucket = bucket,
@@ -98,7 +99,7 @@ class CollectorService : Service() {
         runCatching {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
-                updateNotification("Pushed ${wifiScan.size} Wi-Fi obs • ${location.latitude.format(4)}, ${location.longitude.format(4)}")
+                updateNotification("$callsign • pushed ${wifiScan.size} Wi-Fi obs • ${location.latitude.format(4)}, ${location.longitude.format(4)}")
             }
         }.onFailure {
             updateNotification("Push failed: ${it.message}")
