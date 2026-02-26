@@ -1913,14 +1913,49 @@ ALPHA-3 | REAR"></textarea>
         let lastScanResults = [];
         let lastScanMode = 'A';
 
+        let lastEudStatusSnapshot = '';
+
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
             hubPoller = setInterval(() => {
                 pollHub();
                 pollWifiScan();
+                pollEudStatuses();
             }, 5000);
             pollHub();
             pollWifiScan();
+            pollEudStatuses();
+        }
+
+        async function pollEudStatuses() {
+            if (!window.__TAURI__) return;
+            try {
+                const result = await window.__TAURI__.core.invoke('get_eud_statuses');
+                if (!result || !result.ok) return;
+
+                const nodes = result.nodes || [];
+                const summary = nodes.map(n => `${n.device_id}:${n.status}`).join('|');
+                if (summary !== lastEudStatusSnapshot) {
+                    lastEudStatusSnapshot = summary;
+                    if (nodes.length === 0) {
+                        debugLog('📟 EUD STATUS: no connected nodes');
+                    } else {
+                        nodes.forEach(n => {
+                            debugLog(`📟 EUD ${n.device_id} (${n.source_type}) ${n.status} • ${n.age_secs}s ago`);
+                        });
+                    }
+                }
+
+                // Update hub panel counters if present
+                const active = nodes.filter(n => n.status === 'CONNECTED').length;
+                const stale = nodes.filter(n => n.status === 'STALE').length;
+                const activeEl = document.getElementById('eudActiveCount');
+                const staleEl = document.getElementById('eudStaleCount');
+                if (activeEl) activeEl.textContent = String(active);
+                if (staleEl) staleEl.textContent = String(stale);
+            } catch (e) {
+                // silent
+            }
         }
 
         async function pollWifiScan() {
@@ -2463,7 +2498,7 @@ ALPHA-3 | REAR"></textarea>
                             </div>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:var(--space-md);text-align:center;">
+                            <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:var(--space-md);text-align:center;">
                                 <div>
                                     <div style="font-size:0.9rem;font-weight:700;" id="hubStatus">${hubRunning ? 'RUNNING' : 'STOPPED'}</div>
                                     <div class="tac-label">HUB</div>
@@ -2487,6 +2522,14 @@ ALPHA-3 | REAR"></textarea>
                                 <div>
                                     <div style="font-size:1rem;font-weight:700;color:var(--accent-cyan);" id="wifiTileCountTop">${Object.keys(hexTiles.wifi).length}</div>
                                     <div class="tac-label">Wi-Fi TILES</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:1rem;font-weight:700;color:var(--accent-cyan);" id="eudActiveCount">0</div>
+                                    <div class="tac-label">EUD ACTIVE</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:1rem;font-weight:700;color:var(--accent-orange);" id="eudStaleCount">0</div>
+                                    <div class="tac-label">EUD STALE</div>
                                 </div>
                             </div>
                         </div>

@@ -85,6 +85,24 @@
             android:text="Ready"
             android:textColor="#00897B" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Debug Log"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/debugLogText"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:background="#111111"
+            android:padding="8dp"
+            android:text=""
+            android:textColor="#6EE7FF"
+            android:textSize="12sp"
+            android:typeface="monospace" />
+
     </LinearLayout>
 
 </ScrollView>

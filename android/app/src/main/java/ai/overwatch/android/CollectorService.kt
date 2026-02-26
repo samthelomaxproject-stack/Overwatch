@@ -109,8 +109,15 @@ class CollectorService : Service() {
                 if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
                 updateNotification("$callsign • pushed ${wifiScan.size} Wi-Fi obs • ${location.latitude.format(4)}, ${location.longitude.format(4)} • $tileId")
             }
-        }.onFailure {
-            updateNotification("Push failed: ${it.message}")
+        }.onFailure { err ->
+            val reason = when (err) {
+                is java.net.SocketTimeoutException -> "TIMEOUT"
+                is java.net.ConnectException -> "CONNECT_REFUSED"
+                is java.net.UnknownHostException -> "DNS"
+                is java.net.SocketException -> "SOCKET"
+                else -> err.javaClass.simpleName
+            }
+            updateNotification("Push failed [$reason]: ${err.message}")
         }
     }
 
@@ -307,6 +314,7 @@ class CollectorService : Service() {
     private fun updateNotification(text: String) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(text))
+        sendBroadcast(Intent(ACTION_STATUS).putExtra("msg", text))
     }
 
     private fun Double.format(d: Int): String = String.format(Locale.US, "%.${d}f", this)
@@ -320,6 +328,7 @@ class CollectorService : Service() {
     )
 
     companion object {
+        const val ACTION_STATUS = "ai.overwatch.android.COLLECTOR_STATUS"
         private const val CHANNEL_ID = "overwatch_collector"
         private const val NOTIFICATION_ID = 4201
     }

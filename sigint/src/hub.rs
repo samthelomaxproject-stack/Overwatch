@@ -363,6 +363,49 @@ impl HubDb {
 
 // ── Minimal HTTP server ───────────────────────────────────────────────────────
 
+/// Hub node connection status for UI/debug panels.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NodeStatus {
+    pub device_id: String,
+    pub source_type: String,
+    pub last_seen: u64,
+    pub age_secs: u64,
+    pub status: String, // CONNECTED | STALE | OFFLINE
+}
+
+/// Query node statuses from hub DB for debug/monitoring.
+pub fn get_node_statuses(db_path: &str, stale_after_secs: u64) -> Result<Vec<NodeStatus>, Error> {
+    let conn = Connection::open(db_path)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut stmt = conn.prepare(
+        "SELECT device_id, COALESCE(source_type,'unknown'), COALESCE(last_seen,0)
+         FROM node_registry ORDER BY last_seen DESC LIMIT 50"
+    )?;
+
+    let rows = stmt.query_map([], |r| {
+        let device_id: String = r.get(0)?;
+        let source_type: String = r.get(1)?;
+        let last_seen: i64 = r.get(2)?;
+        let last_seen_u = if last_seen < 0 { 0 } else { last_seen as u64 };
+        let age_secs = now.saturating_sub(last_seen_u);
+        let status = if age_secs <= stale_after_secs {
+            "CONNECTED"
+        } else if age_secs <= stale_after_secs * 3 {
+            "STALE"
+        } else {
+            "OFFLINE"
+        }.to_string();
+
+        Ok(NodeStatus { device_id, source_type, last_seen: last_seen_u, age_secs, status })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(Error::Sqlite)
+}
+
 /// Hub API server configuration.
 #[derive(Debug, Clone)]
 pub struct HubConfig {

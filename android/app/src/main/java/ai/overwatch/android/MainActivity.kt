@@ -2,9 +2,12 @@ package ai.overwatch.android
 
 import android.Manifest
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -20,6 +23,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var hubUrlInput: EditText
     private lateinit var privacySpinner: Spinner
     private lateinit var statusText: TextView
+    private lateinit var debugLogText: TextView
+
+    private val collectorReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != CollectorService.ACTION_STATUS) return
+            val msg = intent.getStringExtra("msg") ?: return
+            appendDebug(msg)
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -40,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         hubUrlInput = findViewById(R.id.hubUrlInput)
         privacySpinner = findViewById(R.id.privacySpinner)
         statusText = findViewById(R.id.statusText)
+        debugLogText = findViewById(R.id.debugLogText)
 
         callsignInput.setText(ConfigStore.getCallsign(this))
         hubUrlInput.setText(ConfigStore.getHubUrl(this))
@@ -85,6 +98,24 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.openMapBtn).setOnClickListener {
             statusText.text = "Map/heatmap view is next milestone"
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        registerReceiver(collectorReceiver, IntentFilter(CollectorService.ACTION_STATUS))
+    }
+
+    override fun onStop() {
+        runCatching { unregisterReceiver(collectorReceiver) }
+        super.onStop()
+    }
+
+    private fun appendDebug(msg: String) {
+        val now = java.time.LocalTime.now().withNano(0).toString()
+        val existing = debugLogText.text?.toString().orEmpty()
+        val lines = (existing + "\n[$now] $msg").trim().lines()
+        val trimmed = if (lines.size > 80) lines.takeLast(80).joinToString("\n") else lines.joinToString("\n")
+        debugLogText.text = trimmed
     }
 
     private fun requestPermissionsIfNeeded() {
