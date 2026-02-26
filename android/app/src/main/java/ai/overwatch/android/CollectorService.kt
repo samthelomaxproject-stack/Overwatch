@@ -126,8 +126,8 @@ class CollectorService : Service() {
                 else -> "2.4"
             }
 
-            val ssidRaw = sr.SSID ?: ""
-            val bssidRaw = sr.BSSID ?: ""
+            val ssidRaw = sr.SSID
+            val bssidRaw = sr.BSSID
 
             val (ssid, bssid) = when (privacyMode) {
                 "B" -> hashPair(ssidRaw, bssidRaw)
@@ -214,6 +214,16 @@ class CollectorService : Service() {
             if (best == null || loc.accuracy < best!!.accuracy) best = loc
         }
         return best
+    }
+
+    private fun freqToChannel(freqMhz: Int): Int {
+        return when {
+            freqMhz in 2412..2472 -> (freqMhz - 2407) / 5
+            freqMhz == 2484 -> 14
+            freqMhz in 5000..5895 -> (freqMhz - 5000) / 5
+            freqMhz in 5925..7125 -> (freqMhz - 5950) / 5
+            else -> 0
+        }
     }
 
     // Placeholder H3 approx until shared Rust JNI lands.
