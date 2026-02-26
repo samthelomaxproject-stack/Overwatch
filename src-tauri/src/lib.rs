@@ -922,6 +922,77 @@ fn hub_status() -> serde_json::Value {
     serde_json::json!({ "running": running, "reachable": reachable })
 }
 
+static COLLECTOR_RUNNING: Mutex<bool> = Mutex::new(false);
+
+/// Start the local SIGINT node collector.
+/// Spawns threads for: Wi-Fi scanning, GPS, and sync push/pull loop.
+/// hackrf_sweep is spawned separately via the Sweeper when RF is enabled.
+#[tauri::command]
+fn start_collector(hub_url: String) -> Result<String, String> {
+    let mut running = COLLECTOR_RUNNING.lock().unwrap();
+    if *running {
+        return Ok("Collector already running".to_string());
+    }
+    *running = true;
+    drop(running);
+
+    std::thread::spawn(move || {
+        use sigint::collector::{Collector, CollectorConfig};
+        use sigint::gps::MacosGpsProvider;
+        use sigint::wifi::AirportScanner;
+        use sigint::storage::NodeDb;
+        use sigint::sync::HttpSyncTransport;
+
+        let config = CollectorConfig::default();
+        let device_id = config.keys.device_id.clone();
+        log::info!("Collector device_id: {}", device_id);
+
+        let db_path = format!("{}/sigint_node.db",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
+        let db = match NodeDb::open(&db_path) {
+            Ok(d) => d,
+            Err(e) => { log::error!("Collector DB error: {e}"); return; }
+        };
+
+        let transport = Box::new(HttpSyncTransport::new(hub_url, &device_id));
+        let collector = Collector::new(
+            config,
+            Box::new(MacosGpsProvider),
+            Box::new(AirportScanner),
+            db,
+            transport,
+        );
+
+        collector.run(); // blocking loop
+    });
+
+    Ok("Collector started".to_string())
+}
+
+/// Start the hackrf_sweep RF sweeper thread.
+/// Feeds observations into the collector's ring buffer via the push_rf channel.
+/// In the current architecture, the sweeper runs independently and the
+/// collector flushes the buffer every 5s.
+#[tauri::command]
+fn start_sweeper() -> Result<String, String> {
+    use sigint::sweeper::{Sweeper, SweepConfig};
+    use sigint::rf::RingBuffer;
+    use std::sync::{Arc, Mutex as StdMutex};
+
+    // Detect binary first
+    if sigint::sweeper::detect_binary().is_none() {
+        return Err("hackrf_sweep not found — install HackRF tools".to_string());
+    }
+
+    std::thread::spawn(|| {
+        let buf = Arc::new(StdMutex::new(RingBuffer::new(2000)));
+        let sweeper = Sweeper::new(SweepConfig::default(), buf);
+        sweeper.run();
+    });
+
+    Ok("Sweeper started".to_string())
+}
+
 /// Fetch SIGINT delta from the local hub-api (runs on localhost:8789).
 /// Returns merged tile data since the given cursor timestamp.
 /// JS polls this every 5 seconds when hub is running.
@@ -1006,6 +1077,8 @@ fn stop_rtl_sdr() -> Result<String, String> {
             start_hub,
             stop_hub,
             hub_status,
+            start_collector,
+            start_sweeper,
             get_rtl_sdr_status,
             get_sigint_delta
         ])

@@ -1637,6 +1637,9 @@ ALPHA-3 | REAR"></textarea>
         let hubPoller = null;
         let hubRunning = false;
 
+        let collectorRunning = false;
+        let sweeperRunning = false;
+
         async function autoStartHub() {
             if (!window.__TAURI__) return;
             try {
@@ -1649,9 +1652,43 @@ ALPHA-3 | REAR"></textarea>
                     debugLog('🛰️ Hub already reachable on :8789');
                     hubRunning = true;
                 }
+                // Auto-start local collector (Wi-Fi + GPS → push to hub)
+                await startCollector();
                 updateHubStatusUI();
             } catch (e) {
                 debugLog('Hub start failed: ' + e);
+            }
+        }
+
+        async function startCollector() {
+            if (!window.__TAURI__ || collectorRunning) return;
+            try {
+                const result = await window.__TAURI__.core.invoke('start_collector', {
+                    hubUrl: 'http://127.0.0.1:8789'
+                });
+                debugLog('📡 ' + result);
+                collectorRunning = true;
+                updateHubStatusUI();
+            } catch (e) {
+                debugLog('Collector start failed: ' + e);
+            }
+        }
+
+        async function toggleSweeper() {
+            if (!window.__TAURI__) return;
+            if (sweeperRunning) {
+                debugLog('⚡ Sweeper already running');
+                return;
+            }
+            try {
+                const result = await window.__TAURI__.core.invoke('start_sweeper');
+                debugLog('⚡ ' + result);
+                sweeperRunning = true;
+                updateHubStatusUI();
+                renderSDR();
+            } catch (e) {
+                debugLog('Sweeper failed: ' + e);
+                alert('RF Sweep failed: ' + e);
             }
         }
 
@@ -1679,6 +1716,16 @@ ALPHA-3 | REAR"></textarea>
             if (el) {
                 el.textContent = hubRunning ? 'RUNNING' : 'STOPPED';
                 el.style.color = hubRunning ? 'var(--accent-cyan)' : 'var(--text-muted)';
+            }
+            const cel = document.getElementById('collectorStatus');
+            if (cel) {
+                cel.textContent = collectorRunning ? 'ACTIVE' : 'IDLE';
+                cel.style.color = collectorRunning ? 'var(--accent-cyan)' : 'var(--text-muted)';
+            }
+            const sel = document.getElementById('sweeperStatus');
+            if (sel) {
+                sel.textContent = sweeperRunning ? 'SWEEPING' : 'OFF';
+                sel.style.color = sweeperRunning ? 'var(--accent-orange)' : 'var(--text-muted)';
             }
         }
 
@@ -2069,15 +2116,28 @@ ALPHA-3 | REAR"></textarea>
                     <div class="tac-panel" style="grid-column: 1 / -1;">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">🛰️ SIGINT Hub</span>
-                            <button class="tac-btn tac-btn-sm ${hubRunning ? 'tac-btn-danger' : 'tac-btn-primary'}" onclick="toggleHub()">
-                                ${hubRunning ? 'STOP HUB' : 'START HUB'}
-                            </button>
+                            <div style="display:flex;gap:var(--space-xs);">
+                                <button class="tac-btn tac-btn-sm ${sweeperRunning ? 'tac-btn-secondary' : 'tac-btn-primary'}" onclick="toggleSweeper()">
+                                    ${sweeperRunning ? '⚡ RF ON' : '⚡ START RF'}
+                                </button>
+                                <button class="tac-btn tac-btn-sm ${hubRunning ? 'tac-btn-danger' : 'tac-btn-primary'}" onclick="toggleHub()">
+                                    ${hubRunning ? 'STOP HUB' : 'START HUB'}
+                                </button>
+                            </div>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-md);text-align:center;">
+                            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:var(--space-md);text-align:center;">
                                 <div>
-                                    <div style="font-size:1rem;font-weight:700;" id="hubStatus">${hubRunning ? 'RUNNING' : 'STOPPED'}</div>
-                                    <div class="tac-label">HUB STATUS</div>
+                                    <div style="font-size:0.9rem;font-weight:700;" id="hubStatus">${hubRunning ? 'RUNNING' : 'STOPPED'}</div>
+                                    <div class="tac-label">HUB</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.9rem;font-weight:700;" id="collectorStatus">${collectorRunning ? 'ACTIVE' : 'IDLE'}</div>
+                                    <div class="tac-label">COLLECTOR</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.9rem;font-weight:700;" id="sweeperStatus">${sweeperRunning ? 'SWEEPING' : 'OFF'}</div>
+                                    <div class="tac-label">RF SWEEP</div>
                                 </div>
                                 <div>
                                     <div style="font-size:0.85rem;font-weight:700;color:var(--accent-cyan);">:8789</div>
