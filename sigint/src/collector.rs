@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use crate::{
     Error,
     confidence::{self, ConfidenceConfig},
+    crypto::{DeviceKeys, sign_payload},
     gps::GpsProvider,
     rf::{RingBuffer, RfObservation, flush_to_aggregates},
     wifi::{WifiScanner, apply_privacy_mode_a},
@@ -38,14 +39,15 @@ pub struct CollectorConfig {
     pub sync_interval_secs: u64,
     /// Confidence scoring config
     pub confidence: ConfidenceConfig,
-    /// Node device_id (derived from public key in Phase 4)
-    pub device_id: String,
+    /// Node keypair — device_id is derived from the public key
+    pub keys: DeviceKeys,
     /// Source type for TileUpdates
     pub source_type: String,
 }
 
 impl Default for CollectorConfig {
     fn default() -> Self {
+        let keys = DeviceKeys::generate();
         Self {
             h3_resolution: 10,
             rf_buffer_capacity: 1000,
@@ -53,7 +55,7 @@ impl Default for CollectorConfig {
             wifi_scan_interval_secs: 30,
             sync_interval_secs: 30,
             confidence: ConfidenceConfig::default(),
-            device_id: uuid::Uuid::new_v4().to_string(),
+            keys,
             source_type: "entity".to_string(),
         }
     }
@@ -187,12 +189,18 @@ impl Collector {
         let pending = self.db.get_pending_sync()?;
         if pending.is_empty() { return Ok(()); }
 
-        let batch = self.build_tile_update(&pending);
+        let mut batch = self.build_tile_update(&pending);
+
+        // Sign the batch (signature covers all fields except signature itself)
+        match sign_payload(&batch, &self.config.keys) {
+            Ok(sig) => { batch.signature = Some(sig); }
+            Err(e) => log::warn!("Failed to sign batch: {e} — sending unsigned"),
+        }
+
         let ack = self.transport.push(&batch)?;
+        log::info!("Sync push: {} accepted, {} rejected (signed={})",
+            ack.accepted, ack.rejected, batch.signature.is_some());
 
-        log::info!("Sync push: {} accepted, {} rejected", ack.accepted, ack.rejected);
-
-        // Mark synced
         self.db.mark_synced(&pending)?;
         Ok(())
     }
@@ -260,7 +268,7 @@ impl Collector {
             }
         }
 
-        let mut update = TileUpdate::new(&self.config.device_id, &self.config.source_type);
+        let mut update = TileUpdate::new(&self.config.keys.device_id, &self.config.source_type);
         update.tiles = tile_map.into_values().collect();
         update
     }
@@ -275,7 +283,7 @@ impl Collector {
         let wifi_interval = Duration::from_secs(self.config.wifi_scan_interval_secs);
         let sync_interval = Duration::from_secs(self.config.sync_interval_secs);
 
-        log::info!("Collector started (device_id={})", self.config.device_id);
+        log::info!("Collector started (device_id={})", self.config.keys.device_id);
 
         loop {
             std::thread::sleep(Duration::from_millis(500));

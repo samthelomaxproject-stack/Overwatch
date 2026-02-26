@@ -9,6 +9,10 @@ pub struct TileUpdate {
     pub source_type: String,
     pub timestamp_utc: u64,
     pub tiles: Vec<TileData>,
+    /// Ed25519 signature over the batch (base64). None = unsigned (hub_local / MVP).
+    /// Covers all fields except this one — sign before setting, verify after clearing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 impl TileUpdate {
@@ -23,6 +27,7 @@ impl TileUpdate {
             source_type: source_type.into(),
             timestamp_utc: now,
             tiles: Vec::new(),
+            signature: None,
         }
     }
 }

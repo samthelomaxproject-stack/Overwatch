@@ -1280,7 +1280,8 @@ ALPHA-3 | REAR"></textarea>
 
                     debugLog('Listeners registered');
 
-                    // Start SIGINT hub polling
+                    // Auto-start hub-api and begin polling
+                    autoStartHub();
                     startHubPoller();
 
                     // Setup Meshtastic listeners
@@ -1634,6 +1635,52 @@ ALPHA-3 | REAR"></textarea>
 
         let hubPollCursor = 0;
         let hubPoller = null;
+        let hubRunning = false;
+
+        async function autoStartHub() {
+            if (!window.__TAURI__) return;
+            try {
+                const status = await window.__TAURI__.core.invoke('hub_status');
+                if (!status.reachable) {
+                    const result = await window.__TAURI__.core.invoke('start_hub');
+                    debugLog('🛰️ ' + result);
+                    hubRunning = true;
+                } else {
+                    debugLog('🛰️ Hub already reachable on :8789');
+                    hubRunning = true;
+                }
+                updateHubStatusUI();
+            } catch (e) {
+                debugLog('Hub start failed: ' + e);
+            }
+        }
+
+        async function toggleHub() {
+            if (!window.__TAURI__) return;
+            try {
+                if (hubRunning) {
+                    await window.__TAURI__.core.invoke('stop_hub');
+                    hubRunning = false;
+                    debugLog('🛰️ Hub stopped');
+                } else {
+                    await window.__TAURI__.core.invoke('start_hub');
+                    hubRunning = true;
+                    debugLog('🛰️ Hub started');
+                }
+                updateHubStatusUI();
+                renderSDR();
+            } catch (e) {
+                debugLog('Hub toggle failed: ' + e);
+            }
+        }
+
+        function updateHubStatusUI() {
+            const el = document.getElementById('hubStatus');
+            if (el) {
+                el.textContent = hubRunning ? 'RUNNING' : 'STOPPED';
+                el.style.color = hubRunning ? 'var(--accent-cyan)' : 'var(--text-muted)';
+            }
+        }
 
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
@@ -2018,6 +2065,35 @@ ALPHA-3 | REAR"></textarea>
             const panel = document.getElementById('sdrPanel');
             panel.innerHTML = `
                 <div class="tac-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-md);">
+                    <!-- Hub Control Panel -->
+                    <div class="tac-panel" style="grid-column: 1 / -1;">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">🛰️ SIGINT Hub</span>
+                            <button class="tac-btn tac-btn-sm ${hubRunning ? 'tac-btn-danger' : 'tac-btn-primary'}" onclick="toggleHub()">
+                                ${hubRunning ? 'STOP HUB' : 'START HUB'}
+                            </button>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-md);text-align:center;">
+                                <div>
+                                    <div style="font-size:1rem;font-weight:700;" id="hubStatus">${hubRunning ? 'RUNNING' : 'STOPPED'}</div>
+                                    <div class="tac-label">HUB STATUS</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.85rem;font-weight:700;color:var(--accent-cyan);">:8789</div>
+                                    <div class="tac-label">PORT</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:1rem;font-weight:700;color:var(--accent-cyan);" id="rfTileCountTop">${Object.keys(hexTiles.rf).length}</div>
+                                    <div class="tac-label">RF TILES</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:1rem;font-weight:700;color:var(--accent-cyan);" id="wifiTileCountTop">${Object.keys(hexTiles.wifi).length}</div>
+                                    <div class="tac-label">Wi-Fi TILES</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="tac-panel">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">ADS-B (1090 MHz)</span>
@@ -2881,8 +2957,24 @@ ALPHA-3 | REAR"></textarea>
 
             tauriListen('meshtastic-position', (event) => {
                 const pos = event.payload;
-                debugLog('Meshtastic position: ' + pos.latitude + ', ' + pos.longitude);
-                // Could add to map here
+                debugLog('📍 Meshtastic PLI: ' + pos.callsign + ' @ ' + pos.latitude + ', ' + pos.longitude);
+
+                // Feed into entity tracking
+                if (pos.latitude && pos.longitude) {
+                    ingestPLI({
+                        uid: pos.node_id || pos.callsign || ('mesh-' + Date.now()),
+                        callsign: pos.callsign || pos.node_id || 'UNKNOWN',
+                        type: pos.type || 'GROUND',
+                        affiliation: pos.affiliation || 'friendly',
+                        lat: parseFloat(pos.latitude),
+                        lon: parseFloat(pos.longitude),
+                        altitude: pos.altitude || null,
+                        speed: pos.speed || null,
+                        course: pos.course || null,
+                        mgrs: pos.mgrs || null,
+                        timestamp: pos.timestamp || Date.now(),
+                    });
+                }
             });
 
             tauriListen('meshtastic-error', (event) => {

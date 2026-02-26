@@ -41,6 +41,7 @@ pub mod manet;
 pub mod rf;
 pub mod sanitize;
 pub mod storage;
+pub mod sweeper;
 pub mod sync;
 pub mod wifi;
 pub mod wire;

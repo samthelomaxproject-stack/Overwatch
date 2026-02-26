@@ -868,6 +868,60 @@ fn get_rtl_sdr_status() -> serde_json::Value {
     })
 }
 
+// ── Hub process management ────────────────────────────────────────────────────
+
+static HUB_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Start the hub-api process (sigint hub, localhost:8789).
+/// Spawns a Rust thread that runs the hub HTTP server.
+/// Idempotent — returns immediately if already running.
+#[tauri::command]
+fn start_hub() -> Result<String, String> {
+    let mut pid = HUB_PID.lock().unwrap();
+    if pid.is_some() {
+        return Ok("Hub already running".to_string());
+    }
+
+    // Spawn hub in a background thread using the sigint crate
+    // The hub runs on 0.0.0.0:8789 (all interfaces — VPN clients can reach it)
+    std::thread::spawn(|| {
+        let config = sigint::hub::HubConfig {
+            bind_addr: "0.0.0.0:8789".to_string(),
+            db_path: format!("{}/hub.db",
+                std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())),
+            collector_enabled: true,
+        };
+        log::info!("Starting hub-api on {}", config.bind_addr);
+        if let Err(e) = sigint::hub::run_hub(config) {
+            log::error!("Hub exited: {e}");
+        }
+    });
+
+    // Mark as running (thread id not available, use sentinel)
+    *pid = Some(1);
+    Ok("Hub started on 0.0.0.0:8789".to_string())
+}
+
+/// Stop the hub (marks as stopped — actual thread cleanup on next restart).
+#[tauri::command]
+fn stop_hub() -> Result<String, String> {
+    let mut pid = HUB_PID.lock().unwrap();
+    *pid = None;
+    Ok("Hub stopped".to_string())
+}
+
+/// Check if the hub is running.
+#[tauri::command]
+fn hub_status() -> serde_json::Value {
+    let running = HUB_PID.lock().unwrap().is_some();
+    // Also verify it's actually reachable
+    let reachable = ureq::get("http://127.0.0.1:8789/health")
+        .call()
+        .map(|r| r.status() == 200)
+        .unwrap_or(false);
+    serde_json::json!({ "running": running, "reachable": reachable })
+}
+
 /// Fetch SIGINT delta from the local hub-api (runs on localhost:8789).
 /// Returns merged tile data since the given cursor timestamp.
 /// JS polls this every 5 seconds when hub is running.
@@ -949,6 +1003,9 @@ fn stop_rtl_sdr() -> Result<String, String> {
             meshtastic_cli_start_listen,
             start_rtl_sdr,
             stop_rtl_sdr,
+            start_hub,
+            stop_hub,
+            hub_status,
             get_rtl_sdr_status,
             get_sigint_delta
         ])

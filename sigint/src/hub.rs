@@ -36,6 +36,7 @@ use std::sync::{Arc, Mutex};
 use crate::{Error, wire::TileUpdate};
 use crate::sync::{AckResult, TileDelta};
 use crate::sanitize::{sanitize_rf, sanitize_wifi, RateLimiter};
+use crate::crypto::verify_payload;
 
 const HUB_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS merged_tiles (
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS merged_tiles (
 CREATE TABLE IF NOT EXISTS node_registry (
     device_id    TEXT PRIMARY KEY,
     source_type  TEXT,
+    public_key   TEXT,
     trust_weight REAL NOT NULL DEFAULT 1.0,
     last_seen    INTEGER
 );
@@ -95,6 +97,27 @@ impl HubDb {
         Ok(())
     }
 
+    /// Store a node's public key for future signature verification.
+    pub fn register_pubkey(&mut self, device_id: &str, public_key_b64: &str) -> Result<(), Error> {
+        self.conn.execute(
+            "UPDATE node_registry SET public_key = ?1 WHERE device_id = ?2",
+            params![public_key_b64, device_id],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieve a node's stored public key (if registered).
+    pub fn get_pubkey(&self, device_id: &str) -> Result<Option<String>, Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT public_key FROM node_registry WHERE device_id = ?1"
+        )?;
+        let mut rows = stmt.query(params![device_id])?;
+        if let Some(row) = rows.next()? {
+            return Ok(row.get::<_, Option<String>>(0)?);
+        }
+        Ok(None)
+    }
+
     /// Merge a TileUpdate batch into merged_tiles.
     /// Sanitizes all inputs before merging. Tracks per-node rate limits.
     /// Uses confidence-weighted mean merge strategy.
@@ -105,6 +128,25 @@ impl HubDb {
             .as_secs();
 
         self.upsert_node(&update.device_id, &update.source_type, now)?;
+
+        // Signature verification — if the node has a registered public key,
+        // the batch must be signed and the signature must be valid.
+        // Unsigned batches from unknown nodes are accepted (first-contact grace).
+        if let Some(ref sig) = update.signature {
+            if let Ok(Some(pubkey)) = self.get_pubkey(&update.device_id) {
+                // Verify against batch without signature field
+                let mut unsigned = update.clone();
+                unsigned.signature = None;
+                match verify_payload(&unsigned, sig, &pubkey) {
+                    Ok(true) => log::debug!("Signature verified for {}", update.device_id),
+                    Ok(false) => {
+                        log::warn!("REJECTED: invalid signature from {}", update.device_id);
+                        return Ok(AckResult { accepted: 0, rejected: update.tiles.len() as u32, cursor: now });
+                    }
+                    Err(e) => log::warn!("Signature check error for {}: {e}", update.device_id),
+                }
+            }
+        }
 
         let mut accepted = 0u32;
         let mut rejected = 0u32;
