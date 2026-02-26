@@ -1565,41 +1565,81 @@ ALPHA-3 | REAR"></textarea>
         function updateHeatmap(type) {
             if (!map || !window.L || !L.heatLayer) return;
 
-            // Build heatmap points: [lat, lng, intensity 0-1]
             const points = [];
-            const cellSeen = new Set();
+            const cellBest = {}; // best intensity per cell (multiple dimensions → take max)
 
             Object.values(hexTiles[type]).forEach(data => {
                 if (!data.cellId || !window.h3) return;
-                if (cellSeen.has(data.cellId)) return;
-                cellSeen.add(data.cellId);
 
+                let signalIntensity;
+                if (type === 'rf') {
+                    // RF: −100 dBm = 0.0, −40 dBm = 1.0 (based purely on signal, not confidence)
+                    signalIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 60));
+                } else {
+                    // Wi-Fi: RSSI −100 = 0.0, −30 = 1.0; also boost by network count
+                    const rssiIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 70));
+                    const countBoost = Math.min(1, (data.sample_count || 1) / 8);
+                    signalIntensity = rssiIntensity * 0.7 + countBoost * 0.3;
+                }
+
+                // Confidence is 0..1 (time-decayed), use as opacity floor: min 0.3, max 1.0
+                // This means old observations still show, just slightly dimmer
+                const opacityFactor = Math.max(0.3, data.confidence || 0.5);
+                const finalIntensity = signalIntensity * opacityFactor;
+
+                const prev = cellBest[data.cellId] || 0;
+                if (finalIntensity > prev) cellBest[data.cellId] = finalIntensity;
+            });
+
+            Object.entries(cellBest).forEach(([cellId, intensity]) => {
+                if (intensity < 0.05) return;
                 try {
-                    const [lat, lng] = h3.cellToLatLng(data.cellId);
-                    let intensity;
-                    if (type === 'rf') {
-                        // Map -100 dBm → 0.0, -40 dBm → 1.0
-                        intensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 60));
-                    } else {
-                        // Map count 0→10+ to 0→1
-                        intensity = Math.max(0, Math.min(1, data.sample_count / 10));
-                    }
-                    // Scale by confidence (decayed)
-                    intensity *= data.confidence;
-                    if (intensity > 0.05) points.push([lat, lng, intensity]);
+                    const [lat, lng] = h3.cellToLatLng(cellId);
+                    points.push([lat, lng, intensity]);
                 } catch(e) {}
             });
 
-            const opts = type === 'rf'
-                ? { radius: 35, blur: 25, maxZoom: 17, gradient: { 0.0: '#0000ff', 0.4: '#00ffff', 0.6: '#00ff00', 0.8: '#ffff00', 1.0: '#ff0000' } }
-                : { radius: 35, blur: 25, maxZoom: 17, gradient: { 0.0: '#0000ff', 0.5: '#ff8800', 1.0: '#ff4400' } };
+            // Leaflet.heat options — opacity via maxOpacity so map remains visible
+            const rfOpts = {
+                radius: 40,
+                blur: 30,
+                maxZoom: 18,
+                max: 1.0,
+                minOpacity: 0.25,
+                gradient: {
+                    0.0: 'rgba(0,0,180,0.6)',
+                    0.3: 'rgba(0,200,200,0.65)',
+                    0.55: 'rgba(0,220,0,0.7)',
+                    0.75: 'rgba(255,200,0,0.75)',
+                    1.0: 'rgba(255,40,0,0.8)'
+                }
+            };
+            const wifiOpts = {
+                radius: 40,
+                blur: 30,
+                maxZoom: 18,
+                max: 1.0,
+                minOpacity: 0.25,
+                gradient: {
+                    0.0: 'rgba(0,50,200,0.6)',
+                    0.4: 'rgba(0,180,255,0.65)',
+                    0.65: 'rgba(255,140,0,0.7)',
+                    1.0: 'rgba(255,60,0,0.8)'
+                }
+            };
 
             if (type === 'rf') {
                 if (rfHeatLayer) { rfHeatLayer.setLatLngs(points); }
-                else { rfHeatLayer = L.heatLayer(points, opts).addTo(map); }
+                else { rfHeatLayer = L.heatLayer(points, rfOpts).addTo(map); }
             } else {
                 if (wifiHeatLayer) { wifiHeatLayer.setLatLngs(points); }
-                else { wifiHeatLayer = L.heatLayer(points, opts).addTo(map); }
+                else { wifiHeatLayer = L.heatLayer(points, wifiOpts).addTo(map); }
+            }
+
+            if (points.length === 0) {
+                debugLog(`${type.toUpperCase()} heatmap: no points to render`);
+            } else {
+                debugLog(`${type.toUpperCase()} heatmap: ${points.length} cells rendered`);
             }
         }
 
@@ -1843,61 +1883,105 @@ ALPHA-3 | REAR"></textarea>
         }
 
         function updateSigintStats() {
-            const rfCount = Object.keys(hexTiles.rf).length;
-            const wifiCount = Object.keys(hexTiles.wifi).length;
+            // ── RF stats ──────────────────────────────────────────────────────
+            const rfVals = Object.values(hexTiles.rf);
+            const rfCount = rfVals.length;
             ['rfTileCount','rfTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = rfCount; });
-            ['wifiTileCount','wifiTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = wifiCount; });
 
-            // Peak RF + band breakdown
             let peakDbm = null;
             const rfByBand = {};
-            Object.values(hexTiles.rf).forEach(t => {
+            rfVals.forEach(t => {
                 if (peakDbm === null || t.max_val > peakDbm) peakDbm = t.max_val;
                 const band = t.dimension || 'unknown';
-                if (!rfByBand[band] || t.max_val > rfByBand[band].max_val) rfByBand[band] = t;
+                if (!rfByBand[band]) rfByBand[band] = { ...t };
+                else {
+                    if (t.max_val > rfByBand[band].max_val) rfByBand[band].max_val = t.max_val;
+                    if (t.mean_val > rfByBand[band].mean_val) rfByBand[band].mean_val = t.mean_val;
+                    rfByBand[band].sample_count += t.sample_count;
+                }
             });
-            const rfPeakEl = document.getElementById('rfPeakPower');
-            if (rfPeakEl) rfPeakEl.textContent = peakDbm !== null ? peakDbm.toFixed(1) + ' dBm' : '--';
+
+            const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+            setEl('rfPeakPower', peakDbm !== null ? peakDbm.toFixed(1) + ' dBm' : '--');
+            setEl('rfBandCount', Object.keys(rfByBand).length || '--');
+            setEl('rfSweepStatus', sweeperRunning ? 'LIVE' : 'IDLE');
 
             const rfBandEl = document.getElementById('rfBandList');
             if (rfBandEl) {
-                if (Object.keys(rfByBand).length === 0) {
-                    rfBandEl.textContent = sweeperRunning ? 'Sweeping… waiting for data' : 'Start RF sweep to see spectrum';
+                if (rfCount === 0) {
+                    rfBandEl.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${sweeperRunning ? 'Sweeping… first data incoming' : 'No RF data — connect HackRF and click ⚡ START RF'}</div>`;
                 } else {
-                    rfBandEl.innerHTML = Object.entries(rfByBand).map(([band, t]) => {
-                        const bar = '█'.repeat(Math.max(1, Math.round((t.max_val + 120) / 10)));
-                        const color = t.max_val > -60 ? 'var(--accent-red, #f56565)' : t.max_val > -80 ? 'var(--accent-orange)' : 'var(--accent-cyan)';
-                        return `<div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-                            <span style="color:var(--text-muted)">${band}</span>
-                            <span style="color:${color}">${bar} ${t.max_val.toFixed(0)} dBm</span>
-                        </div>`;
-                    }).join('');
+                    // Table header
+                    const header = `<div style="display:grid;grid-template-columns:1fr 80px 80px 60px 70px;gap:4px;padding:6px 8px;background:rgba(255,255,255,0.05);font-size:0.65rem;color:var(--text-muted);letter-spacing:0.05em;position:sticky;top:0;">
+                        <span>BAND</span><span style="text-align:right">PEAK</span><span style="text-align:right">MEAN</span><span style="text-align:right">SAMPLES</span><span style="text-align:right">SIGNAL</span>
+                    </div>`;
+                    const rows = Object.entries(rfByBand)
+                        .sort((a, b) => b[1].max_val - a[1].max_val)
+                        .map(([band, t]) => {
+                            const strength = t.max_val > -50 ? 'var(--accent-red,#f56565)' : t.max_val > -70 ? 'var(--accent-orange)' : t.max_val > -90 ? 'var(--accent-cyan)' : 'var(--text-muted)';
+                            const bars = Math.max(1, Math.round((t.max_val + 110) / 8));
+                            const barStr = '▮'.repeat(Math.min(bars, 8)) + '▯'.repeat(Math.max(0, 8 - bars));
+                            return `<div style="display:grid;grid-template-columns:1fr 80px 80px 60px 70px;gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
+                                <span style="color:var(--text-secondary);font-size:0.7rem;">${band}</span>
+                                <span style="text-align:right;color:${strength};">${t.max_val.toFixed(1)}</span>
+                                <span style="text-align:right;color:var(--text-secondary);">${t.mean_val.toFixed(1)}</span>
+                                <span style="text-align:right;color:var(--text-muted);">${t.sample_count}</span>
+                                <span style="text-align:right;color:${strength};font-size:0.65rem;letter-spacing:-1px;">${barStr}</span>
+                            </div>`;
+                        }).join('');
+                    rfBandEl.innerHTML = header + rows;
                 }
             }
 
-            // Hottest Wi-Fi channel + channel list
-            let hottestCh = null;
-            const chBySorted = Object.values(hexTiles.wifi)
-                .sort((a, b) => b.sample_count - a.sample_count);
-            if (chBySorted.length > 0) hottestCh = chBySorted[0];
-            const wifiHotEl = document.getElementById('wifiHotChannel');
-            if (wifiHotEl) wifiHotEl.textContent = hottestCh ? hottestCh.dimension : '--';
+            // ── Wi-Fi stats ───────────────────────────────────────────────────
+            const wifiVals = Object.values(hexTiles.wifi);
+            const wifiCount = wifiVals.length;
+            ['wifiTileCount','wifiTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = wifiCount; });
+
+            // Aggregate by band+channel across all tiles
+            const chAgg = {};
+            let totalNets = 0;
+            let bestRssi = null;
+            wifiVals.forEach(t => {
+                const key = t.dimension;
+                if (!chAgg[key]) chAgg[key] = { ...t, tileCount: 1 };
+                else {
+                    chAgg[key].sample_count += t.sample_count;
+                    chAgg[key].mean_val = (chAgg[key].mean_val + t.mean_val) / 2;
+                    if (t.max_val > chAgg[key].max_val) chAgg[key].max_val = t.max_val;
+                    chAgg[key].tileCount++;
+                }
+                totalNets += t.sample_count;
+                if (bestRssi === null || t.max_val > bestRssi) bestRssi = t.max_val;
+            });
+
+            const chSorted = Object.values(chAgg).sort((a, b) => b.sample_count - a.sample_count);
+            const hottestCh = chSorted[0];
+
+            setEl('wifiNetCount', totalNets || '--');
+            setEl('wifiHotChannel', hottestCh ? hottestCh.dimension : '--');
+            setEl('wifiBestRssi', bestRssi !== null ? bestRssi.toFixed(0) + ' dBm' : '--');
 
             const wifiChEl = document.getElementById('wifiChannelList');
             if (wifiChEl) {
-                if (chBySorted.length === 0) {
-                    wifiChEl.textContent = collectorRunning ? 'Scanning… 30s interval' : 'Start collector to scan';
+                if (wifiCount === 0) {
+                    wifiChEl.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${collectorRunning ? 'Scanning… first results in ~30s' : 'Start collector to begin Wi-Fi scanning'}</div>`;
                 } else {
-                    // Show top 6 channels across all tiles
-                    const top = chBySorted.slice(0, 6);
-                    wifiChEl.innerHTML = top.map(t => {
-                        const rssiBar = '█'.repeat(Math.max(1, Math.round((t.mean_val + 100) / 8)));
-                        const conf = Math.round(t.confidence * 100);
-                        return `<div style="display:flex;justify-content:space-between;margin-bottom:2px;">
-                            <span style="color:var(--text-muted)">${t.dimension}</span>
-                            <span style="color:var(--accent-cyan)">${rssiBar} ${t.mean_val.toFixed(0)} dBm · ${t.sample_count} nets</span>
+                    const header = `<div style="display:grid;grid-template-columns:1fr 50px 70px 80px 60px;gap:4px;padding:6px 8px;background:rgba(255,255,255,0.05);font-size:0.65rem;color:var(--text-muted);letter-spacing:0.05em;position:sticky;top:0;">
+                        <span>CHANNEL</span><span style="text-align:right">BAND</span><span style="text-align:right">MEAN RSSI</span><span style="text-align:right">BEST RSSI</span><span style="text-align:right">NETS</span>
+                    </div>`;
+                    const rows = chSorted.map(t => {
+                        const strength = t.max_val > -50 ? 'var(--accent-orange)' : t.max_val > -70 ? 'var(--accent-cyan)' : 'var(--text-secondary)';
+                        const bars = Math.max(1, Math.round((t.max_val + 100) / 8));
+                        return `<div style="display:grid;grid-template-columns:1fr 50px 70px 80px 60px;gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
+                            <span style="color:var(--text-secondary);font-size:0.7rem;">Ch ${t.channel || '?'} · ${t.tileCount} tile${t.tileCount > 1 ? 's' : ''}</span>
+                            <span style="text-align:right;color:var(--text-muted);">${t.band || '?'}</span>
+                            <span style="text-align:right;color:${strength};">${t.mean_val.toFixed(1)} dBm</span>
+                            <span style="text-align:right;color:${strength};">${t.max_val.toFixed(1)} dBm</span>
+                            <span style="text-align:right;color:var(--accent-cyan);">${t.sample_count}</span>
                         </div>`;
                     }).join('');
+                    wifiChEl.innerHTML = header + rows;
                 }
             }
         }
@@ -2276,68 +2360,62 @@ ALPHA-3 | REAR"></textarea>
                             </div>
                         </div>
                     </div>
-                    <!-- RF Environment Panel -->
-                    <div class="tac-panel">
+                    <!-- RF Environment Panel — full width, scrollable -->
+                    <div class="tac-panel" style="grid-column: 1 / -1;">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">⚡ RF Environment</span>
-                            <button class="tac-btn tac-btn-sm tac-btn-secondary" id="rfMapBtn" onclick="toggleLayer('rf');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP OFF</button>
+                            <div style="display:flex;gap:var(--space-xs);align-items:center;">
+                                <span style="font-size:0.7rem;color:var(--text-muted);" id="rfSource">${sweeperRunning ? '🔴 LIVE' : 'IDLE — click START RF'}</span>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" id="rfMapBtn" onclick="toggleLayer('rf');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');">HEATMAP</button>
+                            </div>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-sm);text-align:center;margin-bottom:var(--space-md);">
-                                <div>
-                                    <div style="font-size:1.5rem;font-weight:700;color:var(--accent-cyan);" id="rfTileCount">0</div>
-                                    <div class="tac-label">TILES</div>
-                                </div>
-                                <div>
-                                    <div style="font-size:0.85rem;font-weight:700;color:var(--accent-cyan);" id="rfPeakPower">--</div>
-                                    <div class="tac-label">PEAK</div>
-                                </div>
-                                <div>
-                                    <div style="font-size:0.85rem;font-weight:700;" id="rfSource" style="color:var(--text-muted);">${sweeperRunning ? '<span style="color:var(--accent-orange)">LIVE</span>' : '<span style="color:var(--text-muted)">IDLE</span>'}</div>
-                                    <div class="tac-label">SOURCE</div>
-                                </div>
+                            <!-- Stats row -->
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-sm);text-align:center;padding-bottom:var(--space-md);border-bottom:1px solid rgba(255,255,255,0.07);margin-bottom:var(--space-md);">
+                                <div><div style="font-size:1.4rem;font-weight:700;color:var(--accent-cyan);" id="rfTileCount">0</div><div class="tac-label">TILES</div></div>
+                                <div><div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="rfPeakPower">--</div><div class="tac-label">PEAK POWER</div></div>
+                                <div><div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="rfBandCount">--</div><div class="tac-label">BANDS</div></div>
+                                <div><div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="rfSweepStatus">--</div><div class="tac-label">SWEEP RATE</div></div>
                             </div>
-                            <!-- Live RF band breakdown -->
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">BANDS OBSERVED</div>
-                            <div id="rfBandList" style="font-family:var(--font-mono);font-size:0.72rem;margin-bottom:var(--space-md);min-height:32px;color:var(--text-secondary);">
-                                No RF data yet — start sweeper
+                            <!-- Scrollable findings list -->
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.05em;">ALL RF OBSERVATIONS</div>
+                            <div id="rfBandList" style="font-family:var(--font-mono);font-size:0.75rem;max-height:280px;overflow-y:auto;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.06);border-radius:4px;">
+                                <div style="padding:var(--space-md);color:var(--text-muted);">No RF data — connect HackRF and click ⚡ START RF</div>
                             </div>
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">SELECTED TILE DETAIL</div>
-                            <div id="rfDetailPanel" style="min-height:48px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.72rem;color:var(--text-secondary);">
-                                Click a hex on the map
+                            <!-- Selected tile -->
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin:var(--space-md) 0 6px;letter-spacing:0.05em;">SELECTED TILE</div>
+                            <div id="rfDetailPanel" style="padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
+                                Click a point on the heatmap
                             </div>
                         </div>
                     </div>
 
-                    <!-- Wi-Fi Density Panel -->
-                    <div class="tac-panel">
+                    <!-- Wi-Fi Density Panel — full width, scrollable -->
+                    <div class="tac-panel" style="grid-column: 1 / -1;">
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">📶 Wi-Fi Density</span>
-                            <button class="tac-btn tac-btn-sm tac-btn-secondary" id="wifiMapBtn" onclick="toggleLayer('wifi');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');" style="font-size:0.7rem;">MAP OFF</button>
+                            <div style="display:flex;gap:var(--space-xs);align-items:center;">
+                                <span style="font-size:0.7rem;color:var(--accent-green);">🔒 Mode A</span>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" id="wifiMapBtn" onclick="toggleLayer('wifi');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');">HEATMAP</button>
+                            </div>
                         </div>
                         <div class="tac-panel-body">
-                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-sm);text-align:center;margin-bottom:var(--space-md);">
-                                <div>
-                                    <div style="font-size:1.5rem;font-weight:700;color:var(--accent-cyan);" id="wifiTileCount">0</div>
-                                    <div class="tac-label">TILES</div>
-                                </div>
-                                <div>
-                                    <div style="font-size:0.75rem;font-weight:700;color:var(--accent-cyan);" id="wifiHotChannel">--</div>
-                                    <div class="tac-label">HOTTEST</div>
-                                </div>
-                                <div>
-                                    <div style="font-size:0.75rem;font-weight:700;color:var(--accent-green);">Mode A</div>
-                                    <div class="tac-label">PRIVACY</div>
-                                </div>
+                            <!-- Stats row -->
+                            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-sm);text-align:center;padding-bottom:var(--space-md);border-bottom:1px solid rgba(255,255,255,0.07);margin-bottom:var(--space-md);">
+                                <div><div style="font-size:1.4rem;font-weight:700;color:var(--accent-cyan);" id="wifiTileCount">0</div><div class="tac-label">TILES</div></div>
+                                <div><div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="wifiNetCount">--</div><div class="tac-label">NETWORKS</div></div>
+                                <div><div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="wifiHotChannel">--</div><div class="tac-label">HOTTEST CH</div></div>
+                                <div><div style="font-size:0.9rem;font-weight:700;color:var(--accent-cyan);" id="wifiBestRssi">--</div><div class="tac-label">BEST RSSI</div></div>
                             </div>
-                            <!-- Live channel breakdown -->
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">CHANNEL ACTIVITY (current tile)</div>
-                            <div id="wifiChannelList" style="font-family:var(--font-mono);font-size:0.72rem;margin-bottom:var(--space-md);min-height:48px;color:var(--text-secondary);">
-                                No Wi-Fi data yet — collector scanning…
+                            <!-- Scrollable channel list — all channels across all tiles -->
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.05em;">ALL CHANNEL OBSERVATIONS</div>
+                            <div id="wifiChannelList" style="font-family:var(--font-mono);font-size:0.75rem;max-height:280px;overflow-y:auto;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.06);border-radius:4px;">
+                                <div style="padding:var(--space-md);color:var(--text-muted);">Collector scanning — first results in ~30s</div>
                             </div>
-                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:4px;">SELECTED TILE DETAIL</div>
-                            <div id="wifiDetailPanel" style="min-height:48px;padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.72rem;color:var(--text-secondary);">
-                                Click a hex on the map
+                            <!-- Selected tile -->
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin:var(--space-md) 0 6px;letter-spacing:0.05em;">SELECTED TILE</div>
+                            <div id="wifiDetailPanel" style="padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
+                                Click a point on the heatmap
                             </div>
                         </div>
                     </div>
