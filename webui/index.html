@@ -1607,38 +1607,49 @@ ALPHA-3 | REAR"></textarea>
             if (!map || !window.L || !L.heatLayer) return;
 
             const points = [];
-            const cellBest = {}; // best intensity per cell (multiple dimensions → take max)
 
-            Object.values(hexTiles[type]).forEach(data => {
-                if (!data.cellId || !window.h3) return;
+            if (type === 'rf') {
+                // RF: one intensity per cell (max band intensity)
+                const cellBest = {};
+                Object.values(hexTiles.rf).forEach(data => {
+                    if (!data.cellId || !window.h3) return;
+                    const signalIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 60));
+                    const opacityFactor = Math.max(0.3, data.confidence || 0.5);
+                    const finalIntensity = signalIntensity * opacityFactor;
+                    const prev = cellBest[data.cellId] || 0;
+                    if (finalIntensity > prev) cellBest[data.cellId] = finalIntensity;
+                });
+                Object.entries(cellBest).forEach(([cellId, intensity]) => {
+                    if (intensity < 0.05) return;
+                    try {
+                        const [lat, lng] = h3.cellToLatLng(cellId);
+                        points.push([lat, lng, intensity]);
+                    } catch(e) {}
+                });
+            } else {
+                // Wi-Fi: include EACH channel observation (not deduped), with slight jitter
+                // so multiple channels in one cell are all visible.
+                Object.values(hexTiles.wifi).forEach(data => {
+                    if (!data.cellId || !window.h3) return;
+                    try {
+                        const [lat, lng] = h3.cellToLatLng(data.cellId);
+                        const rssiIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 70));
+                        const countBoost = Math.min(1, (data.sample_count || 1) / 8);
+                        const signalIntensity = rssiIntensity * 0.7 + countBoost * 0.3;
+                        const opacityFactor = Math.max(0.3, data.confidence || 0.5);
+                        const finalIntensity = signalIntensity * opacityFactor;
+                        if (finalIntensity < 0.05) return;
 
-                let signalIntensity;
-                if (type === 'rf') {
-                    // RF: −100 dBm = 0.0, −40 dBm = 1.0 (based purely on signal, not confidence)
-                    signalIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 60));
-                } else {
-                    // Wi-Fi: RSSI −100 = 0.0, −30 = 1.0; also boost by network count
-                    const rssiIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 70));
-                    const countBoost = Math.min(1, (data.sample_count || 1) / 8);
-                    signalIntensity = rssiIntensity * 0.7 + countBoost * 0.3;
-                }
-
-                // Confidence is 0..1 (time-decayed), use as opacity floor: min 0.3, max 1.0
-                // This means old observations still show, just slightly dimmer
-                const opacityFactor = Math.max(0.3, data.confidence || 0.5);
-                const finalIntensity = signalIntensity * opacityFactor;
-
-                const prev = cellBest[data.cellId] || 0;
-                if (finalIntensity > prev) cellBest[data.cellId] = finalIntensity;
-            });
-
-            Object.entries(cellBest).forEach(([cellId, intensity]) => {
-                if (intensity < 0.05) return;
-                try {
-                    const [lat, lng] = h3.cellToLatLng(cellId);
-                    points.push([lat, lng, intensity]);
-                } catch(e) {}
-            });
+                        // deterministic tiny jitter based on channel
+                        const ch = data.channel || 1;
+                        const angle = (ch % 12) * (Math.PI / 6);
+                        const radius = 0.00022; // ~20-25m
+                        const jLat = lat + Math.sin(angle) * radius;
+                        const jLng = lng + Math.cos(angle) * radius;
+                        points.push([jLat, jLng, finalIntensity]);
+                    } catch(e) {}
+                });
+            }
 
             // Leaflet.heat options — opacity via maxOpacity so map remains visible
             const rfOpts = {
@@ -1899,7 +1910,7 @@ ALPHA-3 | REAR"></textarea>
                 const barStr = '▮'.repeat(Math.min(bars,8)) + '▯'.repeat(Math.max(0,8-bars));
                 return `<div style="display:grid;grid-template-columns:${showBssid ? '2fr 2fr 50px 70px' : '1fr 50px 70px'};gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
                     <span style="color:var(--text-secondary);font-size:0.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${n.display_name}">${n.display_name}</span>
-                    ${showBssid ? `<span style="color:var(--text-muted);font-size:0.65rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis;" title="${n.bssid_display||''}">${n.bssid_display||'--'}</span>` : ''}
+                    ${showBssid ? `<span style="color:var(--text-muted);font-size:0.65rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis;" title="${n.bssid_display||''}">${n.bssid_display || '(withheld by macOS)'}</span>` : ''}
                     <span style="text-align:right;color:var(--text-muted);font-size:0.7rem;">${n.band}</span>
                     <span style="text-align:right;color:${strength};font-size:0.7rem;">${n.rssi_dbm} dBm</span>
                 </div>`;
@@ -2047,8 +2058,8 @@ ALPHA-3 | REAR"></textarea>
 
             // ── Wi-Fi stats ───────────────────────────────────────────────────
             const wifiVals = Object.values(hexTiles.wifi);
-            const wifiCount = wifiVals.length;
-            ['wifiTileCount','wifiTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = wifiCount; });
+            const wifiCellCount = new Set(wifiVals.map(v => v.cellId)).size;
+            ['wifiTileCount','wifiTileCountTop'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = wifiCellCount; });
 
             // Aggregate by band+channel across all tiles
             const chAgg = {};
