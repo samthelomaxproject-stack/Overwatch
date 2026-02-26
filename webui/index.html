@@ -1579,6 +1579,9 @@ ALPHA-3 | REAR"></textarea>
         let rfHeatLayer = null;
         let wifiHeatLayer = null;
 
+        // Invisible hover markers for per-point tooltips
+        const heatHoverMarkers = { rf: [], wifi: [] };
+
         // Leaflet hex polygon layers (for click-to-detail, drawn on top of heatmap)
         const hexPolygons = { rf: {}, wifi: {} };
 
@@ -1598,6 +1601,9 @@ ALPHA-3 | REAR"></textarea>
             // Remove heatmap
             if (type === 'rf' && rfHeatLayer) { map.removeLayer(rfHeatLayer); rfHeatLayer = null; }
             if (type === 'wifi' && wifiHeatLayer) { map.removeLayer(wifiHeatLayer); wifiHeatLayer = null; }
+            // Remove hover markers
+            heatHoverMarkers[type].forEach(m => { if (map) map.removeLayer(m); });
+            heatHoverMarkers[type] = [];
             // Remove polygons
             Object.values(hexPolygons[type]).forEach(p => { if (map) map.removeLayer(p); });
             hexPolygons[type] = {};
@@ -1622,7 +1628,8 @@ ALPHA-3 | REAR"></textarea>
                     const latQ = parseFloat(parts[1]);
                     const lonQ = parseFloat(parts[2]);
                     if (!isNaN(latQ) && !isNaN(lonQ)) {
-                        return [latQ / 100.0, lonQ / 100.0];
+                        // Android fallback uses lat/lon * 10000 quantization
+                        return [latQ / 10000.0, lonQ / 10000.0];
                     }
                 }
             }
@@ -1633,6 +1640,7 @@ ALPHA-3 | REAR"></textarea>
             if (!map || !window.L || !L.heatLayer) return;
 
             const points = [];
+            const pointMeta = [];
 
             if (type === 'rf') {
                 // RF: one intensity per cell (max band intensity)
@@ -1651,6 +1659,7 @@ ALPHA-3 | REAR"></textarea>
                     if (ll) {
                         const [lat, lng] = ll;
                         points.push([lat, lng, intensity]);
+                        pointMeta.push({ lat, lng, data: { ...data, cellId }, type: 'rf' });
                     }
                 });
             } else {
@@ -1675,6 +1684,7 @@ ALPHA-3 | REAR"></textarea>
                     const jLat = lat + Math.sin(angle) * radius;
                     const jLng = lng + Math.cos(angle) * radius;
                     points.push([jLat, jLng, finalIntensity]);
+                    pointMeta.push({ lat: jLat, lng: jLng, data, type: 'wifi' });
                 });
             }
 
@@ -1715,10 +1725,26 @@ ALPHA-3 | REAR"></textarea>
                 else { wifiHeatLayer = L.heatLayer(points, wifiOpts).addTo(map); }
             }
 
+            // Rebuild invisible hover markers so tooltips match each point
+            heatHoverMarkers[type].forEach(m => { if (map) map.removeLayer(m); });
+            heatHoverMarkers[type] = [];
+            pointMeta.forEach(p => {
+                const marker = L.circleMarker([p.lat, p.lng], {
+                    radius: 10,
+                    opacity: 0,
+                    fillOpacity: 0,
+                    interactive: true,
+                });
+                marker.bindTooltip(buildHexTooltip(type, p.data), { sticky: true });
+                marker.on('click', () => showTileDetail(type, p.data.cellId || 'point', p.data));
+                if (layerVisible[type]) marker.addTo(map);
+                heatHoverMarkers[type].push(marker);
+            });
+
             if (points.length === 0) {
                 debugLog(`${type.toUpperCase()} heatmap: no points to render`);
             } else {
-                debugLog(`${type.toUpperCase()} heatmap: ${points.length} cells rendered`);
+                debugLog(`${type.toUpperCase()} heatmap: ${points.length} points rendered`);
             }
         }
 
@@ -1985,6 +2011,22 @@ ALPHA-3 | REAR"></textarea>
                 if (!update.tiles) continue;
                 for (const tile of update.tiles) {
                     const cellId = tile.tile_id;
+
+                    // Entity synthesis from contributing node metadata
+                    if (tile.device_id) {
+                        const ll = tileToLatLng(cellId);
+                        if (ll) {
+                            const [lat, lon] = ll;
+                            ingestPLI({
+                                uid: `node-${tile.device_id}`,
+                                callsign: tile.device_id,
+                                type: (tile.source_type || 'handheld').toUpperCase(),
+                                affiliation: 'friendly',
+                                lat, lon,
+                                timestamp: Date.now(),
+                            });
+                        }
+                    }
 
                     // RF
                     if (tile.rf) {

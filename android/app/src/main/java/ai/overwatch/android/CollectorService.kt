@@ -226,8 +226,9 @@ class CollectorService : Service() {
     // Placeholder H3 approx until shared Rust JNI lands.
     private fun h3CellApprox(lat: Double, lon: Double): String {
         // deterministic pseudo-cell for MVP networking tests
-        val latQ = (lat * 100).toInt()
-        val lonQ = (lon * 100).toInt()
+        // quantize to ~11m resolution so movement updates map smoothly
+        val latQ = (lat * 10000).toInt()
+        val lonQ = (lon * 10000).toInt()
         return "android_${latQ}_${lonQ}"
     }
 

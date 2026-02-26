@@ -39,6 +39,12 @@ pub struct TileData {
     pub tile_id: String,
     /// floor(timestamp_utc / 60) * 60
     pub time_bucket: u64,
+    /// Last contributing device id for this tile (metadata for entity rendering)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+    /// Source type for contributing device (handheld/entity/drone)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rf: Option<Vec<RfAggregate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,6 +56,8 @@ impl TileData {
         Self {
             tile_id: tile_id.into(),
             time_bucket: (timestamp_utc / 60) * 60,
+            device_id: None,
+            source_type: None,
             rf: None,
             wifi: None,
         }

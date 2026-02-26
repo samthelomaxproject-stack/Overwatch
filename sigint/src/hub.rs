@@ -40,16 +40,18 @@ use crate::crypto::verify_payload;
 
 const HUB_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS merged_tiles (
-    tile_id       TEXT    NOT NULL,
-    time_bucket   INTEGER NOT NULL,
-    sensor_type   TEXT    NOT NULL,
-    dimension     TEXT    NOT NULL,
-    mean_val      REAL    NOT NULL,
-    max_val       REAL    NOT NULL,
-    sample_count  INTEGER NOT NULL DEFAULT 1,
-    source_count  INTEGER NOT NULL DEFAULT 1,
-    confidence    REAL    NOT NULL,
-    updated_at    INTEGER NOT NULL,
+    tile_id         TEXT    NOT NULL,
+    time_bucket     INTEGER NOT NULL,
+    sensor_type     TEXT    NOT NULL,
+    dimension       TEXT    NOT NULL,
+    mean_val        REAL    NOT NULL,
+    max_val         REAL    NOT NULL,
+    sample_count    INTEGER NOT NULL DEFAULT 1,
+    source_count    INTEGER NOT NULL DEFAULT 1,
+    confidence      REAL    NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    last_device_id  TEXT,
+    last_source_type TEXT,
     PRIMARY KEY (tile_id, time_bucket, sensor_type, dimension)
 );
 
@@ -78,6 +80,9 @@ impl HubDb {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch(HUB_SCHEMA)?;
+        // Migrations for existing DBs
+        let _ = conn.execute("ALTER TABLE merged_tiles ADD COLUMN last_device_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE merged_tiles ADD COLUMN last_source_type TEXT", []);
         Ok(Self { conn })
     }
 
@@ -171,20 +176,23 @@ impl HubDb {
                     tx.execute(
                         r#"INSERT INTO merged_tiles
                            (tile_id, time_bucket, sensor_type, dimension, mean_val, max_val,
-                            sample_count, source_count, confidence, updated_at)
-                           VALUES (?1, ?2, 'rf', ?3, ?4, ?5, ?6, 1, ?7, ?8)
+                            sample_count, source_count, confidence, updated_at, last_device_id, last_source_type)
+                           VALUES (?1, ?2, 'rf', ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10)
                            ON CONFLICT(tile_id, time_bucket, sensor_type, dimension) DO UPDATE SET
-                             mean_val     = (mean_val * sample_count + excluded.mean_val * excluded.sample_count)
-                                           / (sample_count + excluded.sample_count),
-                             max_val      = MAX(max_val, excluded.max_val),
-                             sample_count = sample_count + excluded.sample_count,
-                             source_count = source_count + 1,
-                             confidence   = (confidence + excluded.confidence) / 2.0,
-                             updated_at   = excluded.updated_at"#,
+                             mean_val      = (mean_val * sample_count + excluded.mean_val * excluded.sample_count)
+                                            / (sample_count + excluded.sample_count),
+                             max_val       = MAX(max_val, excluded.max_val),
+                             sample_count  = sample_count + excluded.sample_count,
+                             source_count  = source_count + 1,
+                             confidence    = (confidence + excluded.confidence) / 2.0,
+                             updated_at    = excluded.updated_at,
+                             last_device_id = excluded.last_device_id,
+                             last_source_type = excluded.last_source_type"#,
                         params![
                             tile.tile_id, tile.time_bucket as i64, dim,
                             agg.mean_power_dbm, agg.max_power_dbm,
-                            agg.sample_count as i64, agg.confidence, now as i64
+                            agg.sample_count as i64, agg.confidence, now as i64,
+                            update.device_id, update.source_type
                         ],
                     )?;
                     accepted += 1;
@@ -208,20 +216,23 @@ impl HubDb {
                     tx.execute(
                         r#"INSERT INTO merged_tiles
                            (tile_id, time_bucket, sensor_type, dimension, mean_val, max_val,
-                            sample_count, source_count, confidence, updated_at)
-                           VALUES (?1, ?2, 'wifi_channel', ?3, ?4, ?5, ?6, 1, ?7, ?8)
+                            sample_count, source_count, confidence, updated_at, last_device_id, last_source_type)
+                           VALUES (?1, ?2, 'wifi_channel', ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10)
                            ON CONFLICT(tile_id, time_bucket, sensor_type, dimension) DO UPDATE SET
-                             mean_val     = (mean_val * sample_count + excluded.mean_val * excluded.sample_count)
-                                           / (sample_count + excluded.sample_count),
-                             max_val      = MAX(max_val, excluded.max_val),
-                             sample_count = sample_count + excluded.sample_count,
-                             source_count = source_count + 1,
-                             confidence   = (confidence + excluded.confidence) / 2.0,
-                             updated_at   = excluded.updated_at"#,
+                             mean_val      = (mean_val * sample_count + excluded.mean_val * excluded.sample_count)
+                                            / (sample_count + excluded.sample_count),
+                             max_val       = MAX(max_val, excluded.max_val),
+                             sample_count  = sample_count + excluded.sample_count,
+                             source_count  = source_count + 1,
+                             confidence    = (confidence + excluded.confidence) / 2.0,
+                             updated_at    = excluded.updated_at,
+                             last_device_id = excluded.last_device_id,
+                             last_source_type = excluded.last_source_type"#,
                         params![
                             tile.tile_id, tile.time_bucket as i64, dim,
                             ch.mean_rssi_dbm, ch.max_rssi_dbm,
-                            ch.count as i64, ch.confidence, now as i64
+                            ch.count as i64, ch.confidence, now as i64,
+                            update.device_id, update.source_type
                         ],
                     )?;
                     accepted += 1;
@@ -242,7 +253,8 @@ impl HubDb {
             .as_secs();
         let mut stmt = self.conn.prepare(
             r#"SELECT tile_id, time_bucket, sensor_type, dimension,
-                      mean_val, max_val, sample_count, confidence, updated_at
+                      mean_val, max_val, sample_count, confidence, updated_at,
+                      last_device_id, last_source_type
                FROM merged_tiles WHERE updated_at > ?1
                ORDER BY updated_at ASC LIMIT 1000"#,
         )?;
@@ -253,6 +265,8 @@ impl HubDb {
             tile_id: String, time_bucket: u64, sensor_type: String,
             dimension: String, mean_val: f64, max_val: f64,
             sample_count: u32, confidence: f64, updated_at: u64,
+            last_device_id: Option<String>,
+            last_source_type: Option<String>,
         }
 
         let rows = stmt.query_map(params![cursor_ts as i64], |r| {
@@ -266,11 +280,14 @@ impl HubDb {
                 sample_count: r.get::<_, i64>(6)? as u32,
                 confidence:   r.get(7)?,
                 updated_at:   r.get::<_, i64>(8)? as u64,
+                last_device_id: r.get(9)?,
+                last_source_type: r.get(10)?,
             })
         })?.collect::<Result<Vec<_>, _>>()?;
 
         let max_cursor = rows.iter().map(|r| r.updated_at).max().unwrap_or(cursor_ts);
-        let now_secs = now as f64;
+        // updated_at and cursor are milliseconds; convert to seconds for decay math
+        let now_secs = now as f64 / 1000.0;
 
         // Build TileUpdate with time-decayed values
         use crate::wire::{TileData, RfAggregate, WifiData, ChannelHotness};
@@ -284,8 +301,15 @@ impl HubDb {
             let tile = tile_map.entry(key).or_insert_with(|| {
                 TileData::new(row.tile_id.clone(), row.time_bucket)
             });
+            // Preserve contributing device metadata for entity rendering
+            if tile.device_id.is_none() {
+                tile.device_id = row.last_device_id.clone();
+            }
+            if tile.source_type.is_none() {
+                tile.source_type = row.last_source_type.clone();
+            }
 
-            let age = now_secs - row.updated_at as f64;
+            let age = now_secs - (row.updated_at as f64 / 1000.0);
 
             match row.sensor_type.as_str() {
                 "rf" => {
