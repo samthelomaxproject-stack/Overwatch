@@ -157,6 +157,8 @@ impl Collector {
 
         // Read shared mode every cycle so UI changes take effect immediately
         let mode = crate::wifi::get_shared_privacy_mode();
+        // Store raw results for direct UI display (respects privacy mode)
+        crate::wifi::update_last_scan(&networks, mode);
         let observations = apply_privacy(networks, mode);
 
         let conf = confidence::compute(

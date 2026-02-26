@@ -1844,10 +1844,81 @@ ALPHA-3 | REAR"></textarea>
             }
         }
 
+        // Live Wi-Fi scan results (direct from scanner, not aggregated through hub)
+        let lastScanResults = [];
+        let lastScanMode = 'A';
+
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
-            hubPoller = setInterval(pollHub, 5000);
-            pollHub(); // immediate first poll
+            hubPoller = setInterval(() => {
+                pollHub();
+                pollWifiScan();
+            }, 5000);
+            pollHub();
+            pollWifiScan();
+        }
+
+        async function pollWifiScan() {
+            if (!window.__TAURI__) return;
+            try {
+                const result = await window.__TAURI__.core.invoke('get_wifi_scan_results');
+                if (result) {
+                    lastScanResults = result.networks || [];
+                    lastScanMode = result.mode || 'A';
+                    renderWifiScanResults();
+                }
+            } catch(e) { /* collector not running yet */ }
+        }
+
+        function renderWifiScanResults() {
+            const el = document.getElementById('wifiChannelList');
+            if (!el) return;
+
+            if (lastScanResults.length === 0) {
+                el.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${collectorRunning ? 'Scanning… first results in ~30s' : 'Start collector to begin scanning'}</div>`;
+                return;
+            }
+
+            // Sort by RSSI descending
+            const sorted = [...lastScanResults].sort((a, b) => b.rssi_dbm - a.rssi_dbm);
+
+            const modeLabel = { 'A': '🔒 Channel only', 'B': '🔑 Hashed IDs', 'C': '⚠️ Raw identifiers' }[lastScanMode] || lastScanMode;
+            const modeColor = { 'A': 'var(--accent-cyan)', 'B': 'var(--accent-orange)', 'C': '#f56565' }[lastScanMode] || 'var(--text-muted)';
+
+            // Header differs by mode
+            const showBssid = lastScanMode !== 'A';
+            const nameLabel = lastScanMode === 'A' ? 'CHANNEL' : 'NETWORK';
+
+            const header = `<div style="display:grid;grid-template-columns:${showBssid ? '2fr 2fr 50px 70px' : '1fr 50px 70px'};gap:4px;padding:6px 8px;background:rgba(255,255,255,0.05);font-size:0.65rem;color:var(--text-muted);letter-spacing:0.05em;position:sticky;top:0;">
+                <span>${nameLabel}</span>${showBssid ? '<span>BSSID</span>' : ''}<span style="text-align:right">BAND</span><span style="text-align:right">RSSI</span>
+            </div>`;
+
+            const rows = sorted.map(n => {
+                const strength = n.rssi_dbm > -50 ? 'var(--accent-orange)' : n.rssi_dbm > -70 ? 'var(--accent-cyan)' : 'var(--text-secondary)';
+                const bars = Math.max(1, Math.round((n.rssi_dbm + 100) / 9));
+                const barStr = '▮'.repeat(Math.min(bars,8)) + '▯'.repeat(Math.max(0,8-bars));
+                return `<div style="display:grid;grid-template-columns:${showBssid ? '2fr 2fr 50px 70px' : '1fr 50px 70px'};gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
+                    <span style="color:var(--text-secondary);font-size:0.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${n.display_name}">${n.display_name}</span>
+                    ${showBssid ? `<span style="color:var(--text-muted);font-size:0.65rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis;" title="${n.bssid_display||''}">${n.bssid_display||'--'}</span>` : ''}
+                    <span style="text-align:right;color:var(--text-muted);font-size:0.7rem;">${n.band}</span>
+                    <span style="text-align:right;color:${strength};font-size:0.7rem;">${n.rssi_dbm} dBm</span>
+                </div>`;
+            }).join('');
+
+            const footer = `<div style="padding:6px 8px;font-size:0.65rem;color:${modeColor};border-top:1px solid rgba(255,255,255,0.07);">
+                ${modeLabel} · ${sorted.length} networks · last scan just now
+            </div>`;
+
+            el.innerHTML = header + rows + footer;
+
+            // Update stats
+            const setEl = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+            setEl('wifiNetCount', sorted.length);
+            const best = sorted[0];
+            if (best) {
+                setEl('wifiHotChannel', `Ch ${best.channel} (${best.band} GHz)`);
+                setEl('wifiBestRssi', `${best.rssi_dbm} dBm`);
+            }
         }
 
         async function pollHub() {
@@ -2003,27 +2074,10 @@ ALPHA-3 | REAR"></textarea>
             setEl('wifiHotChannel', hottestCh ? hottestCh.dimension : '--');
             setEl('wifiBestRssi', bestRssi !== null ? bestRssi.toFixed(0) + ' dBm' : '--');
 
-            const wifiChEl = document.getElementById('wifiChannelList');
-            if (wifiChEl) {
-                if (wifiCount === 0) {
-                    wifiChEl.innerHTML = `<div style="padding:12px;color:var(--text-muted);">${collectorRunning ? 'Scanning… first results in ~30s' : 'Start collector to begin Wi-Fi scanning'}</div>`;
-                } else {
-                    const header = `<div style="display:grid;grid-template-columns:1fr 50px 70px 80px 60px;gap:4px;padding:6px 8px;background:rgba(255,255,255,0.05);font-size:0.65rem;color:var(--text-muted);letter-spacing:0.05em;position:sticky;top:0;">
-                        <span>CHANNEL</span><span style="text-align:right">BAND</span><span style="text-align:right">MEAN RSSI</span><span style="text-align:right">BEST RSSI</span><span style="text-align:right">NETS</span>
-                    </div>`;
-                    const rows = chSorted.map(t => {
-                        const strength = t.max_val > -50 ? 'var(--accent-orange)' : t.max_val > -70 ? 'var(--accent-cyan)' : 'var(--text-secondary)';
-                        const bars = Math.max(1, Math.round((t.max_val + 100) / 8));
-                        return `<div style="display:grid;grid-template-columns:1fr 50px 70px 80px 60px;gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
-                            <span style="color:var(--text-secondary);font-size:0.7rem;">Ch ${t.channel || '?'} · ${t.tileCount} tile${t.tileCount > 1 ? 's' : ''}</span>
-                            <span style="text-align:right;color:var(--text-muted);">${t.band || '?'}</span>
-                            <span style="text-align:right;color:${strength};">${t.mean_val.toFixed(1)} dBm</span>
-                            <span style="text-align:right;color:${strength};">${t.max_val.toFixed(1)} dBm</span>
-                            <span style="text-align:right;color:var(--accent-cyan);">${t.sample_count}</span>
-                        </div>`;
-                    }).join('');
-                    wifiChEl.innerHTML = header + rows;
-                }
+            // Wi-Fi panel is now driven by renderWifiScanResults() (live scan direct feed)
+            // Only update if no live scan data yet
+            if (lastScanResults.length === 0) {
+                renderWifiScanResults(); // will show appropriate empty state
             }
         }
 

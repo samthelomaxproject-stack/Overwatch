@@ -945,6 +945,19 @@ fn current_privacy_mode() -> sigint::wifi::PrivacyMode {
     sigint::wifi::PrivacyMode::from_str(if s.is_empty() { "A" } else { s.as_str() })
 }
 
+/// Return the most recent raw Wi-Fi scan results for UI display.
+/// Respects privacy mode: Mode A shows only channels, B shows hashes, C shows real SSIDs.
+#[tauri::command]
+fn get_wifi_scan_results() -> serde_json::Value {
+    let results = sigint::wifi::get_last_scan_results();
+    let mode = current_privacy_mode();
+    serde_json::json!({
+        "mode": mode.as_str(),
+        "count": results.len(),
+        "networks": results
+    })
+}
+
 /// Start the local SIGINT node collector.
 /// Spawns threads for: Wi-Fi scanning, GPS, and sync push/pull loop.
 /// hackrf_sweep is spawned separately via the Sweeper when RF is enabled.
@@ -1102,6 +1115,7 @@ fn stop_rtl_sdr() -> Result<String, String> {
             start_collector,
             start_sweeper,
             set_privacy_mode,
+            get_wifi_scan_results,
             get_rtl_sdr_status,
             get_sigint_delta
         ])

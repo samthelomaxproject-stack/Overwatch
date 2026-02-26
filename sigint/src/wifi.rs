@@ -60,6 +60,63 @@ pub fn get_shared_privacy_mode() -> PrivacyMode {
     SHARED_PRIVACY_MODE.lock().map(|m| *m).unwrap_or(PrivacyMode::A)
 }
 
+// ── Last scan results (written after every scan, read by Tauri for UI) ────────
+
+/// Last raw Wi-Fi scan results, stored for direct UI display.
+/// Holds the privacy-filtered view of the most recent scan.
+static LAST_SCAN_RESULTS: StdMutex<Vec<ScannedNetwork>> = StdMutex::new(Vec::new());
+
+/// A single Wi-Fi network as it should be displayed in the UI,
+/// according to the active privacy mode.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScannedNetwork {
+    /// Mode A: "Ch 6 · 2.4 GHz" | Mode B: hashed | Mode C: real SSID
+    pub display_name: String,
+    /// Mode A: None | Mode B: hashed MAC | Mode C: real BSSID
+    pub bssid_display: Option<String>,
+    pub band: String,
+    pub channel: u32,
+    pub rssi_dbm: i32,
+    pub privacy_mode: String,
+}
+
+/// Update the shared scan results after a scan.
+pub fn update_last_scan(networks: &[WifiNetwork], mode: PrivacyMode) {
+    let results: Vec<ScannedNetwork> = networks.iter().map(|n| {
+        let (display_name, bssid_display) = match mode {
+            PrivacyMode::A => (
+                format!("Ch {} · {} GHz", n.channel, n.band),
+                None,
+            ),
+            PrivacyMode::B => (
+                format!("{} (hashed)", hash_identifier(&n.ssid)),
+                Some(hash_identifier(&n.bssid)),
+            ),
+            PrivacyMode::C => (
+                if n.ssid.is_empty() { format!("(hidden) Ch {}", n.channel) } else { n.ssid.clone() },
+                Some(n.bssid.clone()),
+            ),
+        };
+        ScannedNetwork {
+            display_name,
+            bssid_display,
+            band: n.band.clone(),
+            channel: n.channel,
+            rssi_dbm: n.rssi_dbm,
+            privacy_mode: mode.as_str().to_string(),
+        }
+    }).collect();
+
+    if let Ok(mut last) = LAST_SCAN_RESULTS.lock() {
+        *last = results;
+    }
+}
+
+/// Get the last scan results for UI display.
+pub fn get_last_scan_results() -> Vec<ScannedNetwork> {
+    LAST_SCAN_RESULTS.lock().map(|r| r.clone()).unwrap_or_default()
+}
+
 /// SIGINT Wi-Fi privacy mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PrivacyMode {
