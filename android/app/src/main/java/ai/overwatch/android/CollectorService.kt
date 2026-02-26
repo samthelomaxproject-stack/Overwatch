@@ -146,16 +146,12 @@ class CollectorService : Service() {
     }
 
     private fun hashPair(ssid: String, bssid: String): Pair<String, String> {
-        fun fnv1a(s: String): String {
-            var hash = 0xcbf29ce484222325L
-            val prime = 0x100000001b3L
-            for (c in s.toByteArray()) {
-                hash = hash xor (c.toLong() and 0xff)
-                hash *= prime
-            }
-            return java.lang.Long.toHexString(hash)
+        fun sha256Short(input: String): String {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(input.toByteArray(Charsets.UTF_8))
+            return digest.joinToString("") { "%02x".format(it) }.take(16)
         }
-        return Pair(fnv1a("ssid:$ssid"), fnv1a("bssid:$bssid"))
+        return Pair(sha256Short("ssid:$ssid"), sha256Short("bssid:$bssid"))
     }
 
     private fun buildTileUpdate(
