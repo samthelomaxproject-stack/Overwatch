@@ -68,18 +68,31 @@ impl GpsProvider for StubGpsProvider {
     }
 }
 
-/// macOS CoreLocation provider.
-/// Hooks into the existing macos_location module in the Tauri backend.
-/// In standalone (non-Tauri) use, reads from a shared memory location
-/// updated by the Tauri process (Phase 2 implementation).
+// ── Shared GPS state (written by Tauri, read by collector thread) ─────────────
+
+use std::sync::Mutex as StdMutex;
+
+/// Global GPS fix shared between Tauri's CoreLocation thread and the collector.
+/// Tauri calls `update_shared_gps_fix()` every 5 seconds; collector reads it.
+static SHARED_GPS_FIX: StdMutex<Option<GpsFix>> = StdMutex::new(None);
+
+/// Called by Tauri's location thread to push a new GPS fix into shared state.
+pub fn update_shared_gps_fix(lat: f64, lon: f64, accuracy_m: f64, speed_mps: Option<f64>) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if let Ok(mut fix) = SHARED_GPS_FIX.lock() {
+        *fix = Some(GpsFix { lat, lon, accuracy_m, altitude_m: None, speed_mps, timestamp_utc: now });
+    }
+}
+
+/// macOS CoreLocation provider — reads from the shared GPS state written by Tauri.
 pub struct MacosGpsProvider;
 
 impl GpsProvider for MacosGpsProvider {
     fn current_fix(&self) -> Option<GpsFix> {
-        // Phase 2: IPC to macos_location module or shared state
-        // For now, returns None (no fix available without Tauri context)
-        log::debug!("MacosGpsProvider: Phase 2 IPC not yet implemented");
-        None
+        SHARED_GPS_FIX.lock().ok()?.clone()
     }
 }
 

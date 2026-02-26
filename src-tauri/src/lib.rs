@@ -347,6 +347,8 @@ fn update_global_location(lat: f64, lon: f64, acc: f64) {
     *CURR_LON.lock().unwrap() = lon;
     *CURR_ACC.lock().unwrap() = acc;
     HAS_FIX.store(true, Ordering::SeqCst);
+    // Share with sigint collector thread
+    sigint::gps::update_shared_gps_fix(lat, lon, acc, None);
 }
 
 // Tauri command to get current location

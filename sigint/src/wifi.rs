@@ -54,99 +54,66 @@ pub trait WifiScanner: Send + Sync {
     fn scan(&self) -> Result<Vec<WifiNetwork>, Error>;
 }
 
-// ── macOS airport scanner ─────────────────────────────────────────────────────
-
-const AIRPORT_PATH: &str =
-    "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport";
+// ── macOS CoreWLAN scanner (via scan_wifi.swift) ─────────────────────────────
+//
+// The `airport` CLI was removed in macOS 15. We use a bundled Swift script
+// that calls CoreWLAN directly.
+// Output format per line: SSID|BSSID|RSSI|CHANNEL|BAND
 
 pub struct AirportScanner;
 
+const SCAN_WIFI_PATHS: &[&str] = &[
+    "/Applications/Overwatch.app/Contents/Resources/scan_wifi.swift",
+    "/Users/thelomaxproject/Overwatch/scan_wifi.swift", // dev fallback
+];
+
+fn find_scan_wifi() -> Option<&'static str> {
+    SCAN_WIFI_PATHS.iter().copied().find(|p| std::path::Path::new(p).exists())
+}
+
 impl WifiScanner for AirportScanner {
     fn scan(&self) -> Result<Vec<WifiNetwork>, Error> {
-        let output = Command::new(AIRPORT_PATH)
-            .arg("-s")
-            .output()
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    Error::ScannerUnavailable(
-                        "airport CLI not found — macOS version may have removed it".to_string(),
-                    )
-                } else {
-                    Error::Io(e)
-                }
-            })?;
+        let script = find_scan_wifi()
+            .ok_or_else(|| Error::ScannerUnavailable(
+                "scan_wifi.swift not found".to_string()
+            ))?;
 
-        if !output.status.success() && output.stdout.is_empty() {
+        let output = Command::new("swift")
+            .arg(script)
+            .output()
+            .map_err(Error::Io)?;
+
+        if output.stdout.is_empty() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(Error::ScannerUnavailable(
-                "airport returned no output".to_string(),
+                format!("scan_wifi: {stderr}")
             ));
         }
 
         let text = String::from_utf8_lossy(&output.stdout);
-        parse_airport_output(&text)
+        parse_corewlan_output(&text)
     }
 }
 
-/// Parse `airport -s` tab-separated output.
-///
-/// Example header + row:
-/// ```text
-///                             SSID BSSID             RSSI CHANNEL HT CC SECURITY (auth/unicast/group)
-/// MyNetwork                        aa:bb:cc:dd:ee:ff  -65   6      Y  US WPA2(PSK/AES/AES)
-/// ```
-fn parse_airport_output(text: &str) -> Result<Vec<WifiNetwork>, Error> {
+/// Parse pipe-delimited output from scan_wifi.swift:
+/// `SSID|BSSID|RSSI|CHANNEL|BAND`
+fn parse_corewlan_output(text: &str) -> Result<Vec<WifiNetwork>, Error> {
     let mut networks = Vec::new();
-    let mut lines = text.lines();
-
-    // Skip header line
-    let _ = lines.next();
-
-    for line in lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if let Some(net) = parse_airport_line(line) {
-            networks.push(net);
-        }
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("ERROR") { continue; }
+        let parts: Vec<&str> = line.splitn(5, '|').collect();
+        if parts.len() < 5 { continue; }
+        let ssid = parts[0].to_string();
+        let bssid = parts[1].to_string();
+        let rssi_dbm: i32 = parts[2].parse().unwrap_or(-100);
+        let channel: u32 = parts[3].parse().unwrap_or(0);
+        if channel == 0 { continue; }
+        let band = parts[4].to_string();
+        let (_, frequency_mhz) = channel_to_band_freq(channel);
+        networks.push(WifiNetwork { ssid, bssid, band, channel, frequency_mhz, rssi_dbm });
     }
-
     Ok(networks)
-}
-
-fn parse_airport_line(line: &str) -> Option<WifiNetwork> {
-    // airport -s output is column-aligned, not strictly tab-separated
-    // SSID is right-justified in the first 33 chars, BSSID follows
-    if line.len() < 40 {
-        return None;
-    }
-
-    let ssid = line[..33].trim().to_string();
-    let rest = line[33..].trim();
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-
-    // Expected: BSSID RSSI CHANNEL HT CC ...
-    if parts.len() < 3 {
-        return None;
-    }
-
-    let bssid = parts[0].to_string();
-    let rssi_dbm: i32 = parts[1].parse().ok()?;
-    let channel_str = parts[2];
-
-    // Channel may be "6" or "6,+1" or "36" etc.
-    let channel: u32 = channel_str.split(',').next()?.parse().ok()?;
-
-    // Derive band and frequency from channel
-    let (band, frequency_mhz) = channel_to_band_freq(channel);
-
-    Some(WifiNetwork {
-        bssid,
-        ssid,
-        band: band.to_string(),
-        channel,
-        frequency_mhz,
-        rssi_dbm,
-    })
 }
 
 fn channel_to_band_freq(channel: u32) -> (&'static str, u32) {
@@ -338,11 +305,22 @@ mod tests {
     }
 
     #[test]
-    fn airport_line_parse() {
-        // Simulate airport -s output line (column-aligned)
-        let line = "         HomeNetwork            aa:bb:cc:dd:ee:ff  -55  6      Y  US WPA2(PSK/AES/AES)";
-        // This may not parse perfectly with fixed-column logic but shouldn't panic
-        let _ = parse_airport_line(line);
+    fn corewlan_output_parse() {
+        // Simulate scan_wifi.swift pipe-delimited output
+        let text = "HomeNetwork|aa:bb:cc:dd:ee:ff|-55|6|2.4\nOtherNet||−72|36|5\n";
+        let nets = parse_corewlan_output(text).unwrap();
+        assert!(!nets.is_empty());
+        assert_eq!(nets[0].ssid, "HomeNetwork");
+        assert_eq!(nets[0].rssi_dbm, -55);
+        assert_eq!(nets[0].channel, 6);
+        assert_eq!(nets[0].band, "2.4");
+    }
+
+    #[test]
+    fn corewlan_skips_bad_lines() {
+        let text = "SSID|BSSID|-65|6|2.4\n\nERROR: something\nbad line\n";
+        let nets = parse_corewlan_output(text).unwrap();
+        assert_eq!(nets.len(), 1);
     }
 
     #[test]
