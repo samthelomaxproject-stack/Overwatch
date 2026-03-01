@@ -2,7 +2,7 @@
 
 **Offline-first tactical communications and situational awareness for mesh networks.**
 
-Inspired by XTOC™, Anduril Lattice, and built for emergency response, field operations, and off-grid communications.
+Built for emergency response, field operations, and off-grid communications.
 
 ---
 
@@ -46,7 +46,7 @@ Inspired by XTOC™, Anduril Lattice, and built for emergency response, field op
 
 ## Overview
 
-Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) application. It enables structured communications (SITREPs, TASKs, CHECKINs) over any transport — mesh networks, radio, QR, or copy/paste. Designed for seamless integration with Anduril Lattice and TAK/ATAK environments.
+Overwatch is a local-first, offline-ready Tactical Operations Center (TOC) application. It enables structured communications (SITREPs, TASKs, CHECKINs) over any transport — mesh networks, radio, QR, or copy/paste. Designed for seamless integration with TAK/ATAK environments.
 
 ## Core Features
 
