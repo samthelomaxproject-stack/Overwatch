@@ -2089,8 +2089,20 @@ out body;
                     else unknown++;
                 }
 
+                // Fail-safe: if cameras are prepared but nothing is visible, force rebuild markers.
+                const visibleCount = cams.filter(c => cctvMarkers[c.id] && map?.hasLayer(cctvMarkers[c.id])).length;
+                if (cams.length > 0 && visibleCount === 0) {
+                    debugLog(`📹 CCTV render mismatch: prepared=${cams.length} visible=0, forcing marker rebuild`);
+                    for (const cam of cams) {
+                        delete cctvMarkers[cam.id];
+                        delete cctvCones[cam.id];
+                        renderCctvCamera(cam);
+                    }
+                }
+
                 updateCctvPanel();
-                debugLog(`📹 CCTV render: total=${cams.length} probed=${probeList.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown} layerVisible.cctv=${layerVisible.cctv} markersAdded=${markersAdded} conesAdded=${conesAdded}`);
+                const finalVisible = cams.filter(c => cctvMarkers[c.id] && map?.hasLayer(cctvMarkers[c.id])).length;
+                debugLog(`📹 CCTV render: total=${cams.length} visible=${finalVisible} probed=${probeList.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown} layerVisible.cctv=${layerVisible.cctv} markersAdded=${markersAdded} conesAdded=${conesAdded}`);
             } finally {
                 cctvRenderInFlight = false;
                 if (cctvPendingRender) {
