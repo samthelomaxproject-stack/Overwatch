@@ -1622,9 +1622,16 @@ ALPHA-3 | REAR"></textarea>
         let cctvSnapshotTimers = {};
 
         const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+        const CCTV_STALE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d fallback on API failure
         const CCTV_AUTO_MIN_ZOOM = 13; // avoid planet-scale pulls
         const CCTV_AUTO_MIN_FETCH_INTERVAL_MS = 10_000;
         const CCTV_MAX_BBOX_DEG2 = 0.08; // guardrail for large viewports
+        const OVERPASS_REQUEST_TIMEOUT_MS = 12000;
+        const OVERPASS_ENDPOINTS = [
+            'https://overpass-api.de/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+            'https://lz4.overpass-api.de/api/interpreter'
+        ];
         let cctvAutoRefreshTimer = null;
         let lastCctvAutoFetchAt = 0;
         let lastCctvAutoBboxKey = null;
@@ -1722,15 +1729,15 @@ ALPHA-3 | REAR"></textarea>
             debugLog(`📹 CCTV fetch start (${force ? 'force' : 'cached'}) bbox=${b.s},${b.w},${b.n},${b.e}`);
             const key = bboxKey(b);
 
-            if (!force) {
-                try {
-                    const cached = JSON.parse(localStorage.getItem(key) || 'null');
-                    if (cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
-                        const items = cached.items || [];
-                        debugLog(`📹 CCTV cache hit: ${items.length} cameras`);
-                        return items;
-                    }
-                } catch(e) {}
+            let cached = null;
+            try {
+                cached = JSON.parse(localStorage.getItem(key) || 'null');
+            } catch(e) { cached = null; }
+
+            if (!force && cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
+                const items = cached.items || [];
+                debugLog(`📹 CCTV cache hit: ${items.length} cameras`);
+                return items;
             }
 
             // Overpass query: OSM surveillance camera points in bbox
@@ -1744,40 +1751,50 @@ out body tags;
             `.trim();
 
             let osmItems = [];
-            try {
-                const resp = await fetch('https://overpass-api.de/api/interpreter', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-                    body: `data=${encodeURIComponent(q)}`
-                });
-                if (!resp.ok) throw new Error(`Overpass ${resp.status}`);
-                const data = await resp.json();
-                const rawOsm = (data.elements || []).map(e => {
-                    const t = e.tags || {};
-                    const bearing = parseFloat(t.direction || t.camera_direction || t['camera:direction'] || '0') || 0;
-                    const fov = parseFloat(t['camera:angle'] || t['camera:fov'] || '60') || 60;
-                    const range = parseFloat(t['camera:range_m'] || '120') || 120;
-                    const snapshotUrl = t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || null;
-                    return {
-                        id: `osm-${String(e.id)}`,
-                        lat: Number(e.lat),
-                        lon: Number(e.lon),
-                        name: t.name || `OSM CCTV-${e.id}`,
-                        bearing,
-                        fov,
-                        range,
-                        source: t.operator || 'OSM',
-                        sourceType: 'OSM',
-                        snapshotUrl,
-                        status: snapshotUrl ? 'UNKNOWN' : 'OFFLINE',
-                        tags: t
-                    };
-                });
-                const invalid = rawOsm.filter(c => !Number.isFinite(c.lat) || !Number.isFinite(c.lon)).length;
-                osmItems = rawOsm.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon));
-                debugLog(`📹 CCTV OSM fetched: ${osmItems.length}${invalid ? ` (dropped invalid coords: ${invalid})` : ''}`);
-            } catch (e) {
-                debugLog('📹 CCTV OSM fetch failed: ' + e);
+            let overpassOk = false;
+            for (const endpoint of OVERPASS_ENDPOINTS) {
+                try {
+                    const ctrl = new AbortController();
+                    const to = setTimeout(() => ctrl.abort(), OVERPASS_REQUEST_TIMEOUT_MS);
+                    const resp = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                        body: `data=${encodeURIComponent(q)}`,
+                        signal: ctrl.signal
+                    });
+                    clearTimeout(to);
+                    if (!resp.ok) throw new Error(`Overpass ${resp.status}`);
+
+                    const data = await resp.json();
+                    const rawOsm = (data.elements || []).map(e => {
+                        const t = e.tags || {};
+                        const bearing = parseFloat(t.direction || t.camera_direction || t['camera:direction'] || '0') || 0;
+                        const fov = parseFloat(t['camera:angle'] || t['camera:fov'] || '60') || 60;
+                        const range = parseFloat(t['camera:range_m'] || '120') || 120;
+                        const snapshotUrl = t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || null;
+                        return {
+                            id: `osm-${String(e.id)}`,
+                            lat: Number(e.lat),
+                            lon: Number(e.lon),
+                            name: t.name || `OSM CCTV-${e.id}`,
+                            bearing,
+                            fov,
+                            range,
+                            source: t.operator || 'OSM',
+                            sourceType: 'OSM',
+                            snapshotUrl,
+                            status: snapshotUrl ? 'UNKNOWN' : 'OFFLINE',
+                            tags: t
+                        };
+                    });
+                    const invalid = rawOsm.filter(c => !Number.isFinite(c.lat) || !Number.isFinite(c.lon)).length;
+                    osmItems = rawOsm.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon));
+                    debugLog(`📹 CCTV OSM fetched (${endpoint}): ${osmItems.length}${invalid ? ` (dropped invalid coords: ${invalid})` : ''}`);
+                    overpassOk = true;
+                    break;
+                } catch (e) {
+                    debugLog(`📹 CCTV OSM fetch failed (${endpoint}): ${e}`);
+                }
             }
 
             // DOT/public camera feed source (fallback catalog for now)
@@ -1787,7 +1804,14 @@ out body tags;
                 c.status = c.snapshotUrl ? 'UNKNOWN' : 'OFFLINE';
             });
 
-            const items = [...osmItems, ...publicItems];
+            let items = [...osmItems, ...publicItems];
+
+            // stale cache fallback when Overpass rate-limits/times out
+            if (!overpassOk && cached && (Date.now() - cached.ts) < CCTV_STALE_CACHE_TTL_MS) {
+                items = cached.items || [];
+                debugLog(`📹 CCTV using stale cache fallback: ${items.length} cameras (${Math.round((Date.now()-cached.ts)/60000)} min old)`);
+            }
+
             debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
             localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
             return items;
