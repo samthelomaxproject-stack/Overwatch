@@ -1950,7 +1950,12 @@ ALPHA-3 | REAR"></textarea>
                 if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
                 activeIds.add(s.id);
                 const color = satGroupColorCss(s.group);
-                const icon = L.divIcon({ className: 'sat-marker', html: `<div style="width:10px;height:10px;border-radius:50%;background:${color};border:1px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, iconSize: [10,10], iconAnchor:[5,5] });
+                const icon = L.divIcon({
+                    className: `sat-marker sat-${s.group}`,
+                    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #ffffff;box-shadow:0 0 8px rgba(0,0,0,0.65);"><div style="width:4px;height:4px;border-radius:50%;background:rgba(0,0,0,0.35);margin:3px auto 0;"></div></div>`,
+                    iconSize: [14,14],
+                    iconAnchor:[7,7]
+                });
                 if (!satMarkers[s.id]) {
                     satMarkers[s.id] = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1500 });
                     satMarkers[s.id].bindPopup(`<div style="min-width:240px;"><div style="font-weight:700;color:${color};">${s.name}</div><div style="font-size:12px;color:#94a3b8;">NORAD ${s.norad || 'n/a'} • ${s.group}</div><div style="font-size:12px;color:#cbd5e1;">Alt ${p.altKm?.toFixed(1)} km</div><div style="margin-top:8px;"><button onclick="satShowOrbit('${s.id}')" style="width:100%;">Show Orbit (90m)</button></div></div>`);
