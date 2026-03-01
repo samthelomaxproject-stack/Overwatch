@@ -1635,6 +1635,7 @@ ALPHA-3 | REAR"></textarea>
         let cctvAutoRefreshTimer = null;
         let lastCctvAutoFetchAt = 0;
         let lastCctvAutoBboxKey = null;
+        let cctvFetchInFlight = false;
 
         // DOT/Public catalog fallback (non-OSM)
         // These can be replaced by a live API response when available.
@@ -1710,7 +1711,12 @@ ALPHA-3 | REAR"></textarea>
                 const key = bboxKey(gate.bbox);
                 const now = Date.now();
                 const tooSoon = (now - lastCctvAutoFetchAt) < CCTV_AUTO_MIN_FETCH_INTERVAL_MS;
-                if (tooSoon && key === lastCctvAutoBboxKey) return;
+                if (tooSoon) return;
+                if (cctvFetchInFlight) {
+                    debugLog('📹 CCTV auto-refresh skipped: fetch in-flight');
+                    return;
+                }
+                if (key === lastCctvAutoBboxKey) return;
 
                 lastCctvAutoFetchAt = now;
                 lastCctvAutoBboxKey = key;
@@ -1728,6 +1734,7 @@ ALPHA-3 | REAR"></textarea>
             const b = gate.bbox;
             debugLog(`📹 CCTV fetch start (${force ? 'force' : 'cached'}) bbox=${b.s},${b.w},${b.n},${b.e}`);
             const key = bboxKey(b);
+            cctvFetchInFlight = true;
 
             let cached = null;
             try {
@@ -1737,6 +1744,7 @@ ALPHA-3 | REAR"></textarea>
             if (!force && cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
                 const items = cached.items || [];
                 debugLog(`📹 CCTV cache hit: ${items.length} cameras`);
+                cctvFetchInFlight = false;
                 return items;
             }
 
@@ -1747,7 +1755,7 @@ ALPHA-3 | REAR"></textarea>
   node["surveillance"="camera"](${b.s},${b.w},${b.n},${b.e});
   node["man_made"="surveillance"](${b.s},${b.w},${b.n},${b.e});
 );
-out body tags;
+out body;
             `.trim();
 
             let osmItems = [];
@@ -1814,6 +1822,7 @@ out body tags;
 
             debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
             localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+            cctvFetchInFlight = false;
             return items;
         }
 
