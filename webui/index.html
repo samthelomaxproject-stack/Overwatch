@@ -1640,6 +1640,9 @@ ALPHA-3 | REAR"></textarea>
         let lastCctvAutoBboxKey = null;
         let cctvFetchInFlight = false;
         let cctvPendingRefresh = false;
+        let cctvRenderInFlight = false;
+        let cctvPendingRender = false;
+        const CCTV_STATUS_PROBE_LIMIT = 20;
 
         // DOT/Public catalog fallback (non-OSM)
         // These can be replaced by a live API response when available.
@@ -1786,6 +1789,10 @@ ALPHA-3 | REAR"></textarea>
                     return;
                 }
                 if (key === lastCctvAutoBboxKey) return;
+                if (cctvRenderInFlight) {
+                    cctvPendingRender = true;
+                    return;
+                }
 
                 lastCctvAutoFetchAt = now;
                 lastCctvAutoBboxKey = key;
@@ -2035,31 +2042,62 @@ out body;
         }
 
         async function renderCctvLayer(force=false) {
-            if (!layerVisible.cctv) {
-                layerVisible.cctv = true;
-                syncCctvUiState();
-                debugLog('📹 CCTV render requested while layer OFF; auto-enabled layerVisible.cctv=true');
+            if (cctvRenderInFlight) {
+                cctvPendingRender = true;
+                return;
             }
+            cctvRenderInFlight = true;
+            try {
+                if (!layerVisible.cctv) {
+                    layerVisible.cctv = true;
+                    syncCctvUiState();
+                    debugLog('📹 CCTV render requested while layer OFF; auto-enabled layerVisible.cctv=true');
+                }
 
-            const cams = await fetchCctvCameras(force);
-            let online = 0, offline = 0, unknown = 0;
-            let markersAdded = 0, conesAdded = 0;
+                const cams = await fetchCctvCameras(force);
+                let online = 0, offline = 0, unknown = 0;
+                let markersAdded = 0, conesAdded = 0;
 
-            // Update online/offline status for each camera
-            for (const cam of cams) {
-                cam.status = await checkCameraOnline(cam);
-                if (cam.status === 'ONLINE') online++;
-                else if (cam.status === 'OFFLINE') offline++;
-                else unknown++;
+                const newIds = new Set(cams.map(c => c.id));
+                Object.keys(cctvMarkers).forEach(id => {
+                    if (!newIds.has(id)) {
+                        if (map && map.hasLayer(cctvMarkers[id])) map.removeLayer(cctvMarkers[id]);
+                        if (map && cctvCones[id] && map.hasLayer(cctvCones[id])) map.removeLayer(cctvCones[id]);
+                        delete cctvMarkers[id];
+                        delete cctvCones[id];
+                        delete cctvCameras[id];
+                    }
+                });
 
-                const markerWasOnMap = !!cctvMarkers[cam.id] && map?.hasLayer(cctvMarkers[cam.id]);
-                const coneWasOnMap = !!cctvCones[cam.id] && map?.hasLayer(cctvCones[cam.id]);
-                renderCctvCamera(cam);
-                if (!markerWasOnMap && cctvMarkers[cam.id] && map?.hasLayer(cctvMarkers[cam.id])) markersAdded++;
-                if (!coneWasOnMap && cctvCones[cam.id] && map?.hasLayer(cctvCones[cam.id])) conesAdded++;
+                for (const cam of cams) {
+                    const markerWasOnMap = !!cctvMarkers[cam.id] && map?.hasLayer(cctvMarkers[cam.id]);
+                    const coneWasOnMap = !!cctvCones[cam.id] && map?.hasLayer(cctvCones[cam.id]);
+                    renderCctvCamera(cam);
+                    if (!markerWasOnMap && cctvMarkers[cam.id] && map?.hasLayer(cctvMarkers[cam.id])) markersAdded++;
+                    if (!coneWasOnMap && cctvCones[cam.id] && map?.hasLayer(cctvCones[cam.id])) conesAdded++;
+                }
+
+                const probeList = cams.filter(c => !!c.snapshotUrl).slice(0, CCTV_STATUS_PROBE_LIMIT);
+                await Promise.allSettled(probeList.map(async (cam) => {
+                    cam.status = await checkCameraOnline(cam);
+                    cctvCameras[cam.id] = cam;
+                }));
+
+                for (const cam of cams) {
+                    if (cam.status === 'ONLINE') online++;
+                    else if (cam.status === 'OFFLINE') offline++;
+                    else unknown++;
+                }
+
+                updateCctvPanel();
+                debugLog(`📹 CCTV render: total=${cams.length} probed=${probeList.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown} layerVisible.cctv=${layerVisible.cctv} markersAdded=${markersAdded} conesAdded=${conesAdded}`);
+            } finally {
+                cctvRenderInFlight = false;
+                if (cctvPendingRender) {
+                    cctvPendingRender = false;
+                    setTimeout(() => renderCctvLayer(false), 50);
+                }
             }
-            updateCctvPanel();
-            debugLog(`📹 CCTV render: total=${cams.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown} layerVisible.cctv=${layerVisible.cctv} markersAdded=${markersAdded} conesAdded=${conesAdded} mapHasFirstMarker=${cams[0] ? map?.hasLayer(cctvMarkers[cams[0].id]) : false}`);
         }
 
         function updateCctvPanel() {
