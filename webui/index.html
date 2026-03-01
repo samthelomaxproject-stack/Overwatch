@@ -1667,7 +1667,30 @@ ALPHA-3 | REAR"></textarea>
             if (u.includes('.m3u8')) return 'hls';
             if (u.match(/\.(mp4|webm|mov)(\?|$)/)) return 'video';
             if (u.match(/\.(jpe?g|png|gif|webp|mjpg|mjpeg)(\?|$)/) || u.includes('mjpg') || u.includes('mjpeg')) return 'image';
+            if (u.includes('/view') || u.includes('/camera') || u.includes('/live') || u.includes('/webcam') || u.includes('earthcam') || u.includes('youtube.com') || u.includes('youtu.be')) return 'page';
             return 'unknown';
+        }
+
+        function tryExtractDirectFeedFromText(html, baseUrl) {
+            if (!html) return null;
+            const m = html.match(/https?:\/\/[^"'\s>]+\.(m3u8|mp4|mjpg|mjpeg|jpg|jpeg|png)(\?[^"'\s>]*)?/i);
+            if (m && m[0]) return m[0];
+            try {
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                const candidates = [
+                    doc.querySelector('meta[property="og:video"]')?.content,
+                    doc.querySelector('meta[property="og:video:url"]')?.content,
+                    doc.querySelector('meta[property="og:image"]')?.content,
+                    doc.querySelector('meta[name="twitter:player:stream"]')?.content,
+                    doc.querySelector('meta[name="twitter:image"]')?.content,
+                    doc.querySelector('video source')?.src,
+                    doc.querySelector('video')?.src
+                ].filter(Boolean);
+                if (candidates.length > 0) {
+                    return new URL(candidates[0], baseUrl).toString();
+                }
+            } catch (e) {}
+            return null;
         }
 
         async function probeImageUrl(url) {
@@ -1708,6 +1731,7 @@ ALPHA-3 | REAR"></textarea>
             if (type === 'image') return await probeImageUrl(cam.snapshotUrl);
             if (type === 'hls' || type === 'video') return await probeVideoUrl(cam.snapshotUrl, type === 'hls');
             if (type === 'rtsp') return 'UNSUPPORTED';
+            if (type === 'page') return 'PAGE_LINK';
             return 'UNKNOWN';
         }
 
@@ -1889,6 +1913,7 @@ out body;
             if (status === 'OFFLINE') return '#ef4444';
             if (status === 'NO_FEED') return '#94a3b8';
             if (status === 'UNSUPPORTED') return '#f97316';
+            if (status === 'PAGE_LINK') return '#38bdf8';
             return '#eab308';
         }
 
@@ -2119,7 +2144,33 @@ out body;
                 return;
             }
 
-            container.innerHTML = 'Unknown feed format (URL may be a webpage, not direct stream)';
+            if (feedType === 'page' || feedType === 'unknown') {
+                try {
+                    const resp = await fetch(cam.snapshotUrl);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const html = await resp.text();
+                    const resolved = tryExtractDirectFeedFromText(html, cam.snapshotUrl);
+                    if (resolved) {
+                        cam.snapshotUrl = resolved;
+                        cam.status = 'UNKNOWN';
+                        bindCctvPopup(cctvMarkers[cam.id], cam);
+                        debugLog(`📹 CCTV resolved page URL -> direct feed (${detectFeedType(resolved)}): ${cam.name}`);
+                        await renderCctvImage(camId, mode);
+                        return;
+                    }
+                    container.innerHTML = `No direct stream found on page. <a href="${cam.snapshotUrl}" target="_blank" rel="noopener noreferrer">Open source page</a>`;
+                    cam.status = 'PAGE_LINK';
+                    debugLog(`📹 CCTV ${mode}: ${cam.name} page link without direct stream`);
+                    return;
+                } catch (e) {
+                    container.innerHTML = `Page blocked by CORS/auth. <a href="${cam.snapshotUrl}" target="_blank" rel="noopener noreferrer">Open source page</a>`;
+                    cam.status = 'PAGE_LINK';
+                    debugLog(`📹 CCTV ${mode}: ${cam.name} page fetch blocked (${e})`);
+                    return;
+                }
+            }
+
+            container.innerHTML = 'Unknown feed format';
             debugLog(`📹 CCTV ${mode}: ${cam.name} unknown feed format`);
         }
 
