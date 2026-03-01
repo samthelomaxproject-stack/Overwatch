@@ -1639,6 +1639,7 @@ ALPHA-3 | REAR"></textarea>
         let lastCctvAutoFetchAt = 0;
         let lastCctvAutoBboxKey = null;
         let cctvFetchInFlight = false;
+        let cctvPendingRefresh = false;
 
         // DOT/Public catalog fallback (non-OSM)
         // These can be replaced by a live API response when available.
@@ -1780,7 +1781,8 @@ ALPHA-3 | REAR"></textarea>
                 const tooSoon = (now - lastCctvAutoFetchAt) < CCTV_AUTO_MIN_FETCH_INTERVAL_MS;
                 if (tooSoon) return;
                 if (cctvFetchInFlight) {
-                    debugLog('📹 CCTV auto-refresh skipped: fetch in-flight');
+                    cctvPendingRefresh = true;
+                    debugLog('📹 CCTV auto-refresh deferred: fetch in-flight');
                     return;
                 }
                 if (key === lastCctvAutoBboxKey) return;
@@ -1802,18 +1804,17 @@ ALPHA-3 | REAR"></textarea>
             debugLog(`📹 CCTV fetch start (${force ? 'force' : 'cached'}) bbox=${b.s},${b.w},${b.n},${b.e}`);
             const key = bboxKey(b);
             cctvFetchInFlight = true;
-
-            let cached = null;
             try {
-                cached = JSON.parse(localStorage.getItem(key) || 'null');
-            } catch(e) { cached = null; }
+                let cached = null;
+                try {
+                    cached = JSON.parse(localStorage.getItem(key) || 'null');
+                } catch(e) { cached = null; }
 
-            if (!force && cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
-                const items = cached.items || [];
-                debugLog(`📹 CCTV cache hit: ${items.length} cameras`);
-                cctvFetchInFlight = false;
-                return items;
-            }
+                if (!force && cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
+                    const items = cached.items || [];
+                    debugLog(`📹 CCTV cache hit: ${items.length} cameras`);
+                    return items;
+                }
 
             // Overpass query: OSM surveillance camera points in bbox
             const q = `
@@ -1896,10 +1897,16 @@ out body;
                 debugLog(`📹 CCTV capped to ${CCTV_MAX_CAMERAS_PER_FETCH} cameras (dense area)`);
             }
 
-            debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
-            localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
-            cctvFetchInFlight = false;
-            return items;
+                debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
+                localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+                return items;
+            } finally {
+                cctvFetchInFlight = false;
+                if (cctvPendingRefresh) {
+                    cctvPendingRefresh = false;
+                    setTimeout(() => scheduleCctvAutoRefresh(), 50);
+                }
+            }
         }
 
         function conePolygon(lat, lon, bearingDeg, fovDeg, rangeM) {
