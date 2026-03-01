@@ -1083,27 +1083,47 @@ fn detect_feed_type(url: &str) -> &'static str {
 }
 
 fn extract_direct_media_url(html: &str, base_url: &str) -> Option<String> {
-    let re = regex::Regex::new(r#"https?://[^"'\s<>]+\.(m3u8|mp4|webm|mov|mjpg|mjpeg|jpg|jpeg|png)(\?[^"'\s<>]*)?"#).ok()?;
-    if let Some(m) = re.find(html) {
-        return Some(m.as_str().to_string());
+    fn score_url(url: &str) -> i32 {
+        let u = url.to_lowercase();
+        let mut score = 0;
+        if u.contains(".m3u8") { score += 120; }
+        if u.contains(".mp4") || u.contains(".webm") || u.contains(".mov") { score += 100; }
+        if u.contains(".mjpg") || u.contains(".mjpeg") { score += 90; }
+        if u.contains(".jpg") || u.contains(".jpeg") || u.contains(".png") { score += 40; }
+        if u.contains("stream") || u.contains("live") || u.contains("playlist") { score += 20; }
+        if u.contains("logo") || u.contains("sprite") || u.contains("thumbnail") || u.contains("placeholder") { score -= 80; }
+        if u.contains("earthcam") && (u.contains("logo") || u.contains("default")) { score -= 120; }
+        score
     }
 
-    let attr_re = regex::Regex::new(r#"(?:content|src)=["']([^"']+)["']"#).ok()?;
-    for cap in attr_re.captures_iter(html) {
-        if let Some(raw) = cap.get(1) {
-            let candidate = raw.as_str();
-            let lc = candidate.to_lowercase();
-            if lc.contains(".m3u8") || lc.contains(".mp4") || lc.contains(".webm") || lc.contains(".mov") || lc.contains(".mjpg") || lc.contains(".mjpeg") || lc.contains(".jpg") || lc.contains(".jpeg") || lc.contains(".png") {
-                if let Ok(base) = Url::parse(base_url) {
-                    if let Ok(joined) = base.join(candidate) {
-                        return Some(joined.to_string());
+    let mut candidates: Vec<String> = Vec::new();
+
+    if let Ok(re) = regex::Regex::new(r#"https?://[^"'\s<>]+\.(m3u8|mp4|webm|mov|mjpg|mjpeg|jpg|jpeg|png)(\?[^"'\s<>]*)?"#) {
+        for m in re.find_iter(html) {
+            candidates.push(m.as_str().to_string());
+        }
+    }
+
+    if let Ok(attr_re) = regex::Regex::new(r#"(?:content|src)=["']([^"']+)["']"#) {
+        for cap in attr_re.captures_iter(html) {
+            if let Some(raw) = cap.get(1) {
+                let candidate = raw.as_str();
+                let lc = candidate.to_lowercase();
+                if lc.contains(".m3u8") || lc.contains(".mp4") || lc.contains(".webm") || lc.contains(".mov") || lc.contains(".mjpg") || lc.contains(".mjpeg") || lc.contains(".jpg") || lc.contains(".jpeg") || lc.contains(".png") {
+                    if let Ok(base) = Url::parse(base_url) {
+                        if let Ok(joined) = base.join(candidate) {
+                            candidates.push(joined.to_string());
+                            continue;
+                        }
                     }
+                    candidates.push(candidate.to_string());
                 }
-                return Some(candidate.to_string());
             }
         }
     }
-    None
+
+    candidates.sort_by_key(|u| -score_url(u));
+    candidates.into_iter().next()
 }
 
 #[tauri::command]
@@ -1136,11 +1156,12 @@ fn resolve_cctv_stream_url(url: String) -> Result<CctvResolveResult, String> {
 
 #[tauri::command]
 fn open_cctv_source_window(app: tauri::AppHandle, url: String, title: Option<String>) -> Result<String, String> {
-    let parsed = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let mut parsed = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis();
+    parsed.query_pairs_mut().append_pair("_owts", &ts.to_string());
     let label = format!("cctv-source-{}", ts);
 
     WebviewWindowBuilder::new(&app, label, WebviewUrl::External(parsed))

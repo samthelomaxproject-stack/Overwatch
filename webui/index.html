@@ -2165,6 +2165,12 @@ out body;
             const ts = Date.now();
 
             if (feedType === 'image') {
+                const lc = String(cam.snapshotUrl).toLowerCase();
+                if (lc.includes('earthcam')) {
+                    container.innerHTML = `Direct EarthCam image often resolves to logo/placeholder. <button onclick="openCctvSourcePage('${cam.id}')" style="margin-left:6px;">Open Source In-App</button>`;
+                    debugLog(`📹 CCTV ${mode}: ${cam.name} EarthCam image fallback -> source page`);
+                    return;
+                }
                 container.innerHTML = `<img src="${cam.snapshotUrl}${cam.snapshotUrl.includes('?') ? '&' : '?'}t=${ts}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='Feed unavailable';">`;
                 debugLog(`📹 CCTV ${mode}: ${cam.name} (image)`);
                 return;
@@ -2270,11 +2276,15 @@ out body;
             stopCctvFeed(camId);
             renderCctvImage(camId, 'live');
             if (detectFeedType(cam.snapshotUrl) === 'image') {
-                cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'live'), 2_000);
-                // auto-timeout live after 2 minutes
-                setTimeout(() => {
-                    if (cctvSnapshotTimers[camId]) startCctvSnapshot(camId);
-                }, 120_000);
+                const lc = String(cam.snapshotUrl).toLowerCase();
+                // MJPEG streams are live by themselves; avoid forced reload loop.
+                if (!(lc.includes('mjpg') || lc.includes('mjpeg'))) {
+                    cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'live'), 2_000);
+                    // auto-timeout live after 2 minutes
+                    setTimeout(() => {
+                        if (cctvSnapshotTimers[camId]) startCctvSnapshot(camId);
+                    }, 120_000);
+                }
             }
         }
 
