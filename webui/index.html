@@ -1752,7 +1752,7 @@ out body tags;
                 });
                 if (!resp.ok) throw new Error(`Overpass ${resp.status}`);
                 const data = await resp.json();
-                osmItems = (data.elements || []).map(e => {
+                const rawOsm = (data.elements || []).map(e => {
                     const t = e.tags || {};
                     const bearing = parseFloat(t.direction || t.camera_direction || t['camera:direction'] || '0') || 0;
                     const fov = parseFloat(t['camera:angle'] || t['camera:fov'] || '60') || 60;
@@ -1760,8 +1760,8 @@ out body tags;
                     const snapshotUrl = t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || null;
                     return {
                         id: `osm-${String(e.id)}`,
-                        lat: e.lat,
-                        lon: e.lon,
+                        lat: Number(e.lat),
+                        lon: Number(e.lon),
                         name: t.name || `OSM CCTV-${e.id}`,
                         bearing,
                         fov,
@@ -1773,7 +1773,9 @@ out body tags;
                         tags: t
                     };
                 });
-                debugLog(`📹 CCTV OSM fetched: ${osmItems.length}`);
+                const invalid = rawOsm.filter(c => !Number.isFinite(c.lat) || !Number.isFinite(c.lon)).length;
+                osmItems = rawOsm.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon));
+                debugLog(`📹 CCTV OSM fetched: ${osmItems.length}${invalid ? ` (dropped invalid coords: ${invalid})` : ''}`);
             } catch (e) {
                 debugLog('📹 CCTV OSM fetch failed: ' + e);
             }
@@ -1839,13 +1841,15 @@ out body tags;
             const sourceColor = cam.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
 
             if (!cctvMarkers[cam.id]) {
+                const isOsm = cam.sourceType === 'OSM';
+                const markerSize = isOsm ? 20 : 16;
                 const icon = L.divIcon({
                     className: 'cctv-marker',
-                    html: `<div style="width:16px;height:16px;border-radius:50%;background:${sourceColor};border:2px solid white;"></div>`,
-                    iconSize: [16, 16],
-                    iconAnchor: [8, 8]
+                    html: `<div style="width:${markerSize}px;height:${markerSize}px;border-radius:50%;background:${sourceColor};border:2px solid ${isOsm ? '#111' : 'white'};box-shadow:0 0 0 1px rgba(255,255,255,0.35),0 0 8px rgba(0,0,0,0.55);"></div>`,
+                    iconSize: [markerSize, markerSize],
+                    iconAnchor: [Math.round(markerSize/2), Math.round(markerSize/2)]
                 });
-                const marker = L.marker([cam.lat, cam.lon], { icon });
+                const marker = L.marker([cam.lat, cam.lon], { icon, zIndexOffset: cam.sourceType === 'OSM' ? 2000 : 1000 });
                 bindCctvPopup(marker, cam);
                 cctvMarkers[cam.id] = marker;
             } else {
@@ -1867,8 +1871,10 @@ out body tags;
             }
 
             if (layerVisible.cctv) {
-                if (!map.hasLayer(cctvMarkers[cam.id])) cctvMarkers[cam.id].addTo(map);
                 if (!map.hasLayer(cctvCones[cam.id])) cctvCones[cam.id].addTo(map);
+                if (!map.hasLayer(cctvMarkers[cam.id])) cctvMarkers[cam.id].addTo(map);
+                if (cctvCones[cam.id]?.bringToBack) cctvCones[cam.id].bringToBack();
+                if (cctvMarkers[cam.id]?.bringToFront) cctvMarkers[cam.id].bringToFront();
             }
         }
 
