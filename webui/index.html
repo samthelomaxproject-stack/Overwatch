@@ -2095,11 +2095,26 @@ out body;
             cctvSourceModalUrl = null;
         }
 
-        function openCctvSourcePage(camId) {
+        async function openCctvSourcePage(camId) {
             const cam = cctvCameras[camId];
             if (!cam || !cam.snapshotUrl) return;
-            cctvSourceModalUrl = cam.snapshotUrl;
+
+            // Best path in Tauri: open source page as top-level webview (bypasses iframe embed restrictions).
+            if (window.__TAURI__?.core?.invoke) {
+                try {
+                    await window.__TAURI__.core.invoke('open_cctv_source_window', {
+                        url: cam.snapshotUrl,
+                        title: `${cam.name} • Source`
+                    });
+                    debugLog(`📹 CCTV source opened in-app window: ${cam.name}`);
+                    return;
+                } catch (e) {
+                    debugLog(`📹 CCTV source window failed, falling back to iframe modal: ${e}`);
+                }
+            }
+
             closeCctvSourcePage();
+            cctvSourceModalUrl = cam.snapshotUrl;
 
             const modal = document.createElement('div');
             modal.id = 'cctvSourceModal';

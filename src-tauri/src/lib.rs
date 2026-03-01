@@ -1,4 +1,4 @@
-use tauri::{Manager, Emitter};
+use tauri::{Manager, Emitter, WebviewWindowBuilder, WebviewUrl, Url};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
@@ -958,6 +958,26 @@ fn get_wifi_scan_results() -> serde_json::Value {
     })
 }
 
+/// Read EUD/node connection status from hub DB for tactical debug output.
+#[tauri::command]
+fn get_eud_statuses() -> serde_json::Value {
+    let db_path = format!("{}/hub.db",
+        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()));
+
+    match sigint::hub::get_node_statuses(&db_path, 90) {
+        Ok(nodes) => serde_json::json!({
+            "ok": true,
+            "count": nodes.len(),
+            "nodes": nodes
+        }),
+        Err(e) => serde_json::json!({
+            "ok": false,
+            "error": e.to_string(),
+            "nodes": []
+        })
+    }
+}
+
 /// Start the local SIGINT node collector.
 /// Spawns threads for: Wi-Fi scanning, GPS, and sync push/pull loop.
 /// hackrf_sweep is spawned separately via the Sweeper when RF is enabled.
@@ -1045,6 +1065,25 @@ fn get_sigint_delta(cursor: u64) -> serde_json::Value {
 }
 
 #[tauri::command]
+fn open_cctv_source_window(app: tauri::AppHandle, url: String, title: Option<String>) -> Result<String, String> {
+    let parsed = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+    let label = format!("cctv-source-{}", ts);
+
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(parsed))
+        .title(title.unwrap_or_else(|| "CCTV Source".to_string()))
+        .inner_size(1280.0, 820.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("Failed to open CCTV window: {}", e))?;
+
+    Ok("opened".to_string())
+}
+
+#[tauri::command]
 fn stop_rtl_sdr() -> Result<String, String> {
     let mut state = RTL_SDR_STATE.lock().unwrap();
     *state = Some(false);
@@ -1108,6 +1147,7 @@ fn stop_rtl_sdr() -> Result<String, String> {
             meshtastic_cli_send,
             meshtastic_cli_start_listen,
             start_rtl_sdr,
+            open_cctv_source_window,
             stop_rtl_sdr,
             start_hub,
             stop_hub,
@@ -1116,6 +1156,7 @@ fn stop_rtl_sdr() -> Result<String, String> {
             start_sweeper,
             set_privacy_mode,
             get_wifi_scan_results,
+            get_eud_statuses,
             get_rtl_sdr_status,
             get_sigint_delta
         ])
