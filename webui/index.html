@@ -872,6 +872,7 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (layer === 'cctv') {
+                debugLog(`📹 CCTV layer toggled ${layerVisible.cctv ? 'ON' : 'OFF'}`);
                 if (layerVisible.cctv) {
                     renderCctvLayer();
                 } else {
@@ -1655,14 +1656,20 @@ ALPHA-3 | REAR"></textarea>
 
         async function fetchCctvCameras(force=false) {
             const b = currentMapBbox();
-            if (!b) return [];
+            if (!b) {
+                debugLog('📹 CCTV fetch skipped: no map bbox');
+                return [];
+            }
+            debugLog(`📹 CCTV fetch start (${force ? 'force' : 'cached'}) bbox=${b.s},${b.w},${b.n},${b.e}`);
             const key = bboxKey(b);
 
             if (!force) {
                 try {
                     const cached = JSON.parse(localStorage.getItem(key) || 'null');
                     if (cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
-                        return cached.items || [];
+                        const items = cached.items || [];
+                        debugLog(`📹 CCTV cache hit: ${items.length} cameras`);
+                        return items;
                     }
                 } catch(e) {}
             }
@@ -1707,17 +1714,20 @@ out body tags;
                         tags: t
                     };
                 });
+                debugLog(`📹 CCTV OSM fetched: ${osmItems.length}`);
             } catch (e) {
-                debugLog('CCTV OSM fetch failed: ' + e);
+                debugLog('📹 CCTV OSM fetch failed: ' + e);
             }
 
             // DOT/public camera feed source (fallback catalog for now)
             const publicItems = await fetchPublicTrafficCameras();
+            debugLog(`📹 CCTV Public catalog in view: ${publicItems.length}`);
             publicItems.forEach(c => {
                 c.status = c.snapshotUrl ? 'UNKNOWN' : 'OFFLINE';
             });
 
             const items = [...osmItems, ...publicItems];
+            debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
             localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
             return items;
         }
@@ -1805,13 +1815,17 @@ out body tags;
 
         async function renderCctvLayer(force=false) {
             const cams = await fetchCctvCameras(force);
+            let online = 0, offline = 0, unknown = 0;
             // Update online/offline status for each camera
             for (const cam of cams) {
                 cam.status = await checkCameraOnline(cam);
+                if (cam.status === 'ONLINE') online++;
+                else if (cam.status === 'OFFLINE') offline++;
+                else unknown++;
                 renderCctvCamera(cam);
             }
             updateCctvPanel();
-            debugLog(`📹 CCTV layer: ${cams.length} cameras loaded (${cams.filter(c=>c.sourceType==='OSM').length} OSM / ${cams.filter(c=>c.sourceType!=='OSM').length} Public)`);
+            debugLog(`📹 CCTV render: total=${cams.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown}`);
         }
 
         function updateCctvPanel() {
