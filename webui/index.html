@@ -1756,6 +1756,37 @@ ALPHA-3 | REAR"></textarea>
             return `cctv:${b.s},${b.w},${b.n},${b.e}`;
         }
 
+        function safeSetCctvCache(key, items) {
+            try {
+                localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+                return true;
+            } catch (e) {
+                // Quota handling: evict oldest CCTV cache entries, then retry once.
+                try {
+                    const keys = Object.keys(localStorage).filter(k => k.startsWith('cctv:'));
+                    const entries = keys.map(k => {
+                        try {
+                            const v = JSON.parse(localStorage.getItem(k) || 'null');
+                            return { k, ts: Number(v?.ts || 0) };
+                        } catch (_) {
+                            return { k, ts: 0 };
+                        }
+                    }).sort((a, b) => a.ts - b.ts);
+
+                    const toRemove = Math.max(5, Math.ceil(entries.length * 0.25));
+                    for (let i = 0; i < toRemove && i < entries.length; i++) {
+                        localStorage.removeItem(entries[i].k);
+                    }
+                    localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+                    debugLog(`📹 CCTV cache quota hit; evicted ${Math.min(toRemove, entries.length)} old entries`);
+                    return true;
+                } catch (e2) {
+                    debugLog(`📹 CCTV cache write skipped (quota): ${e2}`);
+                    return false;
+                }
+            }
+        }
+
         function shouldFetchCctvForCurrentView() {
             if (!map) return { ok: false, reason: 'no-map' };
             if (is3DMode) return { ok: false, reason: '3d-mode' };
@@ -1905,7 +1936,7 @@ out body;
             }
 
                 debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
-                localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+                safeSetCctvCache(key, items);
                 return items;
             } finally {
                 cctvFetchInFlight = false;
