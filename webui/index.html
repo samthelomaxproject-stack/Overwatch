@@ -787,6 +787,10 @@ ALPHA-3 | REAR"></textarea>
 
             debugLog('Map initialized successfully');
 
+            map.on('moveend zoomend', () => {
+                scheduleCctvAutoRefresh();
+            });
+
             // If we have a location already, show it
             if (lastKnownLocation) {
                 debugLog('Have stored location, updating marker');
@@ -1618,6 +1622,12 @@ ALPHA-3 | REAR"></textarea>
         let cctvSnapshotTimers = {};
 
         const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+        const CCTV_AUTO_MIN_ZOOM = 13; // avoid planet-scale pulls
+        const CCTV_AUTO_MIN_FETCH_INTERVAL_MS = 10_000;
+        const CCTV_MAX_BBOX_DEG2 = 0.08; // guardrail for large viewports
+        let cctvAutoRefreshTimer = null;
+        let lastCctvAutoFetchAt = 0;
+        let lastCctvAutoBboxKey = null;
 
         // DOT/Public catalog fallback (non-OSM)
         // These can be replaced by a live API response when available.
@@ -1667,12 +1677,48 @@ ALPHA-3 | REAR"></textarea>
             return `cctv:${b.s},${b.w},${b.n},${b.e}`;
         }
 
-        async function fetchCctvCameras(force=false) {
+        function shouldFetchCctvForCurrentView() {
+            if (!map) return { ok: false, reason: 'no-map' };
+            if (is3DMode) return { ok: false, reason: '3d-mode' };
+            const zoom = map.getZoom();
+            if (zoom < CCTV_AUTO_MIN_ZOOM) return { ok: false, reason: `zoom-${zoom}` };
             const b = currentMapBbox();
-            if (!b) {
-                debugLog('📹 CCTV fetch skipped: no map bbox');
+            if (!b) return { ok: false, reason: 'no-bbox' };
+            const latSpan = Math.abs(parseFloat(b.n) - parseFloat(b.s));
+            const lonSpan = Math.abs(parseFloat(b.e) - parseFloat(b.w));
+            const areaDeg2 = latSpan * lonSpan;
+            if (areaDeg2 > CCTV_MAX_BBOX_DEG2) return { ok: false, reason: `bbox-too-large-${areaDeg2.toFixed(3)}` };
+            return { ok: true, reason: 'ok', bbox: b };
+        }
+
+        function scheduleCctvAutoRefresh() {
+            if (!layerVisible.cctv) return;
+            if (cctvAutoRefreshTimer) clearTimeout(cctvAutoRefreshTimer);
+            cctvAutoRefreshTimer = setTimeout(() => {
+                const gate = shouldFetchCctvForCurrentView();
+                if (!gate.ok) {
+                    debugLog(`📹 CCTV auto-refresh skipped: ${gate.reason}`);
+                    return;
+                }
+                const key = bboxKey(gate.bbox);
+                const now = Date.now();
+                const tooSoon = (now - lastCctvAutoFetchAt) < CCTV_AUTO_MIN_FETCH_INTERVAL_MS;
+                if (tooSoon && key === lastCctvAutoBboxKey) return;
+
+                lastCctvAutoFetchAt = now;
+                lastCctvAutoBboxKey = key;
+                debugLog(`📹 CCTV auto-refresh @ zoom ${map.getZoom()} bbox=${gate.bbox.s},${gate.bbox.w},${gate.bbox.n},${gate.bbox.e}`);
+                renderCctvLayer(false);
+            }, 750);
+        }
+
+        async function fetchCctvCameras(force=false) {
+            const gate = shouldFetchCctvForCurrentView();
+            if (!gate.ok) {
+                debugLog(`📹 CCTV fetch skipped: ${gate.reason}`);
                 return [];
             }
+            const b = gate.bbox;
             debugLog(`📹 CCTV fetch start (${force ? 'force' : 'cached'}) bbox=${b.s},${b.w},${b.n},${b.e}`);
             const key = bboxKey(b);
 
@@ -3047,6 +3093,8 @@ out body tags;
                     </div>
                 </div>
             `;
+            syncCctvUiState();
+            updateCctvPanel();
         }
 
         function renderAdsbAircraftList() {
