@@ -917,6 +917,7 @@ ALPHA-3 | REAR"></textarea>
         let is3DMode = false;
         let cesiumPlayerEntity = null;   // Our own position marker
         let cesiumAircraftEntities = {}; // keyed by ICAO
+        let cesiumSatEntities = {}; // keyed by SAT id
 
         function toggle3D() {
             const mapDiv = document.getElementById('map');
@@ -1007,6 +1008,9 @@ ALPHA-3 | REAR"></textarea>
                 // Populate any already-tracked aircraft into 3D view
                 if (layerVisible.adsb) {
                     adsbAircraft.forEach(ac => addAircraftToCesium(ac));
+                }
+                if (layerVisible.sat) {
+                    renderSatLayer(false);
                 }
 
                 is3DMode = true;
@@ -1892,6 +1896,10 @@ ALPHA-3 | REAR"></textarea>
         function clearSatLayer() {
             Object.values(satMarkers).forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
             satMarkers = {};
+            if (cesiumViewer) {
+                Object.values(cesiumSatEntities).forEach(e => cesiumViewer.entities.remove(e));
+            }
+            cesiumSatEntities = {};
             updateSatPanel();
         }
 
@@ -1927,6 +1935,7 @@ ALPHA-3 | REAR"></textarea>
                     satMarkers[s.id].setLatLng([p.lat, p.lon]);
                 }
                 if (!map.hasLayer(satMarkers[s.id])) satMarkers[s.id].addTo(map);
+                if (is3DMode && cesiumViewer) addSatToCesium(s, p);
             }
             Object.keys(satMarkers).forEach(id => {
                 if (!activeIds.has(id)) {
@@ -1934,9 +1943,17 @@ ALPHA-3 | REAR"></textarea>
                     delete satMarkers[id];
                 }
             });
+            if (cesiumViewer) {
+                Object.keys(cesiumSatEntities).forEach(id => {
+                    if (!activeIds.has(id)) {
+                        cesiumViewer.entities.remove(cesiumSatEntities[id]);
+                        delete cesiumSatEntities[id];
+                    }
+                });
+            }
 
             updateSatPanel();
-            debugLog(`🛰️ SAT render: groups=${satSelectedGroups.join(',')} total=${satCatalog.length} shown=${Object.keys(satMarkers).length}`);
+            debugLog(`🛰️ SAT render: groups=${satSelectedGroups.join(',')} total=${satCatalog.length} shown=${Object.keys(satMarkers).length} shown3d=${Object.keys(cesiumSatEntities).length}`);
         }
 
         function satApplySettings() {
@@ -1956,9 +1973,12 @@ ALPHA-3 | REAR"></textarea>
             const hit = satCatalog.find(s => s.name.toLowerCase().includes(q) || String(s.norad).includes(q));
             if (!hit) return;
             const marker = satMarkers[hit.id];
-            if (marker) {
+            if (marker && map) {
                 map.setView(marker.getLatLng(), Math.max(map.getZoom(), 5));
                 marker.openPopup();
+            }
+            if (is3DMode && cesiumViewer && cesiumSatEntities[hit.id]) {
+                cesiumViewer.flyTo(cesiumSatEntities[hit.id], { duration: 1.2 });
             }
         }
 
@@ -3253,6 +3273,54 @@ out body;
                         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
                         pixelOffset: new Cesium.Cartesian2(0, -25)
+                    }
+                });
+            }
+        }
+
+        // Add/update a satellite in the Cesium 3D view
+        function addSatToCesium(s, p) {
+            if (!cesiumViewer || !p) return;
+            const altMeters = Math.max(1000, (p.altKm || 0) * 1000);
+            const label = `${s.name}\nNORAD ${s.norad || '?'}`;
+            const color = Cesium.Color.fromCssColorString('#93c5fd');
+
+            if (cesiumSatEntities[s.id]) {
+                const entity = cesiumSatEntities[s.id];
+                entity.position = new Cesium.ConstantPositionProperty(
+                    Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altMeters)
+                );
+                if (entity.label) entity.label.text = new Cesium.ConstantProperty(label);
+            } else {
+                cesiumSatEntities[s.id] = cesiumViewer.entities.add({
+                    id: 'sat_' + s.id,
+                    position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altMeters),
+                    point: {
+                        pixelSize: 8,
+                        color: color,
+                        outlineColor: Cesium.Color.WHITE,
+                        outlineWidth: 1,
+                        scaleByDistance: new Cesium.NearFarScalar(1e5, 1.5, 2e7, 0.6)
+                    },
+                    label: {
+                        text: label,
+                        font: '10px monospace',
+                        fillColor: color,
+                        outlineColor: Cesium.Color.BLACK,
+                        outlineWidth: 2,
+                        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                        pixelOffset: new Cesium.Cartesian2(0, -12),
+                        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000000)
+                    },
+                    polyline: {
+                        positions: [
+                            Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
+                            Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altMeters)
+                        ],
+                        width: 1,
+                        material: new Cesium.ColorMaterialProperty(color.withAlpha(0.3)),
+                        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1200000)
                     }
                 });
             }
