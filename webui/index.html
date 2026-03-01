@@ -1620,6 +1620,7 @@ ALPHA-3 | REAR"></textarea>
         let cctvCones = {};
         let cctvCameras = {};
         let cctvSnapshotTimers = {};
+        let cctvHlsPlayers = {};
 
         const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
         const CCTV_STALE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d fallback on API failure
@@ -1659,15 +1660,55 @@ ALPHA-3 | REAR"></textarea>
             }));
         }
 
-        async function checkCameraOnline(cam) {
-            if (!cam.snapshotUrl) return 'NO_FEED';
+        function detectFeedType(url) {
+            if (!url) return 'none';
+            const u = String(url).toLowerCase();
+            if (u.startsWith('rtsp://') || u.startsWith('rtmp://')) return 'rtsp';
+            if (u.includes('.m3u8')) return 'hls';
+            if (u.match(/\.(mp4|webm|mov)(\?|$)/)) return 'video';
+            if (u.match(/\.(jpe?g|png|gif|webp|mjpg|mjpeg)(\?|$)/) || u.includes('mjpg') || u.includes('mjpeg')) return 'image';
+            return 'unknown';
+        }
+
+        async function probeImageUrl(url) {
             return await new Promise((resolve) => {
                 const img = new Image();
                 const timeout = setTimeout(() => resolve('OFFLINE'), 5000);
                 img.onload = () => { clearTimeout(timeout); resolve('ONLINE'); };
                 img.onerror = () => { clearTimeout(timeout); resolve('OFFLINE'); };
-                img.src = `${cam.snapshotUrl}${cam.snapshotUrl.includes('?') ? '&' : '?'}probe=${Date.now()}`;
+                img.src = `${url}${url.includes('?') ? '&' : '?'}probe=${Date.now()}`;
             });
+        }
+
+        async function probeVideoUrl(url, isHls=false) {
+            return await new Promise((resolve) => {
+                const v = document.createElement('video');
+                let done = false;
+                const finish = (s) => { if (!done) { done = true; cleanup(); resolve(s); } };
+                const cleanup = () => {
+                    clearTimeout(timeout);
+                    v.oncanplay = null;
+                    v.onerror = null;
+                    try { v.pause(); v.src = ''; v.load(); } catch(e) {}
+                };
+                const timeout = setTimeout(() => finish('OFFLINE'), 7000);
+                v.muted = true;
+                v.playsInline = true;
+                v.preload = 'metadata';
+                v.oncanplay = () => finish('ONLINE');
+                v.onerror = () => finish(isHls ? 'UNSUPPORTED' : 'OFFLINE');
+                v.src = url;
+                v.load();
+            });
+        }
+
+        async function checkCameraOnline(cam) {
+            if (!cam.snapshotUrl) return 'NO_FEED';
+            const type = detectFeedType(cam.snapshotUrl);
+            if (type === 'image') return await probeImageUrl(cam.snapshotUrl);
+            if (type === 'hls' || type === 'video') return await probeVideoUrl(cam.snapshotUrl, type === 'hls');
+            if (type === 'rtsp') return 'UNSUPPORTED';
+            return 'UNKNOWN';
         }
 
         function currentMapBbox() {
@@ -1847,6 +1888,7 @@ out body;
             if (status === 'ONLINE') return '#22c55e';
             if (status === 'OFFLINE') return '#ef4444';
             if (status === 'NO_FEED') return '#94a3b8';
+            if (status === 'UNSUPPORTED') return '#f97316';
             return '#eab308';
         }
 
@@ -1858,23 +1900,27 @@ out body;
 
         function bindCctvPopup(marker, cam) {
             const hasFeed = !!cam.snapshotUrl;
+            const feedType = detectFeedType(cam.snapshotUrl);
             const sourceBadge = cam.sourceType === 'OSM'
                 ? '<span style="color:#f59e0b;">OSM</span>'
                 : '<span style="color:#60a5fa;">PUBLIC</span>';
             const statusColor = getCctvStatusColor(cam.status);
+            const snapshotDisabled = (!hasFeed || feedType === 'rtsp' || feedType === 'hls' || feedType === 'video') ? 'disabled' : '';
+            const liveDisabled = (!hasFeed || feedType === 'rtsp') ? 'disabled' : '';
+            const feedLabel = hasFeed ? `feed: ${feedType}` : 'feed: none';
             const html = `
                 <div style="min-width:300px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                         <div style="font-weight:700;">${cam.name}</div>
                         <div style="font-size:11px;font-weight:700;color:${statusColor};">${cam.status || 'UNKNOWN'}</div>
                     </div>
-                    <div style="font-size:12px;color:#888;margin-bottom:6px;">${sourceBadge} • ${cam.source} • Bearing ${Math.round(cam.bearing)}° • FOV ${Math.round(cam.fov)}°</div>
+                    <div style="font-size:12px;color:#888;margin-bottom:6px;">${sourceBadge} • ${cam.source} • Bearing ${Math.round(cam.bearing)}° • FOV ${Math.round(cam.fov)}° • ${feedLabel}</div>
                     <div id="cctv-img-${cam.id}" style="height:150px;background:#111;border:1px solid #333;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px;">
-                        ${hasFeed ? 'Click Snapshot' : 'No feed URL available'}
+                        ${hasFeed ? 'Click Live' : 'No feed URL available'}
                     </div>
                     <div style="display:flex;gap:6px;margin-top:8px;">
-                        <button onclick="startCctvSnapshot('${cam.id}')" ${hasFeed ? '' : 'disabled'} style="flex:1;">Snapshot 60s</button>
-                        <button onclick="startCctvLive('${cam.id}')" ${hasFeed ? '' : 'disabled'} style="flex:1;">Go Live</button>
+                        <button onclick="startCctvSnapshot('${cam.id}')" ${snapshotDisabled} style="flex:1;">Snapshot 60s</button>
+                        <button onclick="startCctvLive('${cam.id}')" ${liveDisabled} style="flex:1;">Go Live</button>
                         <button onclick="stopCctvFeed('${cam.id}')" style="flex:1;">Stop</button>
                     </div>
                 </div>
@@ -1996,36 +2042,119 @@ out body;
             Object.keys(cctvSnapshotTimers).forEach(stopCctvFeed);
         }
 
-        function renderCctvImage(camId, mode='snapshot') {
+        async function ensureHlsJs() {
+            if (window.Hls) return true;
+            return await new Promise((resolve) => {
+                const existing = document.querySelector('script[data-hlsjs="1"]');
+                if (existing) {
+                    existing.addEventListener('load', () => resolve(!!window.Hls), { once: true });
+                    existing.addEventListener('error', () => resolve(false), { once: true });
+                    return;
+                }
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+                s.async = true;
+                s.dataset.hlsjs = '1';
+                s.onload = () => resolve(!!window.Hls);
+                s.onerror = () => resolve(false);
+                document.head.appendChild(s);
+            });
+        }
+
+        async function renderCctvImage(camId, mode='snapshot') {
             const cam = cctvCameras[camId];
             if (!cam || !cam.snapshotUrl) return;
             const container = document.getElementById(`cctv-img-${camId}`);
             if (!container) return;
+
+            const feedType = detectFeedType(cam.snapshotUrl);
             const ts = Date.now();
-            container.innerHTML = `<img src="${cam.snapshotUrl}${cam.snapshotUrl.includes('?') ? '&' : '?'}t=${ts}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='Feed unavailable';">`;
-            debugLog(`📹 CCTV ${mode}: ${cam.name}`);
+
+            if (feedType === 'image') {
+                container.innerHTML = `<img src="${cam.snapshotUrl}${cam.snapshotUrl.includes('?') ? '&' : '?'}t=${ts}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='Feed unavailable';">`;
+                debugLog(`📹 CCTV ${mode}: ${cam.name} (image)`);
+                return;
+            }
+
+            if (feedType === 'video' || feedType === 'hls') {
+                container.innerHTML = '';
+                const video = document.createElement('video');
+                video.style.width = '100%';
+                video.style.height = '100%';
+                video.style.objectFit = 'cover';
+                video.controls = true;
+                video.autoplay = true;
+                video.muted = true;
+                video.playsInline = true;
+                container.appendChild(video);
+
+                if (feedType === 'hls') {
+                    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                        video.src = cam.snapshotUrl;
+                    } else {
+                        const ok = await ensureHlsJs();
+                        if (ok && window.Hls?.isSupported?.()) {
+                            if (cctvHlsPlayers[camId]) {
+                                try { cctvHlsPlayers[camId].destroy(); } catch(e) {}
+                            }
+                            const hls = new window.Hls();
+                            cctvHlsPlayers[camId] = hls;
+                            hls.loadSource(cam.snapshotUrl);
+                            hls.attachMedia(video);
+                        } else {
+                            container.innerHTML = 'HLS unsupported in this environment';
+                        }
+                    }
+                } else {
+                    video.src = cam.snapshotUrl;
+                }
+
+                debugLog(`📹 CCTV ${mode}: ${cam.name} (${feedType})`);
+                return;
+            }
+
+            if (feedType === 'rtsp') {
+                container.innerHTML = 'RTSP/RTMP requires transcoding gateway (not browser-native)';
+                debugLog(`📹 CCTV ${mode}: ${cam.name} unsupported feed type (${feedType})`);
+                return;
+            }
+
+            container.innerHTML = 'Unknown feed format (URL may be a webpage, not direct stream)';
+            debugLog(`📹 CCTV ${mode}: ${cam.name} unknown feed format`);
         }
 
         function startCctvSnapshot(camId) {
+            const cam = cctvCameras[camId];
+            if (!cam) return;
             stopCctvFeed(camId);
             renderCctvImage(camId, 'snapshot');
-            cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'snapshot'), 60_000);
+            if (detectFeedType(cam.snapshotUrl) === 'image') {
+                cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'snapshot'), 60_000);
+            }
         }
 
         function startCctvLive(camId) {
+            const cam = cctvCameras[camId];
+            if (!cam) return;
             stopCctvFeed(camId);
             renderCctvImage(camId, 'live');
-            cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'live'), 2_000);
-            // auto-timeout live after 2 minutes
-            setTimeout(() => {
-                if (cctvSnapshotTimers[camId]) startCctvSnapshot(camId);
-            }, 120_000);
+            if (detectFeedType(cam.snapshotUrl) === 'image') {
+                cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'live'), 2_000);
+                // auto-timeout live after 2 minutes
+                setTimeout(() => {
+                    if (cctvSnapshotTimers[camId]) startCctvSnapshot(camId);
+                }, 120_000);
+            }
         }
 
         function stopCctvFeed(camId) {
             if (cctvSnapshotTimers[camId]) {
                 clearInterval(cctvSnapshotTimers[camId]);
                 delete cctvSnapshotTimers[camId];
+            }
+            if (cctvHlsPlayers[camId]) {
+                try { cctvHlsPlayers[camId].destroy(); } catch(e) {}
+                delete cctvHlsPlayers[camId];
             }
         }
 
