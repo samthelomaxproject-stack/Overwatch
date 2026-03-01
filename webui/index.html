@@ -2089,6 +2089,19 @@ out body;
             });
         }
 
+        async function resolveCctvStreamViaBackend(url) {
+            if (!url || !window.__TAURI__?.core?.invoke) return null;
+            try {
+                const res = await window.__TAURI__.core.invoke('resolve_cctv_stream_url', { url });
+                if (res?.ok && res?.direct_url) return res;
+                debugLog(`📹 CCTV backend resolver: ${res?.reason || 'no result'}`);
+                return null;
+            } catch (e) {
+                debugLog(`📹 CCTV backend resolver failed: ${e}`);
+                return null;
+            }
+        }
+
         function closeCctvSourcePage() {
             const modal = document.getElementById('cctvSourceModal');
             if (modal) modal.remove();
@@ -2201,6 +2214,17 @@ out body;
             }
 
             if (feedType === 'page' || feedType === 'unknown') {
+                // First try backend resolver (bypasses browser CORS and can parse provider HTML).
+                const backendResolved = await resolveCctvStreamViaBackend(cam.snapshotUrl);
+                if (backendResolved?.direct_url) {
+                    cam.snapshotUrl = backendResolved.direct_url;
+                    cam.status = 'UNKNOWN';
+                    bindCctvPopup(cctvMarkers[cam.id], cam);
+                    debugLog(`📹 CCTV backend resolved page URL -> direct feed (${backendResolved.feed_type || detectFeedType(cam.snapshotUrl)}): ${cam.name}`);
+                    await renderCctvImage(camId, mode);
+                    return;
+                }
+
                 try {
                     const resp = await fetch(cam.snapshotUrl);
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

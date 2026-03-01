@@ -1,4 +1,5 @@
 use tauri::{Manager, Emitter, WebviewWindowBuilder, WebviewUrl, Url};
+use serde::Serialize;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
@@ -1064,6 +1065,75 @@ fn get_sigint_delta(cursor: u64) -> serde_json::Value {
     }
 }
 
+#[derive(Serialize)]
+struct CctvResolveResult {
+    ok: bool,
+    direct_url: Option<String>,
+    feed_type: Option<String>,
+    reason: Option<String>,
+}
+
+fn detect_feed_type(url: &str) -> &'static str {
+    let u = url.to_lowercase();
+    if u.starts_with("rtsp://") || u.starts_with("rtmp://") { return "rtsp"; }
+    if u.contains(".m3u8") { return "hls"; }
+    if u.contains(".mp4") || u.contains(".webm") || u.contains(".mov") { return "video"; }
+    if u.contains(".jpg") || u.contains(".jpeg") || u.contains(".png") || u.contains(".gif") || u.contains(".webp") || u.contains("mjpg") || u.contains("mjpeg") { return "image"; }
+    "unknown"
+}
+
+fn extract_direct_media_url(html: &str, base_url: &str) -> Option<String> {
+    let re = regex::Regex::new(r#"https?://[^"'\s<>]+\.(m3u8|mp4|webm|mov|mjpg|mjpeg|jpg|jpeg|png)(\?[^"'\s<>]*)?"#).ok()?;
+    if let Some(m) = re.find(html) {
+        return Some(m.as_str().to_string());
+    }
+
+    let attr_re = regex::Regex::new(r#"(?:content|src)=["']([^"']+)["']"#).ok()?;
+    for cap in attr_re.captures_iter(html) {
+        if let Some(raw) = cap.get(1) {
+            let candidate = raw.as_str();
+            let lc = candidate.to_lowercase();
+            if lc.contains(".m3u8") || lc.contains(".mp4") || lc.contains(".webm") || lc.contains(".mov") || lc.contains(".mjpg") || lc.contains(".mjpeg") || lc.contains(".jpg") || lc.contains(".jpeg") || lc.contains(".png") {
+                if let Ok(base) = Url::parse(base_url) {
+                    if let Ok(joined) = base.join(candidate) {
+                        return Some(joined.to_string());
+                    }
+                }
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn resolve_cctv_stream_url(url: String) -> Result<CctvResolveResult, String> {
+    let parsed = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let host = parsed.host_str().unwrap_or_default();
+    if host.is_empty() {
+        return Ok(CctvResolveResult { ok: false, direct_url: None, feed_type: None, reason: Some("invalid-host".to_string()) });
+    }
+
+    let resp = ureq::get(&url)
+        .set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36")
+        .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .call();
+
+    let body = match resp {
+        Ok(r) => r.into_string().map_err(|e| format!("read body failed: {}", e))?,
+        Err(e) => {
+            return Ok(CctvResolveResult { ok: false, direct_url: None, feed_type: None, reason: Some(format!("fetch-failed: {}", e)) });
+        }
+    };
+
+    if let Some(found) = extract_direct_media_url(&body, &url) {
+        let feed = detect_feed_type(&found).to_string();
+        return Ok(CctvResolveResult { ok: true, direct_url: Some(found), feed_type: Some(feed), reason: None });
+    }
+
+    Ok(CctvResolveResult { ok: false, direct_url: None, feed_type: None, reason: Some("no-direct-media-found".to_string()) })
+}
+
 #[tauri::command]
 fn open_cctv_source_window(app: tauri::AppHandle, url: String, title: Option<String>) -> Result<String, String> {
     let parsed = Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
@@ -1147,6 +1217,7 @@ fn stop_rtl_sdr() -> Result<String, String> {
             meshtastic_cli_send,
             meshtastic_cli_start_listen,
             start_rtl_sdr,
+            resolve_cctv_stream_url,
             open_cctv_source_window,
             stop_rtl_sdr,
             start_hub,
