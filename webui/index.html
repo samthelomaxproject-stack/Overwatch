@@ -1685,25 +1685,67 @@ ALPHA-3 | REAR"></textarea>
         const CCTV_STATUS_PROBE_LIMIT = 20;
 
         // DOT/Public catalog fallback (non-OSM)
-        // These can be replaced by a live API response when available.
+        // Global public camera sources (page links and direct feeds mixed).
+        const CCTV_PUBLIC_SOURCE_DEFAULTS = { dot: true, weather: true, tourism: true, marina: true, attraction: true };
+        let cctvPublicSourceEnabled = (() => {
+            try {
+                const saved = JSON.parse(localStorage.getItem('cctv:publicSources') || 'null');
+                return { ...CCTV_PUBLIC_SOURCE_DEFAULTS, ...(saved || {}) };
+            } catch (_) { return { ...CCTV_PUBLIC_SOURCE_DEFAULTS }; }
+        })();
+
         const PUBLIC_CAMERA_CATALOG = [
-            { id: 'dot-fwy-121-main', name: 'DOT Cam • SH-121 @ Main', lat: 33.1709, lon: -96.8341, bearing: 95, fov: 65, range: 220, source: 'DOT/Public', snapshotUrl: null },
-            { id: 'dot-legacy-dr-tollway', name: 'DOT Cam • Legacy @ Tollway', lat: 33.0778, lon: -96.8240, bearing: 180, fov: 70, range: 220, source: 'DOT/Public', snapshotUrl: null },
-            { id: 'dot-us75-eldorado', name: 'DOT Cam • US-75 @ Eldorado', lat: 33.1739, lon: -96.6688, bearing: 180, fov: 65, range: 230, source: 'DOT/Public', snapshotUrl: null },
+            // DOT/traffic samples
+            { id: 'dot-fwy-121-main', name: 'DOT Cam • SH-121 @ Main (US)', lat: 33.1709, lon: -96.8341, bearing: 95, fov: 65, range: 220, source: 'DOT/Public', sourceCategory: 'dot', snapshotUrl: null },
+            { id: 'dot-us75-eldorado', name: 'DOT Cam • US-75 @ Eldorado (US)', lat: 33.1739, lon: -96.6688, bearing: 180, fov: 65, range: 230, source: 'DOT/Public', sourceCategory: 'dot', snapshotUrl: null },
+
+            // Weather/public webcam networks
+            { id: 'wx-jerusalem-panorama', name: 'Jerusalem Panorama Webcam', lat: 31.7780, lon: 35.2350, bearing: 110, fov: 70, range: 600, source: 'Weather/Webcam', sourceCategory: 'weather', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/israel/jerusalem-district/jerusalem/jerusalem.html' },
+            { id: 'wx-telaviv-beach', name: 'Tel Aviv Beach Webcam', lat: 32.0809, lon: 34.7690, bearing: 270, fov: 75, range: 500, source: 'Weather/Webcam', sourceCategory: 'weather', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/israel/tel-aviv-district/tel-aviv/tel-aviv-beach.html' },
+            { id: 'wx-eilat-marina', name: 'Eilat Marina Webcam', lat: 29.5549, lon: 34.9522, bearing: 120, fov: 70, range: 500, source: 'Weather/Webcam', sourceCategory: 'weather', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/israel/south-district/eilat/eilat.html' },
+            { id: 'wx-miami-beach', name: 'Miami Beach Webcam', lat: 25.7907, lon: -80.1300, bearing: 90, fov: 70, range: 500, source: 'Weather/Webcam', sourceCategory: 'weather', snapshotUrl: 'https://www.earthcam.com/usa/florida/miamiandthebeaches/' },
+
+            // Tourism city cams
+            { id: 'tour-times-square', name: 'Times Square Live', lat: 40.7580, lon: -73.9855, bearing: 200, fov: 65, range: 350, source: 'Tourism', sourceCategory: 'tourism', snapshotUrl: 'https://www.earthcam.com/usa/newyork/timessquare/' },
+            { id: 'tour-london-bridge', name: 'London Bridge Area Cam', lat: 51.5079, lon: -0.0877, bearing: 180, fov: 65, range: 300, source: 'Tourism', sourceCategory: 'tourism', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/united-kingdom/england/london/tower-bridge.html' },
+            { id: 'tour-tokyo-crossing', name: 'Tokyo Crossing Cam', lat: 35.6595, lon: 139.7005, bearing: 210, fov: 65, range: 260, source: 'Tourism', sourceCategory: 'tourism', snapshotUrl: 'https://www.youtube.com/watch?v=EHkMjfMw7L4' },
+            { id: 'tour-sydney-harbour', name: 'Sydney Harbour Cam', lat: -33.8523, lon: 151.2108, bearing: 90, fov: 70, range: 700, source: 'Tourism', sourceCategory: 'tourism', snapshotUrl: 'https://www.earthcam.com/world/australia/sydney/' },
+
+            // Marina/port
+            { id: 'mar-haifa-port', name: 'Haifa Port Cam', lat: 32.8200, lon: 34.9980, bearing: 250, fov: 70, range: 800, source: 'Marina/Port', sourceCategory: 'marina', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/israel/haifa-district/haifa/haifa-port.html' },
+            { id: 'mar-herzliya-marina', name: 'Herzliya Marina Cam', lat: 32.1638, lon: 34.7933, bearing: 260, fov: 70, range: 600, source: 'Marina/Port', sourceCategory: 'marina', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/israel/tel-aviv-district/herzliya/herzliya-marina.html' },
+            { id: 'mar-san-diego-harbor', name: 'San Diego Harbor Cam', lat: 32.7150, lon: -117.1750, bearing: 220, fov: 70, range: 900, source: 'Marina/Port', sourceCategory: 'marina', snapshotUrl: 'https://www.portofsandiego.org/harborcam' },
+
+            // Attractions
+            { id: 'attr-seaworld-san-diego', name: 'SeaWorld San Diego Area Cam', lat: 32.7637, lon: -117.2267, bearing: 160, fov: 65, range: 500, source: 'Attraction', sourceCategory: 'attraction', snapshotUrl: 'https://www.earthcam.com/usa/california/sandiego/' },
+            { id: 'attr-disney-orlando', name: 'Orlando Theme Park Area Cam', lat: 28.3772, lon: -81.5707, bearing: 130, fov: 65, range: 550, source: 'Attraction', sourceCategory: 'attraction', snapshotUrl: 'https://www.earthcam.com/usa/florida/orlando/' },
+            { id: 'attr-zoo-berlin', name: 'Berlin Zoo Area Cam', lat: 52.5080, lon: 13.3370, bearing: 150, fov: 65, range: 300, source: 'Attraction', sourceCategory: 'attraction', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/deutschland/berlin/berlin/berlin-zoo.html' },
         ];
 
         function isInBbox(lat, lon, b) {
             return lat >= parseFloat(b.s) && lat <= parseFloat(b.n) && lon >= parseFloat(b.w) && lon <= parseFloat(b.e);
         }
 
+        function applyCctvPublicSources() {
+            const checks = document.querySelectorAll('input[data-cctv-source]');
+            checks.forEach(ch => {
+                cctvPublicSourceEnabled[ch.value] = !!ch.checked;
+            });
+            localStorage.setItem('cctv:publicSources', JSON.stringify(cctvPublicSourceEnabled));
+            debugLog(`📹 CCTV public sources: ${Object.entries(cctvPublicSourceEnabled).filter(([,v]) => v).map(([k]) => k).join(',')}`);
+            renderCctvLayer(true);
+        }
+
         async function fetchPublicTrafficCameras() {
             const b = currentMapBbox();
             if (!b) return [];
-            // TODO: swap to live DOT/public API source when available.
-            return PUBLIC_CAMERA_CATALOG.filter(c => isInBbox(c.lat, c.lon, b)).map(c => ({
-                ...c,
-                sourceType: 'PUBLIC',
-            }));
+            return PUBLIC_CAMERA_CATALOG
+                .filter(c => isInBbox(c.lat, c.lon, b))
+                .filter(c => cctvPublicSourceEnabled[c.sourceCategory] !== false)
+                .map(c => ({
+                    ...c,
+                    sourceType: 'PUBLIC',
+                }));
         }
 
         function detectFeedType(url) {
@@ -3907,6 +3949,14 @@ out body;
                                 <input id="cctvMaxPerFetchInput" type="number" min="20" max="500" step="10" value="${CCTV_MAX_CAMERAS_PER_FETCH}" style="width:88px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:0.75rem;" />
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="applyCctvMaxPerFetch()">Apply</button>
                             </div>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:0.75rem;">
+                                <label><input data-cctv-source type="checkbox" value="dot" ${cctvPublicSourceEnabled.dot ? 'checked' : ''}/> DOT</label>
+                                <label><input data-cctv-source type="checkbox" value="weather" ${cctvPublicSourceEnabled.weather ? 'checked' : ''}/> Weather</label>
+                                <label><input data-cctv-source type="checkbox" value="tourism" ${cctvPublicSourceEnabled.tourism ? 'checked' : ''}/> Tourism</label>
+                                <label><input data-cctv-source type="checkbox" value="marina" ${cctvPublicSourceEnabled.marina ? 'checked' : ''}/> Marina</label>
+                                <label><input data-cctv-source type="checkbox" value="attraction" ${cctvPublicSourceEnabled.attraction ? 'checked' : ''}/> Attractions</label>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="applyCctvPublicSources()">Apply Sources</button>
+                            </div>
                             <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.05em;">CAMERAS IN VIEW (toggle layer ON to display)</div>
                             <div id="cctvList" style="font-family:var(--font-mono);font-size:0.75rem;max-height:220px;overflow-y:auto;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.06);border-radius:4px;">
                                 <div style="padding:10px;color:var(--text-muted);">No CCTV cameras loaded yet</div>
@@ -3960,6 +4010,7 @@ out body;
             `;
             syncCctvUiState();
             updateSatPanel();
+            document.querySelectorAll('input[data-cctv-source]').forEach(chk => { chk.checked = cctvPublicSourceEnabled[chk.value] !== false; });
             updateCctvPanel();
         }
 
