@@ -1660,7 +1660,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         async function checkCameraOnline(cam) {
-            if (!cam.snapshotUrl) return 'OFFLINE';
+            if (!cam.snapshotUrl) return 'NO_FEED';
             return await new Promise((resolve) => {
                 const img = new Image();
                 const timeout = setTimeout(() => resolve('OFFLINE'), 5000);
@@ -1754,6 +1754,8 @@ ALPHA-3 | REAR"></textarea>
 (
   node["surveillance"="camera"](${b.s},${b.w},${b.n},${b.e});
   node["man_made"="surveillance"](${b.s},${b.w},${b.n},${b.e});
+  node["surveillance:type"="camera"]["contact:webcam"](${b.s},${b.w},${b.n},${b.e});
+  node["man_made"="surveillance"]["contact:webcam"](${b.s},${b.w},${b.n},${b.e});
 );
 out body;
             `.trim();
@@ -1779,7 +1781,7 @@ out body;
                         const bearing = parseFloat(t.direction || t.camera_direction || t['camera:direction'] || '0') || 0;
                         const fov = parseFloat(t['camera:angle'] || t['camera:fov'] || '60') || 60;
                         const range = parseFloat(t['camera:range_m'] || '120') || 120;
-                        const snapshotUrl = t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || null;
+                        const snapshotUrl = t['contact:webcam'] || t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || t['website'] || null;
                         return {
                             id: `osm-${String(e.id)}`,
                             lat: Number(e.lat),
@@ -1791,7 +1793,7 @@ out body;
                             source: t.operator || 'OSM',
                             sourceType: 'OSM',
                             snapshotUrl,
-                            status: snapshotUrl ? 'UNKNOWN' : 'OFFLINE',
+                            status: snapshotUrl ? 'UNKNOWN' : 'NO_FEED',
                             tags: t
                         };
                     });
@@ -1809,7 +1811,7 @@ out body;
             const publicItems = await fetchPublicTrafficCameras();
             debugLog(`📹 CCTV Public catalog in view: ${publicItems.length}`);
             publicItems.forEach(c => {
-                c.status = c.snapshotUrl ? 'UNKNOWN' : 'OFFLINE';
+                c.status = c.snapshotUrl ? 'UNKNOWN' : 'NO_FEED';
             });
 
             let items = [...osmItems, ...publicItems];
@@ -1841,12 +1843,25 @@ out body;
             return points;
         }
 
+        function getCctvStatusColor(status) {
+            if (status === 'ONLINE') return '#22c55e';
+            if (status === 'OFFLINE') return '#ef4444';
+            if (status === 'NO_FEED') return '#94a3b8';
+            return '#eab308';
+        }
+
+        function getCctvMarkerColor(cam) {
+            // User preference: viewable cameras should be green.
+            if (cam.snapshotUrl) return '#22c55e';
+            return cam.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
+        }
+
         function bindCctvPopup(marker, cam) {
             const hasFeed = !!cam.snapshotUrl;
             const sourceBadge = cam.sourceType === 'OSM'
                 ? '<span style="color:#f59e0b;">OSM</span>'
                 : '<span style="color:#60a5fa;">PUBLIC</span>';
-            const statusColor = cam.status === 'ONLINE' ? '#22c55e' : cam.status === 'OFFLINE' ? '#ef4444' : '#eab308';
+            const statusColor = getCctvStatusColor(cam.status);
             const html = `
                 <div style="min-width:300px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -1872,13 +1887,14 @@ out body;
             cctvCameras[cam.id] = cam;
 
             const sourceColor = cam.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
+            const markerColor = getCctvMarkerColor(cam);
 
             if (!cctvMarkers[cam.id]) {
                 const isOsm = cam.sourceType === 'OSM';
                 const markerSize = isOsm ? 20 : 16;
                 const icon = L.divIcon({
                     className: 'cctv-marker',
-                    html: `<div style="width:${markerSize}px;height:${markerSize}px;border-radius:50%;background:${sourceColor};border:2px solid ${isOsm ? '#111' : 'white'};box-shadow:0 0 0 1px rgba(255,255,255,0.35),0 0 8px rgba(0,0,0,0.55);"></div>`,
+                    html: `<div style="width:${markerSize}px;height:${markerSize}px;border-radius:50%;background:${markerColor};border:2px solid ${isOsm ? '#111' : 'white'};box-shadow:0 0 0 1px rgba(255,255,255,0.35),0 0 8px rgba(0,0,0,0.55);"></div>`,
                     iconSize: [markerSize, markerSize],
                     iconAnchor: [Math.round(markerSize/2), Math.round(markerSize/2)]
                 });
@@ -1963,7 +1979,7 @@ out body;
                         .sort((a,b) => (a.status === 'ONLINE' ? -1 : 1) - (b.status === 'ONLINE' ? -1 : 1))
                         .map(c => {
                             const sourceColor = c.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
-                            const statusColor = c.status === 'ONLINE' ? '#22c55e' : c.status === 'OFFLINE' ? '#ef4444' : '#eab308';
+                            const statusColor = getCctvStatusColor(c.status);
                             return `<div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:0.72rem;align-items:center;">
                                 <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${c.name}</span>
                                 <span style="color:${sourceColor};font-weight:700;">${c.sourceType}</span>
