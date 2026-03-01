@@ -431,7 +431,7 @@
                             <button class="tac-layer-btn" onclick="toggleLayer('ais')">AIS</button>
                             <button class="tac-layer-btn" onclick="toggleLayer('rf')">RF</button>
                             <button class="tac-layer-btn" onclick="toggleLayer('wifi')">Wi-Fi</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('cctv')">CCTV</button>
+                            <button class="tac-layer-btn" data-layer="cctv" onclick="toggleLayer('cctv')">CCTV</button>
                         </div>
                     </div>
                 </div>
@@ -830,9 +830,21 @@ ALPHA-3 | REAR"></textarea>
         // Layer visibility state (mirrors button active state)
         const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, cctv: false };
 
-        function toggleLayer(layer) {
-            layerVisible[layer] = !layerVisible[layer];
-            event.target.classList.toggle('active');
+        function syncCctvUiState() {
+            const cctvOn = !!layerVisible.cctv;
+            document.querySelectorAll('[data-layer="cctv"]').forEach(btn => {
+                btn.classList.toggle('active', cctvOn);
+            });
+            document.querySelectorAll('[data-cctv-toggle="1"]').forEach(btn => {
+                btn.textContent = cctvOn ? 'CCTV ON' : 'CCTV OFF';
+            });
+        }
+
+        function toggleLayer(layer, forceState = null) {
+            layerVisible[layer] = (typeof forceState === 'boolean') ? forceState : !layerVisible[layer];
+            if (typeof event !== 'undefined' && event?.target?.classList) {
+                event.target.classList.toggle('active', layerVisible[layer]);
+            }
 
             if (layer === 'adsb') {
                 // 2D Leaflet markers
@@ -872,6 +884,7 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (layer === 'cctv') {
+                syncCctvUiState();
                 debugLog(`📹 CCTV layer toggled ${layerVisible.cctv ? 'ON' : 'OFF'}`);
                 if (layerVisible.cctv) {
                     renderCctvLayer();
@@ -1814,18 +1827,31 @@ out body tags;
         }
 
         async function renderCctvLayer(force=false) {
+            if (!layerVisible.cctv) {
+                layerVisible.cctv = true;
+                syncCctvUiState();
+                debugLog('📹 CCTV render requested while layer OFF; auto-enabled layerVisible.cctv=true');
+            }
+
             const cams = await fetchCctvCameras(force);
             let online = 0, offline = 0, unknown = 0;
+            let markersAdded = 0, conesAdded = 0;
+
             // Update online/offline status for each camera
             for (const cam of cams) {
                 cam.status = await checkCameraOnline(cam);
                 if (cam.status === 'ONLINE') online++;
                 else if (cam.status === 'OFFLINE') offline++;
                 else unknown++;
+
+                const markerWasOnMap = !!cctvMarkers[cam.id] && map?.hasLayer(cctvMarkers[cam.id]);
+                const coneWasOnMap = !!cctvCones[cam.id] && map?.hasLayer(cctvCones[cam.id]);
                 renderCctvCamera(cam);
+                if (!markerWasOnMap && cctvMarkers[cam.id] && map?.hasLayer(cctvMarkers[cam.id])) markersAdded++;
+                if (!coneWasOnMap && cctvCones[cam.id] && map?.hasLayer(cctvCones[cam.id])) conesAdded++;
             }
             updateCctvPanel();
-            debugLog(`📹 CCTV render: total=${cams.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown}`);
+            debugLog(`📹 CCTV render: total=${cams.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown} layerVisible.cctv=${layerVisible.cctv} markersAdded=${markersAdded} conesAdded=${conesAdded} mapHasFirstMarker=${cams[0] ? map?.hasLayer(cctvMarkers[cams[0].id]) : false}`);
         }
 
         function updateCctvPanel() {
@@ -2958,7 +2984,7 @@ out body tags;
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">📹 CCTV (OSINT + Public)</span>
                             <div style="display:flex;gap:6px;">
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleLayer('cctv')">${layerVisible.cctv ? 'CCTV ON' : 'CCTV OFF'}</button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" data-cctv-toggle="1" onclick="toggleLayer('cctv')">${layerVisible.cctv ? 'CCTV ON' : 'CCTV OFF'}</button>
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="renderCctvLayer(true)">Refresh</button>
                             </div>
                         </div>
