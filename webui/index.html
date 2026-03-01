@@ -1628,7 +1628,10 @@ ALPHA-3 | REAR"></textarea>
         const CCTV_AUTO_MIN_ZOOM = 13; // avoid planet-scale pulls
         const CCTV_AUTO_MIN_FETCH_INTERVAL_MS = 10_000;
         const CCTV_MAX_BBOX_DEG2 = 0.08; // guardrail for large viewports
-        const CCTV_MAX_CAMERAS_PER_FETCH = 150; // cap to prevent render-crash on dense areas
+        let CCTV_MAX_CAMERAS_PER_FETCH = (() => {
+            const saved = parseInt(localStorage.getItem('cctv:maxPerFetch') || '150', 10);
+            return Number.isFinite(saved) ? Math.max(20, Math.min(500, saved)) : 150;
+        })(); // cap to prevent render-crash on dense areas
         const OVERPASS_REQUEST_TIMEOUT_MS = 12000;
         const OVERPASS_ENDPOINTS = [
             'https://overpass-api.de/api/interpreter',
@@ -2149,6 +2152,17 @@ out body;
                     setTimeout(() => renderCctvLayer(false), 50);
                 }
             }
+        }
+
+        function applyCctvMaxPerFetch() {
+            const input = document.getElementById('cctvMaxPerFetchInput');
+            if (!input) return;
+            const next = parseInt(input.value || String(CCTV_MAX_CAMERAS_PER_FETCH), 10);
+            CCTV_MAX_CAMERAS_PER_FETCH = Number.isFinite(next) ? Math.max(20, Math.min(500, next)) : CCTV_MAX_CAMERAS_PER_FETCH;
+            input.value = String(CCTV_MAX_CAMERAS_PER_FETCH);
+            localStorage.setItem('cctv:maxPerFetch', String(CCTV_MAX_CAMERAS_PER_FETCH));
+            debugLog(`📹 CCTV max-per-fetch set to ${CCTV_MAX_CAMERAS_PER_FETCH}`);
+            renderCctvLayer(true);
         }
 
         function updateCctvPanel() {
@@ -3488,6 +3502,11 @@ out body;
                                 <div><div style="font-size:1.0rem;font-weight:700;color:#60a5fa;" id="cctvPublicCount">0</div><div class="tac-label">PUBLIC</div></div>
                                 <div><div style="font-size:1.0rem;font-weight:700;color:#22c55e;" id="cctvOnlineCount">0</div><div class="tac-label">ONLINE</div></div>
                                 <div><div style="font-size:1.0rem;font-weight:700;color:#ef4444;" id="cctvOfflineCount">0</div><div class="tac-label">OFFLINE</div></div>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                                <div style="font-size:0.7rem;color:var(--text-muted);letter-spacing:0.05em;">MAX CAMERAS/FETCH</div>
+                                <input id="cctvMaxPerFetchInput" type="number" min="20" max="500" step="10" value="${CCTV_MAX_CAMERAS_PER_FETCH}" style="width:88px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:0.75rem;" />
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="applyCctvMaxPerFetch()">Apply</button>
                             </div>
                             <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.05em;">CAMERAS IN VIEW (toggle layer ON to display)</div>
                             <div id="cctvList" style="font-family:var(--font-mono);font-size:0.75rem;max-height:220px;overflow-y:auto;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.06);border-radius:4px;">
