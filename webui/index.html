@@ -431,6 +431,7 @@
                             <button class="tac-layer-btn" onclick="toggleLayer('ais')">AIS</button>
                             <button class="tac-layer-btn" onclick="toggleLayer('rf')">RF</button>
                             <button class="tac-layer-btn" onclick="toggleLayer('wifi')">Wi-Fi</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('cctv')">CCTV</button>
                         </div>
                     </div>
                 </div>
@@ -827,7 +828,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, cctv: false };
 
         function toggleLayer(layer) {
             layerVisible[layer] = !layerVisible[layer];
@@ -868,6 +869,14 @@ ALPHA-3 | REAR"></textarea>
             }
             if (layer === 'wifi') {
                 layerVisible.wifi ? renderHexLayer('wifi') : clearHexLayer('wifi');
+            }
+
+            if (layer === 'cctv') {
+                if (layerVisible.cctv) {
+                    renderCctvLayer();
+                } else {
+                    clearCctvLayer();
+                }
             }
         }
 
@@ -1587,6 +1596,203 @@ ALPHA-3 | REAR"></textarea>
 
         // Selected tile for detail panel
         let selectedTile = null;
+
+        // ── CCTV OSINT layer ───────────────────────────────────────────────────
+        let cctvMarkers = {};
+        let cctvCones = {};
+        let cctvCameras = {};
+        let cctvSnapshotTimers = {};
+
+        const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+        function currentMapBbox() {
+            if (!map) return null;
+            const b = map.getBounds();
+            return {
+                s: b.getSouth().toFixed(5),
+                w: b.getWest().toFixed(5),
+                n: b.getNorth().toFixed(5),
+                e: b.getEast().toFixed(5)
+            };
+        }
+
+        function bboxKey(b) {
+            return `cctv:${b.s},${b.w},${b.n},${b.e}`;
+        }
+
+        async function fetchCctvCameras(force=false) {
+            const b = currentMapBbox();
+            if (!b) return [];
+            const key = bboxKey(b);
+
+            if (!force) {
+                try {
+                    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+                    if (cached && (Date.now() - cached.ts) < CCTV_CACHE_TTL_MS) {
+                        return cached.items || [];
+                    }
+                } catch(e) {}
+            }
+
+            // Overpass query: nodes tagged surveillance=camera within bbox
+            const q = `
+[out:json][timeout:25];
+(
+  node["surveillance"="camera"](${b.s},${b.w},${b.n},${b.e});
+  node["man_made"="surveillance"](${b.s},${b.w},${b.n},${b.e});
+);
+out body tags;
+            `.trim();
+
+            try {
+                const resp = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                    body: `data=${encodeURIComponent(q)}`
+                });
+                if (!resp.ok) throw new Error(`Overpass ${resp.status}`);
+                const data = await resp.json();
+                const items = (data.elements || []).map(e => {
+                    const t = e.tags || {};
+                    const bearing = parseFloat(t.direction || t.camera_direction || t['camera:direction'] || '0') || 0;
+                    const fov = parseFloat(t['camera:angle'] || t['camera:fov'] || '60') || 60;
+                    const range = parseFloat(t['camera:range_m'] || '120') || 120;
+                    const snapshotUrl = t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || null;
+                    return {
+                        id: String(e.id),
+                        lat: e.lat,
+                        lon: e.lon,
+                        name: t.name || `CCTV-${e.id}`,
+                        bearing,
+                        fov,
+                        range,
+                        source: t.operator || 'OSINT',
+                        snapshotUrl,
+                        tags: t
+                    };
+                });
+
+                localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+                return items;
+            } catch (e) {
+                debugLog('CCTV fetch failed: ' + e);
+                return [];
+            }
+        }
+
+        function conePolygon(lat, lon, bearingDeg, fovDeg, rangeM) {
+            const points = [[lat, lon]];
+            const steps = 12;
+            const start = bearingDeg - fovDeg / 2;
+            const end = bearingDeg + fovDeg / 2;
+            for (let i = 0; i <= steps; i++) {
+                const brg = (start + (end - start) * (i / steps)) * Math.PI / 180;
+                const dLat = (rangeM / 111111) * Math.cos(brg);
+                const dLon = (rangeM / (111111 * Math.cos(lat * Math.PI/180))) * Math.sin(brg);
+                points.push([lat + dLat, lon + dLon]);
+            }
+            points.push([lat, lon]);
+            return points;
+        }
+
+        function bindCctvPopup(marker, cam) {
+            const hasFeed = !!cam.snapshotUrl;
+            const html = `
+                <div style="min-width:280px;">
+                    <div style="font-weight:700;margin-bottom:6px;">${cam.name}</div>
+                    <div style="font-size:12px;color:#888;margin-bottom:6px;">${cam.source} • Bearing ${Math.round(cam.bearing)}° • FOV ${Math.round(cam.fov)}°</div>
+                    <div id="cctv-img-${cam.id}" style="height:150px;background:#111;border:1px solid #333;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px;">
+                        ${hasFeed ? 'Click Snapshot' : 'No feed URL available'}
+                    </div>
+                    <div style="display:flex;gap:6px;margin-top:8px;">
+                        <button onclick="startCctvSnapshot('${cam.id}')" ${hasFeed ? '' : 'disabled'} style="flex:1;">Snapshot 60s</button>
+                        <button onclick="startCctvLive('${cam.id}')" ${hasFeed ? '' : 'disabled'} style="flex:1;">Go Live</button>
+                        <button onclick="stopCctvFeed('${cam.id}')" style="flex:1;">Stop</button>
+                    </div>
+                </div>
+            `;
+            marker.bindPopup(html);
+        }
+
+        function renderCctvCamera(cam) {
+            if (!map) return;
+            cctvCameras[cam.id] = cam;
+
+            if (!cctvMarkers[cam.id]) {
+                const icon = L.divIcon({
+                    className: 'cctv-marker',
+                    html: `<div style="width:16px;height:16px;border-radius:50%;background:#ff4d4f;border:2px solid white;"></div>`,
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                });
+                const marker = L.marker([cam.lat, cam.lon], { icon });
+                bindCctvPopup(marker, cam);
+                cctvMarkers[cam.id] = marker;
+            }
+
+            const cone = conePolygon(cam.lat, cam.lon, cam.bearing, cam.fov, cam.range);
+            if (!cctvCones[cam.id]) {
+                cctvCones[cam.id] = L.polygon(cone, {
+                    color: '#ff4d4f',
+                    weight: 1,
+                    opacity: 0.8,
+                    fillColor: '#ff4d4f',
+                    fillOpacity: 0.18
+                });
+            } else {
+                cctvCones[cam.id].setLatLngs(cone);
+            }
+
+            if (layerVisible.cctv) {
+                if (!map.hasLayer(cctvMarkers[cam.id])) cctvMarkers[cam.id].addTo(map);
+                if (!map.hasLayer(cctvCones[cam.id])) cctvCones[cam.id].addTo(map);
+            }
+        }
+
+        async function renderCctvLayer(force=false) {
+            const cams = await fetchCctvCameras(force);
+            cams.forEach(renderCctvCamera);
+            debugLog(`📹 CCTV layer: ${cams.length} cameras loaded`);
+        }
+
+        function clearCctvLayer() {
+            Object.values(cctvMarkers).forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
+            Object.values(cctvCones).forEach(c => { if (map && map.hasLayer(c)) map.removeLayer(c); });
+            Object.keys(cctvSnapshotTimers).forEach(stopCctvFeed);
+        }
+
+        function renderCctvImage(camId, mode='snapshot') {
+            const cam = cctvCameras[camId];
+            if (!cam || !cam.snapshotUrl) return;
+            const container = document.getElementById(`cctv-img-${camId}`);
+            if (!container) return;
+            const ts = Date.now();
+            container.innerHTML = `<img src="${cam.snapshotUrl}${cam.snapshotUrl.includes('?') ? '&' : '?'}t=${ts}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='Feed unavailable';">`;
+            debugLog(`📹 CCTV ${mode}: ${cam.name}`);
+        }
+
+        function startCctvSnapshot(camId) {
+            stopCctvFeed(camId);
+            renderCctvImage(camId, 'snapshot');
+            cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'snapshot'), 60_000);
+        }
+
+        function startCctvLive(camId) {
+            stopCctvFeed(camId);
+            renderCctvImage(camId, 'live');
+            cctvSnapshotTimers[camId] = setInterval(() => renderCctvImage(camId, 'live'), 2_000);
+            // auto-timeout live after 2 minutes
+            setTimeout(() => {
+                if (cctvSnapshotTimers[camId]) startCctvSnapshot(camId);
+            }, 120_000);
+        }
+
+        function stopCctvFeed(camId) {
+            if (cctvSnapshotTimers[camId]) {
+                clearInterval(cctvSnapshotTimers[camId]);
+                delete cctvSnapshotTimers[camId];
+            }
+        }
 
         function renderHexLayer(type) {
             if (!map) return;
