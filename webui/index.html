@@ -1637,7 +1637,10 @@ ALPHA-3 | REAR"></textarea>
         const SAT_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
         let satMarkers = {};
         let satCatalog = [];
+        let satIndexById = {};
         let satUpdateTimer = null;
+        let satOrbit2d = null;
+        let satOrbit3d = null;
         let satSelectedGroups = (() => {
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
@@ -1847,6 +1850,20 @@ ALPHA-3 | REAR"></textarea>
             return `https://celestrak.org/NORAD/elements/gp.php?GROUP=${encodeURIComponent(group)}&FORMAT=TLE`;
         }
 
+        function satGroupColorCss(group) {
+            const g = String(group || '').toLowerCase();
+            if (g === 'stations') return '#22d3ee';
+            if (g === 'weather') return '#34d399';
+            if (g === 'starlink') return '#a78bfa';
+            if (g === 'military') return '#f97316';
+            if (g === 'active') return '#facc15';
+            return '#e5e7eb';
+        }
+
+        function satGroupColorCesium(group) {
+            return Cesium.Color.fromCssColorString(satGroupColorCss(group));
+        }
+
         function parseTleText(tleText, group) {
             const lines = String(tleText || '').split('\n').map(l => l.trim()).filter(Boolean);
             const out = [];
@@ -1896,9 +1913,13 @@ ALPHA-3 | REAR"></textarea>
         function clearSatLayer() {
             Object.values(satMarkers).forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
             satMarkers = {};
+            if (satOrbit2d && map && map.hasLayer(satOrbit2d)) map.removeLayer(satOrbit2d);
+            satOrbit2d = null;
             if (cesiumViewer) {
                 Object.values(cesiumSatEntities).forEach(e => cesiumViewer.entities.remove(e));
+                if (satOrbit3d) cesiumViewer.entities.remove(satOrbit3d);
             }
+            satOrbit3d = null;
             cesiumSatEntities = {};
             updateSatPanel();
         }
@@ -1920,6 +1941,7 @@ ALPHA-3 | REAR"></textarea>
             const dedup = new Map();
             all.forEach(s => dedup.set(s.norad || s.id, s));
             satCatalog = Array.from(dedup.values());
+            satIndexById = Object.fromEntries(satCatalog.map(s => [s.id, s]));
 
             const sats = satCatalog.slice(0, satMaxMarkers);
             const activeIds = new Set();
@@ -1927,12 +1949,14 @@ ALPHA-3 | REAR"></textarea>
                 const p = satSubpointFromTle(s);
                 if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
                 activeIds.add(s.id);
-                const icon = L.divIcon({ className: 'sat-marker', html: '<div style="width:10px;height:10px;border-radius:50%;background:#93c5fd;border:1px solid #fff;"></div>', iconSize: [10,10], iconAnchor:[5,5] });
+                const color = satGroupColorCss(s.group);
+                const icon = L.divIcon({ className: 'sat-marker', html: `<div style="width:10px;height:10px;border-radius:50%;background:${color};border:1px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.5);"></div>`, iconSize: [10,10], iconAnchor:[5,5] });
                 if (!satMarkers[s.id]) {
                     satMarkers[s.id] = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1500 });
-                    satMarkers[s.id].bindPopup(`<div style="min-width:220px;"><div style="font-weight:700;">${s.name}</div><div style="font-size:12px;color:#94a3b8;">NORAD ${s.norad || 'n/a'} • ${s.group}</div><div style="font-size:12px;color:#cbd5e1;">Alt ${p.altKm?.toFixed(1)} km</div></div>`);
+                    satMarkers[s.id].bindPopup(`<div style="min-width:240px;"><div style="font-weight:700;color:${color};">${s.name}</div><div style="font-size:12px;color:#94a3b8;">NORAD ${s.norad || 'n/a'} • ${s.group}</div><div style="font-size:12px;color:#cbd5e1;">Alt ${p.altKm?.toFixed(1)} km</div><div style="margin-top:8px;"><button onclick="satShowOrbit('${s.id}')" style="width:100%;">Show Orbit (90m)</button></div></div>`);
                 } else {
                     satMarkers[s.id].setLatLng([p.lat, p.lon]);
+                    satMarkers[s.id].setIcon(icon);
                 }
                 if (!map.hasLayer(satMarkers[s.id])) satMarkers[s.id].addTo(map);
                 if (is3DMode && cesiumViewer) addSatToCesium(s, p);
@@ -1965,6 +1989,49 @@ ALPHA-3 | REAR"></textarea>
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
             localStorage.setItem('sat:maxMarkers', String(satMaxMarkers));
             renderSatLayer(true);
+        }
+
+        function satBuildOrbitPoints(s, minutes=90, stepSec=180) {
+            if (!window.satellite || !s?.line1 || !s?.line2) return [];
+            const satrec = window.satellite.twoline2satrec(s.line1, s.line2);
+            const pts = [];
+            const now = Date.now();
+            for (let t = 0; t <= minutes * 60; t += stepSec) {
+                const dt = new Date(now + t * 1000);
+                const gmst = window.satellite.gstime(dt);
+                const pv = window.satellite.propagate(satrec, dt);
+                if (!pv?.position) continue;
+                const gd = window.satellite.eciToGeodetic(pv.position, gmst);
+                const lat = window.satellite.degreesLat(gd.latitude);
+                const lon = window.satellite.degreesLong(gd.longitude);
+                const altM = Math.max(0, (gd.height || 0) * 1000);
+                if (Number.isFinite(lat) && Number.isFinite(lon)) pts.push({ lat, lon, altM });
+            }
+            return pts;
+        }
+
+        function satShowOrbit(satId) {
+            const s = satIndexById[satId];
+            if (!s) return;
+            const pts = satBuildOrbitPoints(s, 90, 180);
+            if (pts.length < 2) return;
+            const color = satGroupColorCss(s.group);
+
+            if (satOrbit2d && map) map.removeLayer(satOrbit2d);
+            satOrbit2d = L.polyline(pts.map(p => [p.lat, p.lon]), { color, weight: 2, opacity: 0.85, dashArray: '6,4' });
+            if (map) satOrbit2d.addTo(map);
+
+            if (cesiumViewer) {
+                if (satOrbit3d) cesiumViewer.entities.remove(satOrbit3d);
+                satOrbit3d = cesiumViewer.entities.add({
+                    id: 'sat_orbit_preview',
+                    polyline: {
+                        positions: pts.map(p => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.altM)),
+                        width: 2,
+                        material: new Cesium.ColorMaterialProperty(satGroupColorCesium(s.group).withAlpha(0.8))
+                    }
+                });
+            }
         }
 
         function satSearchPick(value) {
@@ -3755,6 +3822,13 @@ out body;
                                 <label style="font-size:0.75rem;"><input data-sat-group type="checkbox" value="active" ${satSelectedGroups.includes('active') ? 'checked' : ''}/> Active</label>
                                 <input id="satMaxInput" type="number" min="20" max="500" value="${satMaxMarkers}" style="width:80px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:0.75rem;" />
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satApplySettings()">Apply</button>
+                            </div>
+                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:0.72rem;color:var(--text-secondary);">
+                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22d3ee;margin-right:4px;"></span>Stations</span>
+                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#34d399;margin-right:4px;"></span>Weather</span>
+                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#a78bfa;margin-right:4px;"></span>Starlink</span>
+                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;margin-right:4px;"></span>Military</span>
+                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#facc15;margin-right:4px;"></span>Active</span>
                             </div>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satSearchPick('ISS')">ISS</button>
