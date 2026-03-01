@@ -1621,6 +1621,7 @@ ALPHA-3 | REAR"></textarea>
         let cctvCameras = {};
         let cctvSnapshotTimers = {};
         let cctvHlsPlayers = {};
+        let cctvSourceModalUrl = null;
 
         const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
         const CCTV_STALE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d fallback on API failure
@@ -1932,9 +1933,10 @@ out body;
             const statusColor = getCctvStatusColor(cam.status);
             const snapshotDisabled = (!hasFeed || feedType === 'rtsp' || feedType === 'hls' || feedType === 'video') ? 'disabled' : '';
             const liveDisabled = (!hasFeed || feedType === 'rtsp') ? 'disabled' : '';
+            const sourceDisabled = !hasFeed ? 'disabled' : '';
             const feedLabel = hasFeed ? `feed: ${feedType}` : 'feed: none';
             const html = `
-                <div style="min-width:300px;">
+                <div style="min-width:320px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                         <div style="font-weight:700;">${cam.name}</div>
                         <div style="font-size:11px;font-weight:700;color:${statusColor};">${cam.status || 'UNKNOWN'}</div>
@@ -1943,10 +1945,11 @@ out body;
                     <div id="cctv-img-${cam.id}" style="height:150px;background:#111;border:1px solid #333;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px;">
                         ${hasFeed ? 'Click Live' : 'No feed URL available'}
                     </div>
-                    <div style="display:flex;gap:6px;margin-top:8px;">
-                        <button onclick="startCctvSnapshot('${cam.id}')" ${snapshotDisabled} style="flex:1;">Snapshot 60s</button>
-                        <button onclick="startCctvLive('${cam.id}')" ${liveDisabled} style="flex:1;">Go Live</button>
-                        <button onclick="stopCctvFeed('${cam.id}')" style="flex:1;">Stop</button>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;">
+                        <button onclick="startCctvSnapshot('${cam.id}')" ${snapshotDisabled}>Snapshot 60s</button>
+                        <button onclick="startCctvLive('${cam.id}')" ${liveDisabled}>Go Live</button>
+                        <button onclick="openCctvSourcePage('${cam.id}')" ${sourceDisabled}>Open Source In-App</button>
+                        <button onclick="stopCctvFeed('${cam.id}')">Stop</button>
                     </div>
                 </div>
             `;
@@ -2084,6 +2087,44 @@ out body;
                 s.onerror = () => resolve(false);
                 document.head.appendChild(s);
             });
+        }
+
+        function closeCctvSourcePage() {
+            const modal = document.getElementById('cctvSourceModal');
+            if (modal) modal.remove();
+            cctvSourceModalUrl = null;
+        }
+
+        function openCctvSourcePage(camId) {
+            const cam = cctvCameras[camId];
+            if (!cam || !cam.snapshotUrl) return;
+            cctvSourceModalUrl = cam.snapshotUrl;
+            closeCctvSourcePage();
+
+            const modal = document.createElement('div');
+            modal.id = 'cctvSourceModal';
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+            modal.innerHTML = `
+                <div style="width:min(1200px,95vw);height:min(800px,92vh);background:#0b1220;border:1px solid rgba(255,255,255,0.2);border-radius:10px;display:flex;flex-direction:column;overflow:hidden;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#111827;border-bottom:1px solid rgba(255,255,255,0.12);font-size:12px;color:#cbd5e1;gap:8px;">
+                        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cam.name} • ${cam.snapshotUrl}</div>
+                        <div style="display:flex;gap:8px;">
+                            <a href="${cam.snapshotUrl}" target="_blank" rel="noopener noreferrer" style="color:#93c5fd;text-decoration:none;">Open External</a>
+                            <button onclick="closeCctvSourcePage()" style="background:#1f2937;color:#fff;border:1px solid #334155;border-radius:4px;padding:4px 8px;cursor:pointer;">Close</button>
+                        </div>
+                    </div>
+                    <div style="position:relative;flex:1;background:#000;">
+                        <iframe src="${cam.snapshotUrl}" style="width:100%;height:100%;border:0;background:#000;" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                        <div style="position:absolute;left:10px;bottom:10px;background:rgba(15,23,42,0.85);color:#cbd5e1;padding:6px 8px;border-radius:6px;font-size:11px;max-width:460px;">
+                            If this frame is blank, the site blocks embedding (X-Frame-Options/CSP). Use Open External.
+                        </div>
+                    </div>
+                </div>
+            `;
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeCctvSourcePage();
+            });
+            document.body.appendChild(modal);
         }
 
         async function renderCctvImage(camId, mode='snapshot') {
