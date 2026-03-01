@@ -2078,10 +2078,6 @@ out body;
                 }
 
                 const probeList = cams.filter(c => !!c.snapshotUrl).slice(0, CCTV_STATUS_PROBE_LIMIT);
-                await Promise.allSettled(probeList.map(async (cam) => {
-                    cam.status = await checkCameraOnline(cam);
-                    cctvCameras[cam.id] = cam;
-                }));
 
                 for (const cam of cams) {
                     if (cam.status === 'ONLINE') online++;
@@ -2103,6 +2099,18 @@ out body;
                 updateCctvPanel();
                 const finalVisible = cams.filter(c => cctvMarkers[c.id] && map?.hasLayer(cctvMarkers[c.id])).length;
                 debugLog(`📹 CCTV render: total=${cams.length} visible=${finalVisible} probed=${probeList.length} osm=${cams.filter(c=>c.sourceType==='OSM').length} public=${cams.filter(c=>c.sourceType!=='OSM').length} online=${online} offline=${offline} unknown=${unknown} layerVisible.cctv=${layerVisible.cctv} markersAdded=${markersAdded} conesAdded=${conesAdded}`);
+
+                // Probe status asynchronously so marker rendering is never blocked.
+                Promise.allSettled(probeList.map(async (cam) => {
+                    cam.status = await checkCameraOnline(cam);
+                    cctvCameras[cam.id] = cam;
+                })).then(() => {
+                    updateCctvPanel();
+                }).catch((e) => {
+                    debugLog(`📹 CCTV async probe error: ${e}`);
+                });
+            } catch (e) {
+                debugLog(`📹 CCTV render exception: ${e}`);
             } finally {
                 cctvRenderInFlight = false;
                 if (cctvPendingRender) {
