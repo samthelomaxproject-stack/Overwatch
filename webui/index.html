@@ -1859,6 +1859,12 @@ ALPHA-3 | REAR"></textarea>
             return Cesium.Color.fromCssColorString(satGroupColorCss(group));
         }
 
+        function isIssSatellite(s) {
+            const name = String(s?.name || '').toLowerCase();
+            const norad = String(s?.norad || '');
+            return norad === '25544' || name.includes('iss') || name.includes('zarya');
+        }
+
         function parseTleText(tleText, group) {
             const lines = String(tleText || '').split('\n').map(l => l.trim()).filter(Boolean);
             const out = [];
@@ -1945,11 +1951,14 @@ ALPHA-3 | REAR"></textarea>
                 if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
                 activeIds.add(s.id);
                 const color = '#ffea00'; // hard-force yellow on tactical map
+                const iss = isIssSatellite(s);
                 const icon = L.divIcon({
-                    className: 'sat-marker',
-                    html: `<div style="width:16px;height:16px;border-radius:50%;background:${color} !important;border:2px solid #111;box-shadow:0 0 10px rgba(255,234,0,0.75),0 0 8px rgba(0,0,0,0.65);"></div>`,
-                    iconSize: [16,16],
-                    iconAnchor:[8,8]
+                    className: `sat-marker ${iss ? 'sat-iss' : ''}`,
+                    html: iss
+                        ? `<div style="width:20px;height:20px;border-radius:6px;background:#ffffff;border:2px solid #0ea5e9;box-shadow:0 0 12px rgba(14,165,233,0.85),0 0 8px rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;">🛰️</div>`
+                        : `<div style="width:16px;height:16px;border-radius:50%;background:${color} !important;border:2px solid #111;box-shadow:0 0 10px rgba(255,234,0,0.75),0 0 8px rgba(0,0,0,0.65);"></div>`,
+                    iconSize: iss ? [20,20] : [16,16],
+                    iconAnchor: iss ? [10,10] : [8,8]
                 });
                 if (!satMarkers[s.id]) {
                     satMarkers[s.id] = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1500 });
@@ -3387,7 +3396,8 @@ out body;
             if (!cesiumViewer || !p) return;
             const altMeters = Math.max(1000, (p.altKm || 0) * 1000);
             const label = `${s.name}\nNORAD ${s.norad || '?'}`;
-            const color = Cesium.Color.fromCssColorString('#ffea00');
+            const iss = isIssSatellite(s);
+            const color = iss ? Cesium.Color.fromCssColorString('#38bdf8') : Cesium.Color.fromCssColorString('#ffea00');
 
             if (cesiumSatEntities[s.id]) {
                 const entity = cesiumSatEntities[s.id];
@@ -3400,7 +3410,7 @@ out body;
                     id: 'sat_' + s.id,
                     position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altMeters),
                     point: {
-                        pixelSize: 8,
+                        pixelSize: iss ? 12 : 8,
                         color: color,
                         outlineColor: Cesium.Color.WHITE,
                         outlineWidth: 1,
