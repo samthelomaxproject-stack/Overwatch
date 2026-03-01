@@ -1851,13 +1851,8 @@ ALPHA-3 | REAR"></textarea>
         }
 
         function satGroupColorCss(group) {
-            const g = String(group || '').toLowerCase();
-            if (g === 'stations') return '#22d3ee';
-            if (g === 'weather') return '#34d399';
-            if (g === 'starlink') return '#a78bfa';
-            if (g === 'military') return '#f97316';
-            if (g === 'active') return '#facc15';
-            return '#e5e7eb';
+            // User preference: all satellites yellow on map/UI.
+            return '#facc15';
         }
 
         function satGroupColorCesium(group) {
@@ -1994,6 +1989,43 @@ ALPHA-3 | REAR"></textarea>
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
             localStorage.setItem('sat:maxMarkers', String(satMaxMarkers));
             renderSatLayer(true);
+        }
+
+        async function satFetchByNorad(catnr, label='Special') {
+            try {
+                const resp = await fetch(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${encodeURIComponent(catnr)}&FORMAT=TLE`);
+                if (!resp.ok) return null;
+                const txt = await resp.text();
+                const items = parseTleText(txt, 'special');
+                if (!items.length) return null;
+                const sat = items[0];
+                sat.name = sat.name || label;
+                satCatalog = [sat, ...satCatalog.filter(x => x.id !== sat.id)];
+                satIndexById[sat.id] = sat;
+                await renderSatLayer(false);
+                return sat;
+            } catch (_) { return null; }
+        }
+
+        async function satQuickPick(kind) {
+            const mapNorad = {
+                iss: { id: '25544', q: 'ISS' },
+                hubble: { id: '20580', q: 'HUBBLE' },
+                noaa: { id: '28654', q: 'NOAA' },
+                landsat: { id: '39084', q: 'LANDSAT' }
+            };
+            const hit = mapNorad[String(kind||'').toLowerCase()];
+            if (!hit) return;
+
+            if (!layerVisible.sat) toggleLayer('sat', true);
+            if (!satCatalog.length) await renderSatLayer(false);
+
+            let found = satCatalog.find(s => s.name.toLowerCase().includes(hit.q.toLowerCase()) || String(s.norad) === hit.id);
+            if (!found) {
+                const fetched = await satFetchByNorad(hit.id, hit.q);
+                if (fetched) found = fetched;
+            }
+            if (found) satSearchPick(found.name || hit.q);
         }
 
         function satBuildOrbitPoints(s, minutes=90, stepSec=180) {
@@ -3828,18 +3860,11 @@ out body;
                                 <input id="satMaxInput" type="number" min="20" max="500" value="${satMaxMarkers}" style="width:80px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:0.75rem;" />
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satApplySettings()">Apply</button>
                             </div>
-                            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:0.72rem;color:var(--text-secondary);">
-                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#22d3ee;margin-right:4px;"></span>Stations</span>
-                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#34d399;margin-right:4px;"></span>Weather</span>
-                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#a78bfa;margin-right:4px;"></span>Starlink</span>
-                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f97316;margin-right:4px;"></span>Military</span>
-                                <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#facc15;margin-right:4px;"></span>Active</span>
-                            </div>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satSearchPick('ISS')">ISS</button>
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satSearchPick('HUBBLE')">HUBBLE</button>
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satSearchPick('NOAA')">NOAA</button>
-                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satSearchPick('LANDSAT')">LANDSAT</button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satQuickPick('iss')">ISS</button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satQuickPick('hubble')">HUBBLE</button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satQuickPick('noaa')">NOAA</button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="satQuickPick('landsat')">LANDSAT</button>
                                 <input id="satSearchInput" list="satSearchList" placeholder="Search satellite name or NORAD..." style="flex:1;min-width:220px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:6px 8px;border-radius:4px;font-size:0.75rem;" oninput="satSearchPick(this.value)" />
                                 <datalist id="satSearchList"></datalist>
                             </div>
