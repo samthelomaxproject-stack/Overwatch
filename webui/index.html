@@ -1628,6 +1628,7 @@ ALPHA-3 | REAR"></textarea>
         const CCTV_AUTO_MIN_ZOOM = 13; // avoid planet-scale pulls
         const CCTV_AUTO_MIN_FETCH_INTERVAL_MS = 10_000;
         const CCTV_MAX_BBOX_DEG2 = 0.08; // guardrail for large viewports
+        const CCTV_MAX_CAMERAS_PER_FETCH = 80; // cap to prevent render-crash on dense areas
         const OVERPASS_REQUEST_TIMEOUT_MS = 12000;
         const OVERPASS_ENDPOINTS = [
             'https://overpass-api.de/api/interpreter',
@@ -1888,6 +1889,13 @@ out body;
                 debugLog(`📹 CCTV using stale cache fallback: ${items.length} cameras (${Math.round((Date.now()-cached.ts)/60000)} min old)`);
             }
 
+            // Cap to prevent render crash in dense areas — keep higher-quality feeds first
+            if (items.length > CCTV_MAX_CAMERAS_PER_FETCH) {
+                items.sort((a, b) => (b.snapshotUrl ? 1 : 0) - (a.snapshotUrl ? 1 : 0));
+                items = items.slice(0, CCTV_MAX_CAMERAS_PER_FETCH);
+                debugLog(`📹 CCTV capped to ${CCTV_MAX_CAMERAS_PER_FETCH} cameras (dense area)`);
+            }
+
             debugLog(`📹 CCTV total cameras prepared: ${items.length}`);
             localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
             cctvFetchInFlight = false;
@@ -1924,36 +1932,54 @@ out body;
             return cam.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
         }
 
+        function isEarthcamFeed(cam) {
+            const u = String(cam.snapshotUrl || cam.tags?.['contact:webcam'] || cam.tags?.['website'] || '').toLowerCase();
+            return u.includes('earthcam');
+        }
+
         function bindCctvPopup(marker, cam) {
             const hasFeed = !!cam.snapshotUrl;
             const feedType = detectFeedType(cam.snapshotUrl);
+            const isEartcam = isEarthcamFeed(cam);
             const sourceBadge = cam.sourceType === 'OSM'
                 ? '<span style="color:#f59e0b;">OSM</span>'
                 : '<span style="color:#60a5fa;">PUBLIC</span>';
             const statusColor = getCctvStatusColor(cam.status);
-            const snapshotDisabled = (!hasFeed || feedType === 'rtsp' || feedType === 'hls' || feedType === 'video') ? 'disabled' : '';
-            const liveDisabled = (!hasFeed || feedType === 'rtsp') ? 'disabled' : '';
+            const snapshotDisabled = (!hasFeed || feedType === 'rtsp' || feedType === 'hls' || feedType === 'video' || isEartcam) ? 'disabled' : '';
+            const liveDisabled = (!hasFeed || feedType === 'rtsp' || isEartcam) ? 'disabled' : '';
             const sourceDisabled = !hasFeed ? 'disabled' : '';
-            const feedLabel = hasFeed ? `feed: ${feedType}` : 'feed: none';
+            const feedLabel = hasFeed ? `feed: ${feedType}${isEartcam ? ' • EarthCam' : ''}` : 'feed: none';
+            const liveTitle = isEartcam ? 'EarthCam does not allow direct live embedding' : '';
             const html = `
-                <div style="min-width:320px;">
+                <div style="min-width:340px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                         <div style="font-weight:700;">${cam.name}</div>
                         <div style="font-size:11px;font-weight:700;color:${statusColor};">${cam.status || 'UNKNOWN'}</div>
                     </div>
                     <div style="font-size:12px;color:#888;margin-bottom:6px;">${sourceBadge} • ${cam.source} • Bearing ${Math.round(cam.bearing)}° • FOV ${Math.round(cam.fov)}° • ${feedLabel}</div>
-                    <div id="cctv-img-${cam.id}" style="height:150px;background:#111;border:1px solid #333;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px;">
-                        ${hasFeed ? 'Click Live' : 'No feed URL available'}
+                    <div id="cctv-img-${cam.id}" style="position:relative;height:180px;min-height:100px;resize:vertical;overflow:hidden;background:#111;border:1px solid #333;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px;">
+                        ${hasFeed ? (isEartcam ? 'EarthCam — use Open Source In-App' : 'Click Live') : 'No feed URL available'}
+                        ${hasFeed ? `<button onclick="cctvToggleFullscreen('${cam.id}')" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.55);border:1px solid #334155;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;color:#e2e8f0;">⛶ FS</button>` : ''}
                     </div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;">
                         <button onclick="startCctvSnapshot('${cam.id}')" ${snapshotDisabled}>Snapshot 60s</button>
-                        <button onclick="startCctvLive('${cam.id}')" ${liveDisabled}>Go Live</button>
+                        <button onclick="startCctvLive('${cam.id}')" ${liveDisabled} title="${liveTitle}">Go Live</button>
                         <button onclick="openCctvSourcePage('${cam.id}')" ${sourceDisabled}>Open Source In-App</button>
                         <button onclick="stopCctvFeed('${cam.id}')">Stop</button>
                     </div>
                 </div>
             `;
             marker.bindPopup(html);
+        }
+
+        function cctvToggleFullscreen(camId) {
+            const container = document.getElementById(`cctv-img-${camId}`);
+            if (!container) return;
+            if (!document.fullscreenElement) {
+                container.requestFullscreen?.() || container.webkitRequestFullscreen?.();
+            } else {
+                document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+            }
         }
 
         function renderCctvCamera(cam) {
