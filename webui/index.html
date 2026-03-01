@@ -1605,6 +1605,39 @@ ALPHA-3 | REAR"></textarea>
 
         const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+        // DOT/Public catalog fallback (non-OSM)
+        // These can be replaced by a live API response when available.
+        const PUBLIC_CAMERA_CATALOG = [
+            { id: 'dot-fwy-121-main', name: 'DOT Cam • SH-121 @ Main', lat: 33.1709, lon: -96.8341, bearing: 95, fov: 65, range: 220, source: 'DOT/Public', snapshotUrl: null },
+            { id: 'dot-legacy-dr-tollway', name: 'DOT Cam • Legacy @ Tollway', lat: 33.0778, lon: -96.8240, bearing: 180, fov: 70, range: 220, source: 'DOT/Public', snapshotUrl: null },
+            { id: 'dot-us75-eldorado', name: 'DOT Cam • US-75 @ Eldorado', lat: 33.1739, lon: -96.6688, bearing: 180, fov: 65, range: 230, source: 'DOT/Public', snapshotUrl: null },
+        ];
+
+        function isInBbox(lat, lon, b) {
+            return lat >= parseFloat(b.s) && lat <= parseFloat(b.n) && lon >= parseFloat(b.w) && lon <= parseFloat(b.e);
+        }
+
+        async function fetchPublicTrafficCameras() {
+            const b = currentMapBbox();
+            if (!b) return [];
+            // TODO: swap to live DOT/public API source when available.
+            return PUBLIC_CAMERA_CATALOG.filter(c => isInBbox(c.lat, c.lon, b)).map(c => ({
+                ...c,
+                sourceType: 'PUBLIC',
+            }));
+        }
+
+        async function checkCameraOnline(cam) {
+            if (!cam.snapshotUrl) return 'OFFLINE';
+            return await new Promise((resolve) => {
+                const img = new Image();
+                const timeout = setTimeout(() => resolve('OFFLINE'), 5000);
+                img.onload = () => { clearTimeout(timeout); resolve('ONLINE'); };
+                img.onerror = () => { clearTimeout(timeout); resolve('OFFLINE'); };
+                img.src = `${cam.snapshotUrl}${cam.snapshotUrl.includes('?') ? '&' : '?'}probe=${Date.now()}`;
+            });
+        }
+
         function currentMapBbox() {
             if (!map) return null;
             const b = map.getBounds();
@@ -1634,7 +1667,7 @@ ALPHA-3 | REAR"></textarea>
                 } catch(e) {}
             }
 
-            // Overpass query: nodes tagged surveillance=camera within bbox
+            // Overpass query: OSM surveillance camera points in bbox
             const q = `
 [out:json][timeout:25];
 (
@@ -1644,6 +1677,7 @@ ALPHA-3 | REAR"></textarea>
 out body tags;
             `.trim();
 
+            let osmItems = [];
             try {
                 const resp = await fetch('https://overpass-api.de/api/interpreter', {
                     method: 'POST',
@@ -1652,32 +1686,40 @@ out body tags;
                 });
                 if (!resp.ok) throw new Error(`Overpass ${resp.status}`);
                 const data = await resp.json();
-                const items = (data.elements || []).map(e => {
+                osmItems = (data.elements || []).map(e => {
                     const t = e.tags || {};
                     const bearing = parseFloat(t.direction || t.camera_direction || t['camera:direction'] || '0') || 0;
                     const fov = parseFloat(t['camera:angle'] || t['camera:fov'] || '60') || 60;
                     const range = parseFloat(t['camera:range_m'] || '120') || 120;
                     const snapshotUrl = t['camera:url'] || t['surveillance:feed'] || t['image'] || t['url'] || null;
                     return {
-                        id: String(e.id),
+                        id: `osm-${String(e.id)}`,
                         lat: e.lat,
                         lon: e.lon,
-                        name: t.name || `CCTV-${e.id}`,
+                        name: t.name || `OSM CCTV-${e.id}`,
                         bearing,
                         fov,
                         range,
-                        source: t.operator || 'OSINT',
+                        source: t.operator || 'OSM',
+                        sourceType: 'OSM',
                         snapshotUrl,
+                        status: snapshotUrl ? 'UNKNOWN' : 'OFFLINE',
                         tags: t
                     };
                 });
-
-                localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
-                return items;
             } catch (e) {
-                debugLog('CCTV fetch failed: ' + e);
-                return [];
+                debugLog('CCTV OSM fetch failed: ' + e);
             }
+
+            // DOT/public camera feed source (fallback catalog for now)
+            const publicItems = await fetchPublicTrafficCameras();
+            publicItems.forEach(c => {
+                c.status = c.snapshotUrl ? 'UNKNOWN' : 'OFFLINE';
+            });
+
+            const items = [...osmItems, ...publicItems];
+            localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+            return items;
         }
 
         function conePolygon(lat, lon, bearingDeg, fovDeg, rangeM) {
@@ -1697,10 +1739,17 @@ out body tags;
 
         function bindCctvPopup(marker, cam) {
             const hasFeed = !!cam.snapshotUrl;
+            const sourceBadge = cam.sourceType === 'OSM'
+                ? '<span style="color:#f59e0b;">OSM</span>'
+                : '<span style="color:#60a5fa;">PUBLIC</span>';
+            const statusColor = cam.status === 'ONLINE' ? '#22c55e' : cam.status === 'OFFLINE' ? '#ef4444' : '#eab308';
             const html = `
-                <div style="min-width:280px;">
-                    <div style="font-weight:700;margin-bottom:6px;">${cam.name}</div>
-                    <div style="font-size:12px;color:#888;margin-bottom:6px;">${cam.source} • Bearing ${Math.round(cam.bearing)}° • FOV ${Math.round(cam.fov)}°</div>
+                <div style="min-width:300px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <div style="font-weight:700;">${cam.name}</div>
+                        <div style="font-size:11px;font-weight:700;color:${statusColor};">${cam.status || 'UNKNOWN'}</div>
+                    </div>
+                    <div style="font-size:12px;color:#888;margin-bottom:6px;">${sourceBadge} • ${cam.source} • Bearing ${Math.round(cam.bearing)}° • FOV ${Math.round(cam.fov)}°</div>
                     <div id="cctv-img-${cam.id}" style="height:150px;background:#111;border:1px solid #333;display:flex;align-items:center;justify-content:center;color:#777;font-size:12px;">
                         ${hasFeed ? 'Click Snapshot' : 'No feed URL available'}
                     </div>
@@ -1718,29 +1767,34 @@ out body tags;
             if (!map) return;
             cctvCameras[cam.id] = cam;
 
+            const sourceColor = cam.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
+
             if (!cctvMarkers[cam.id]) {
                 const icon = L.divIcon({
                     className: 'cctv-marker',
-                    html: `<div style="width:16px;height:16px;border-radius:50%;background:#ff4d4f;border:2px solid white;"></div>`,
+                    html: `<div style="width:16px;height:16px;border-radius:50%;background:${sourceColor};border:2px solid white;"></div>`,
                     iconSize: [16, 16],
                     iconAnchor: [8, 8]
                 });
                 const marker = L.marker([cam.lat, cam.lon], { icon });
                 bindCctvPopup(marker, cam);
                 cctvMarkers[cam.id] = marker;
+            } else {
+                bindCctvPopup(cctvMarkers[cam.id], cam); // refresh status/source in popup
             }
 
             const cone = conePolygon(cam.lat, cam.lon, cam.bearing, cam.fov, cam.range);
             if (!cctvCones[cam.id]) {
                 cctvCones[cam.id] = L.polygon(cone, {
-                    color: '#ff4d4f',
+                    color: sourceColor,
                     weight: 1,
                     opacity: 0.8,
-                    fillColor: '#ff4d4f',
+                    fillColor: sourceColor,
                     fillOpacity: 0.18
                 });
             } else {
                 cctvCones[cam.id].setLatLngs(cone);
+                cctvCones[cam.id].setStyle({ color: sourceColor, fillColor: sourceColor });
             }
 
             if (layerVisible.cctv) {
@@ -1751,8 +1805,48 @@ out body tags;
 
         async function renderCctvLayer(force=false) {
             const cams = await fetchCctvCameras(force);
-            cams.forEach(renderCctvCamera);
-            debugLog(`📹 CCTV layer: ${cams.length} cameras loaded`);
+            // Update online/offline status for each camera
+            for (const cam of cams) {
+                cam.status = await checkCameraOnline(cam);
+                renderCctvCamera(cam);
+            }
+            updateCctvPanel();
+            debugLog(`📹 CCTV layer: ${cams.length} cameras loaded (${cams.filter(c=>c.sourceType==='OSM').length} OSM / ${cams.filter(c=>c.sourceType!=='OSM').length} Public)`);
+        }
+
+        function updateCctvPanel() {
+            const cams = Object.values(cctvCameras);
+            const total = cams.length;
+            const osm = cams.filter(c => c.sourceType === 'OSM').length;
+            const pub = cams.filter(c => c.sourceType !== 'OSM').length;
+            const online = cams.filter(c => c.status === 'ONLINE').length;
+            const offline = cams.filter(c => c.status === 'OFFLINE').length;
+
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
+            set('cctvTotalCount', total);
+            set('cctvOsmCount', osm);
+            set('cctvPublicCount', pub);
+            set('cctvOnlineCount', online);
+            set('cctvOfflineCount', offline);
+
+            const list = document.getElementById('cctvList');
+            if (list) {
+                if (cams.length === 0) {
+                    list.innerHTML = '<div style="padding:10px;color:var(--text-muted);">No CCTV cameras loaded in current map area</div>';
+                } else {
+                    list.innerHTML = cams
+                        .sort((a,b) => (a.status === 'ONLINE' ? -1 : 1) - (b.status === 'ONLINE' ? -1 : 1))
+                        .map(c => {
+                            const sourceColor = c.sourceType === 'OSM' ? '#f59e0b' : '#60a5fa';
+                            const statusColor = c.status === 'ONLINE' ? '#22c55e' : c.status === 'OFFLINE' ? '#ef4444' : '#eab308';
+                            return `<div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:0.72rem;align-items:center;">
+                                <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${c.name}</span>
+                                <span style="color:${sourceColor};font-weight:700;">${c.sourceType}</span>
+                                <span style="color:${statusColor};font-weight:700;">${c.status}</span>
+                            </div>`;
+                        }).join('');
+                }
+            }
         }
 
         function clearCctvLayer() {
@@ -2841,6 +2935,30 @@ out body tags;
                             <div style="font-size:0.7rem;color:var(--text-muted);margin:var(--space-md) 0 6px;letter-spacing:0.05em;">SELECTED TILE</div>
                             <div id="wifiDetailPanel" style="padding:var(--space-sm);background:rgba(0,0,0,0.3);border-radius:4px;font-size:0.75rem;color:var(--text-secondary);">
                                 Click a point on the heatmap
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CCTV Panel -->
+                    <div class="tac-panel" style="grid-column: 1 / -1;">
+                        <div class="tac-panel-header">
+                            <span class="tac-panel-title">📹 CCTV (OSINT + Public)</span>
+                            <div style="display:flex;gap:6px;">
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="toggleLayer('cctv')">${layerVisible.cctv ? 'CCTV ON' : 'CCTV OFF'}</button>
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="renderCctvLayer(true)">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="tac-panel-body">
+                            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-sm);text-align:center;margin-bottom:var(--space-md);">
+                                <div><div style="font-size:1.2rem;font-weight:700;color:var(--accent-cyan);" id="cctvTotalCount">0</div><div class="tac-label">TOTAL</div></div>
+                                <div><div style="font-size:1.0rem;font-weight:700;color:#f59e0b;" id="cctvOsmCount">0</div><div class="tac-label">OSM</div></div>
+                                <div><div style="font-size:1.0rem;font-weight:700;color:#60a5fa;" id="cctvPublicCount">0</div><div class="tac-label">PUBLIC</div></div>
+                                <div><div style="font-size:1.0rem;font-weight:700;color:#22c55e;" id="cctvOnlineCount">0</div><div class="tac-label">ONLINE</div></div>
+                                <div><div style="font-size:1.0rem;font-weight:700;color:#ef4444;" id="cctvOfflineCount">0</div><div class="tac-label">OFFLINE</div></div>
+                            </div>
+                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.05em;">CAMERAS IN VIEW (toggle layer ON to display)</div>
+                            <div id="cctvList" style="font-family:var(--font-mono);font-size:0.75rem;max-height:220px;overflow-y:auto;color:var(--text-secondary);border:1px solid rgba(255,255,255,0.06);border-radius:4px;">
+                                <div style="padding:10px;color:var(--text-muted);">No CCTV cameras loaded yet</div>
                             </div>
                         </div>
                     </div>
