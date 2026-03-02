@@ -1662,7 +1662,10 @@ ALPHA-3 | REAR"></textarea>
 
         const CCTV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
         const CCTV_STALE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d fallback on API failure
-        const CCTV_AUTO_MIN_ZOOM = 13; // avoid planet-scale pulls
+        let CCTV_AUTO_MIN_ZOOM = (() => {
+            const saved = parseInt(localStorage.getItem('cctv:minZoom') || '13', 10);
+            return Number.isFinite(saved) ? Math.max(3, Math.min(20, saved)) : 13;
+        })(); // avoid planet-scale pulls
         const CCTV_AUTO_MIN_FETCH_INTERVAL_MS = 10_000;
         const CCTV_MAX_BBOX_DEG2 = 0.08; // guardrail for large viewports
         let CCTV_MAX_CAMERAS_PER_FETCH = (() => {
@@ -2539,6 +2542,17 @@ out body;
             input.value = String(CCTV_MAX_CAMERAS_PER_FETCH);
             localStorage.setItem('cctv:maxPerFetch', String(CCTV_MAX_CAMERAS_PER_FETCH));
             debugLog(`📹 CCTV max-per-fetch set to ${CCTV_MAX_CAMERAS_PER_FETCH}`);
+            renderCctvLayer(true);
+        }
+
+        function applyCctvMinZoom() {
+            const input = document.getElementById('cctvMinZoomInput');
+            if (!input) return;
+            const next = parseInt(input.value || String(CCTV_AUTO_MIN_ZOOM), 10);
+            CCTV_AUTO_MIN_ZOOM = Number.isFinite(next) ? Math.max(3, Math.min(20, next)) : CCTV_AUTO_MIN_ZOOM;
+            input.value = String(CCTV_AUTO_MIN_ZOOM);
+            localStorage.setItem('cctv:minZoom', String(CCTV_AUTO_MIN_ZOOM));
+            debugLog(`📹 CCTV min zoom set to ${CCTV_AUTO_MIN_ZOOM}`);
             renderCctvLayer(true);
         }
 
@@ -3963,10 +3977,13 @@ out body;
                                 <div><div style="font-size:1.0rem;font-weight:700;color:#22c55e;" id="cctvOnlineCount">0</div><div class="tac-label">ONLINE</div></div>
                                 <div><div style="font-size:1.0rem;font-weight:700;color:#ef4444;" id="cctvOfflineCount">0</div><div class="tac-label">OFFLINE</div></div>
                             </div>
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                                 <div style="font-size:0.7rem;color:var(--text-muted);letter-spacing:0.05em;">MAX CAMERAS/FETCH</div>
                                 <input id="cctvMaxPerFetchInput" type="number" min="20" max="500" step="10" value="${CCTV_MAX_CAMERAS_PER_FETCH}" style="width:88px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:0.75rem;" />
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="applyCctvMaxPerFetch()">Apply</button>
+                                <div style="font-size:0.7rem;color:var(--text-muted);letter-spacing:0.05em;margin-left:8px;">MIN ZOOM TO RENDER</div>
+                                <input id="cctvMinZoomInput" type="number" min="3" max="20" step="1" value="${CCTV_AUTO_MIN_ZOOM}" style="width:72px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.18);color:var(--text-primary);padding:4px 6px;border-radius:4px;font-size:0.75rem;" />
+                                <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="applyCctvMinZoom()">Apply</button>
                             </div>
                             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:0.75rem;">
                                 <label><input data-cctv-source type="checkbox" value="dot" ${cctvPublicSourceEnabled.dot ? 'checked' : ''}/> DOT</label>
