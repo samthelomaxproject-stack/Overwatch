@@ -1693,6 +1693,7 @@ ALPHA-3 | REAR"></textarea>
                 return { ...CCTV_PUBLIC_SOURCE_DEFAULTS, ...(saved || {}) };
             } catch (_) { return { ...CCTV_PUBLIC_SOURCE_DEFAULTS }; }
         })();
+        let cctvAggressiveDiscovery = localStorage.getItem('cctv:aggressiveDiscovery') === '1';
 
         const PUBLIC_CAMERA_CATALOG = [
             // DOT/traffic samples
@@ -1722,6 +1723,18 @@ ALPHA-3 | REAR"></textarea>
             { id: 'attr-zoo-berlin', name: 'Berlin Zoo Area Cam', lat: 52.5080, lon: 13.3370, bearing: 150, fov: 65, range: 300, source: 'Attraction', sourceCategory: 'attraction', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/deutschland/berlin/berlin/berlin-zoo.html' },
         ];
 
+
+        const PUBLIC_CAMERA_CATALOG_AGGRESSIVE = [
+            { id: 'agg-nyc-midtown', name: 'NYC Midtown Streets Cam', lat: 40.7540, lon: -73.9845, bearing: 200, fov: 65, range: 300, source: 'Aggressive/Public', sourceCategory: 'tourism', snapshotUrl: 'https://www.earthcam.com/usa/newyork/midtown/' },
+            { id: 'agg-paris-eiffel', name: 'Paris Eiffel Area Cam', lat: 48.8583, lon: 2.2945, bearing: 160, fov: 70, range: 500, source: 'Aggressive/Public', sourceCategory: 'tourism', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/france/ile-de-france/paris/tour-eiffel.html' },
+            { id: 'agg-rome-colosseum', name: 'Rome Colosseum Cam', lat: 41.8902, lon: 12.4922, bearing: 180, fov: 65, range: 300, source: 'Aggressive/Public', sourceCategory: 'tourism', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/italia/lazio/roma/colosseo.html' },
+            { id: 'agg-rio-copacabana', name: 'Rio Copacabana Cam', lat: -22.9711, lon: -43.1822, bearing: 120, fov: 75, range: 600, source: 'Aggressive/Public', sourceCategory: 'weather', snapshotUrl: 'https://www.earthcam.com/world/brazil/riodejaneiro/' },
+            { id: 'agg-cape-town-waterfront', name: 'Cape Town Waterfront Cam', lat: -33.9032, lon: 18.4207, bearing: 130, fov: 70, range: 700, source: 'Aggressive/Public', sourceCategory: 'marina', snapshotUrl: 'https://www.earthcam.com/world/southafrica/capetown/' },
+            { id: 'agg-hongkong-harbor', name: 'Hong Kong Harbor Cam', lat: 22.2930, lon: 114.1694, bearing: 180, fov: 70, range: 700, source: 'Aggressive/Public', sourceCategory: 'marina', snapshotUrl: 'https://www.skylinewebcams.com/en/webcam/china/hong-kong/hong-kong/victoria-harbour.html' },
+            { id: 'agg-singapore-bay', name: 'Singapore Bay Cam', lat: 1.2834, lon: 103.8607, bearing: 220, fov: 70, range: 700, source: 'Aggressive/Public', sourceCategory: 'tourism', snapshotUrl: 'https://www.earthcam.com/world/singapore/' },
+            { id: 'agg-telaviv-promenade', name: 'Tel Aviv Promenade Cam', lat: 32.0770, lon: 34.7680, bearing: 260, fov: 70, range: 500, source: 'Aggressive/Public', sourceCategory: 'weather', snapshotUrl: 'https://www.earthcam.com/world/israel/telaviv/' },
+        ];
+
         function isInBbox(lat, lon, b) {
             return lat >= parseFloat(b.s) && lat <= parseFloat(b.n) && lon >= parseFloat(b.w) && lon <= parseFloat(b.e);
         }
@@ -1731,15 +1744,21 @@ ALPHA-3 | REAR"></textarea>
             checks.forEach(ch => {
                 cctvPublicSourceEnabled[ch.value] = !!ch.checked;
             });
+            const aggressive = document.getElementById('cctvAggressiveDiscovery');
+            cctvAggressiveDiscovery = !!aggressive?.checked;
             localStorage.setItem('cctv:publicSources', JSON.stringify(cctvPublicSourceEnabled));
-            debugLog(`📹 CCTV public sources: ${Object.entries(cctvPublicSourceEnabled).filter(([,v]) => v).map(([k]) => k).join(',')}`);
+            localStorage.setItem('cctv:aggressiveDiscovery', cctvAggressiveDiscovery ? '1' : '0');
+            debugLog(`📹 CCTV public sources: ${Object.entries(cctvPublicSourceEnabled).filter(([,v]) => v).map(([k]) => k).join(',')} aggressive=${cctvAggressiveDiscovery}`);
             renderCctvLayer(true);
         }
 
         async function fetchPublicTrafficCameras() {
             const b = currentMapBbox();
             if (!b) return [];
-            return PUBLIC_CAMERA_CATALOG
+            const merged = cctvAggressiveDiscovery
+                ? [...PUBLIC_CAMERA_CATALOG, ...PUBLIC_CAMERA_CATALOG_AGGRESSIVE]
+                : PUBLIC_CAMERA_CATALOG;
+            return merged
                 .filter(c => isInBbox(c.lat, c.lon, b))
                 .filter(c => cctvPublicSourceEnabled[c.sourceCategory] !== false)
                 .map(c => ({
@@ -3955,6 +3974,7 @@ out body;
                                 <label><input data-cctv-source type="checkbox" value="tourism" ${cctvPublicSourceEnabled.tourism ? 'checked' : ''}/> Tourism</label>
                                 <label><input data-cctv-source type="checkbox" value="marina" ${cctvPublicSourceEnabled.marina ? 'checked' : ''}/> Marina</label>
                                 <label><input data-cctv-source type="checkbox" value="attraction" ${cctvPublicSourceEnabled.attraction ? 'checked' : ''}/> Attractions</label>
+                                <label title="Higher coverage, lower reliability / more dead links"><input id="cctvAggressiveDiscovery" type="checkbox" ${cctvAggressiveDiscovery ? 'checked' : ''}/> Aggressive Discovery</label>
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" onclick="applyCctvPublicSources()">Apply Sources</button>
                             </div>
                             <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:6px;letter-spacing:0.05em;">CAMERAS IN VIEW (toggle layer ON to display)</div>
@@ -4011,6 +4031,8 @@ out body;
             syncCctvUiState();
             updateSatPanel();
             document.querySelectorAll('input[data-cctv-source]').forEach(chk => { chk.checked = cctvPublicSourceEnabled[chk.value] !== false; });
+            const ag = document.getElementById('cctvAggressiveDiscovery');
+            if (ag) ag.checked = cctvAggressiveDiscovery;
             updateCctvPanel();
         }
 
