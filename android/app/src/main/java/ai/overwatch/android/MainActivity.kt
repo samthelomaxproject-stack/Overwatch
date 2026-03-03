@@ -97,7 +97,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.openMapBtn).setOnClickListener {
-            statusText.text = "Map/heatmap view is next milestone"
+            val hub = hubUrlInput.text.toString().trim().ifEmpty { ConfigStore.getHubUrl(this) }
+            val intent = Intent(this, TacticalMapActivity::class.java)
+                .putExtra(TacticalMapActivity.EXTRA_HUB_URL, hub)
+            startActivity(intent)
         }
     }
 

@@ -23,6 +23,10 @@
             android:foregroundServiceType="location" />
 
         <activity
+            android:name=".TacticalMapActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
