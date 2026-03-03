@@ -195,11 +195,13 @@ An Android scaffold now exists in `android/`.
 4. Install `app-debug.apk` on Android (allow unknown sources)
 
 Current Android MVP includes:
-- Hub URL configuration
+- Hub URL + callsign configuration
 - Wi-Fi privacy mode selector (A/B/C)
-- Collector/map control placeholders
+- Foreground collector service (location + Wi-Fi scan push loop)
+- Tactical Map button opens in-app map view (WebView to configured hub)
+- Live debug/status log relay from collector service
 
-> Note: this is a scaffold installer for iterative testing. Full tactical map + collector service wiring is the next step.
+> Note: Android is currently an MVP field client focused on collection + map access. Native tactical Android UI layers are still in progress.
 
 ## Development Roadmap
 
