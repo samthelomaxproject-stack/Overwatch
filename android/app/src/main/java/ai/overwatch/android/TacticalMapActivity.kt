@@ -48,7 +48,7 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
 
-        val html = tacticalHtml(callsign, initLat, initLon)
+        val html = tacticalHtml(callsign, baseUrl, initLat, initLon)
         runCatching {
             webView.loadDataWithBaseURL(
                 baseUrl,
@@ -85,7 +85,7 @@ class TacticalMapActivity : AppCompatActivity() {
         return best
     }
 
-    private fun tacticalHtml(callsign: String, initLat: Double, initLon: Double): String {
+    private fun tacticalHtml(callsign: String, hubBase: String, initLat: Double, initLon: Double): String {
         val callsignJs = org.json.JSONObject.quote(callsign)
         return """
 <!doctype html>
@@ -131,7 +131,7 @@ class TacticalMapActivity : AppCompatActivity() {
     </div>
     <div class="sb-row">
       <div class="sb-label">Hub</div>
-      <input id="cfgHub" class="sb-input" value="${baseUrl}" />
+      <input id="cfgHub" class="sb-input" value="${hubBase}" />
     </div>
     <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
     <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
