@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
 import android.os.Bundle
+import android.webkit.GeolocationPermissions
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Toast
@@ -39,8 +40,13 @@ class TacticalMapActivity : AppCompatActivity() {
         webView.settings.loadWithOverviewMode = true
         webView.settings.allowFileAccess = true
         webView.settings.allowContentAccess = true
+        webView.settings.setGeolocationEnabled(true)
 
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
+                callback?.invoke(origin, true, false)
+            }
+        }
 
         val html = tacticalHtml(callsign, initLat, initLon)
         runCatching {
@@ -57,7 +63,7 @@ class TacticalMapActivity : AppCompatActivity() {
     }
 
     private fun normalizeHubBase(hubUrl: String): String {
-        val fallback = "http://10.0.0.5:8789/"
+        val fallback = "http://192.168.1.143:8789/"
         if (!hubUrl.startsWith("http://") && !hubUrl.startsWith("https://")) return fallback
         return hubUrl.trimEnd('/') + "/"
     }
@@ -98,6 +104,16 @@ class TacticalMapActivity : AppCompatActivity() {
       font: 12px monospace; padding: 8px 10px;
       max-width: 60vw;
     }
+    .sidebar {
+      position: fixed; top: 8px; right: 8px; z-index: 9999;
+      width: 280px; background: rgba(11,18,32,0.9); color: #cbd5e1;
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+      font: 12px monospace; padding: 10px;
+    }
+    .sb-row { margin-bottom: 8px; }
+    .sb-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; }
+    .sb-input { width: 100%; box-sizing: border-box; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 6px; }
+    .sb-btn { width: 100%; margin-top: 6px; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 6px; }
     .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#22c55e; margin-right:6px; }
   </style>
 </head>
@@ -107,6 +123,18 @@ class TacticalMapActivity : AppCompatActivity() {
     <div><span class="dot"></span>EUD Tactical Map • ${callsign}</div>
     <div id="status">Connecting…</div>
     <div id="count">Entities: 0</div>
+  </div>
+  <div class="sidebar">
+    <div class="sb-row">
+      <div class="sb-label">Callsign</div>
+      <input id="cfgCallsign" class="sb-input" value="${callsign}" />
+    </div>
+    <div class="sb-row">
+      <div class="sb-label">Hub</div>
+      <input id="cfgHub" class="sb-input" value="${baseUrl}" />
+    </div>
+    <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
+    <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -133,7 +161,24 @@ class TacticalMapActivity : AppCompatActivity() {
 
     let cursor = 0;
     const markers = {};
+    let ownGpsMarker = null;
     let centeredOnOwn = false;
+
+    function ownCallsign() {
+      return (document.getElementById('cfgCallsign')?.value || OWN_CALLSIGN || 'ANDROID-EUD').trim();
+    }
+
+    function focusOwn() {
+      const id = ownCallsign();
+      const m = markers[id] || ownGpsMarker;
+      if (m) map.setView(m.getLatLng(), 16);
+    }
+
+    function reloadDelta() {
+      cursor = 0;
+      document.getElementById('status').textContent = 'Reconnecting hub delta…';
+      pollDelta();
+    }
 
     function parseAndroidTile(tileId) {
       if (!tileId || !tileId.startsWith('android_')) return null;
@@ -146,7 +191,7 @@ class TacticalMapActivity : AppCompatActivity() {
     }
 
     function upsertMarker(id, lat, lon, sourceType) {
-      const isOwn = String(id || '').toUpperCase() === String(OWN_CALLSIGN || '').toUpperCase();
+      const isOwn = String(id || '').toUpperCase() === String(ownCallsign() || '').toUpperCase();
       const color = isOwn ? '#22c55e' : (sourceType === 'drone' ? '#f97316' : '#60a5fa');
       const size = isOwn ? 16 : 12;
       const icon = L.divIcon({
@@ -196,6 +241,31 @@ class TacticalMapActivity : AppCompatActivity() {
       } catch (e) {
         statusEl.textContent = `Delta error: ${'$'}{e}`;
       }
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition((pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const icon = L.divIcon({
+          className: 'eud-self',
+          html: `<div style="width:18px;height:18px;border-radius:50%;background:#22c55e;border:3px solid #ffffff;box-shadow:0 0 12px rgba(34,197,94,0.8);"></div>`,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9]
+        });
+        if (!ownGpsMarker) {
+          ownGpsMarker = L.marker([lat, lon], { icon }).addTo(map);
+          ownGpsMarker.bindPopup(`<b>${'$'}{ownCallsign()}</b><br/>Live GPS`);
+        } else {
+          ownGpsMarker.setLatLng([lat, lon]);
+        }
+        if (!centeredOnOwn) {
+          map.setView([lat, lon], 16);
+          centeredOnOwn = true;
+        }
+      }, (err) => {
+        document.getElementById('status').textContent = `GPS error: ${'$'}{err.message}`;
+      }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
     }
 
     setInterval(pollDelta, 3000);

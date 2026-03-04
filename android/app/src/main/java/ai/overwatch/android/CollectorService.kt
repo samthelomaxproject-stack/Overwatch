@@ -222,19 +222,21 @@ class CollectorService : Service() {
             return
         }
 
+        // Prefer true device GPS; avoid network-provider drift (e.g., VPN/IP geolocation effects).
         runCatching {
             if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 lm.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    5_000L,
-                    5f,
+                    3_000L,
+                    3f,
                     gpsListener
                 )
             }
         }
 
+        // Keep network provider as fallback only if GPS is unavailable.
         runCatching {
-            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER) && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 lm.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
                     5_000L,
@@ -259,6 +261,12 @@ class CollectorService : Service() {
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
         ) {
             return null
+        }
+
+        // Prefer GPS provider first for true device location.
+        runCatching { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull()?.let {
+            latestLocation = it
+            return it
         }
 
         val providers = lm.getProviders(true)

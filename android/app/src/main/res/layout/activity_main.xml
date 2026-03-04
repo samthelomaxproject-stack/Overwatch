@@ -41,8 +41,8 @@
             android:id="@+id/hubUrlInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="http://10.0.0.5:8789"
-            android:text="http://10.0.0.5:8789" />
+            android:hint="http://192.168.1.143:8789"
+            android:text="http://192.168.1.143:8789" />
 
         <TextView
             android:layout_width="wrap_content"

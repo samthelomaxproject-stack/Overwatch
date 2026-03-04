@@ -10,7 +10,7 @@ object ConfigStore {
 
     fun getHubUrl(context: Context): String {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_HUB_URL, "http://10.0.0.5:8789") ?: "http://10.0.0.5:8789"
+            .getString(KEY_HUB_URL, "http://192.168.1.143:8789") ?: "http://192.168.1.143:8789"
     }
 
     fun setHubUrl(context: Context, url: String) {
