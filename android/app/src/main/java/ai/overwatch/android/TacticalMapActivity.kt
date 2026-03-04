@@ -106,7 +106,7 @@ class TacticalMapActivity : AppCompatActivity() {
       const color = sourceType === 'drone' ? '#f97316' : sourceType === 'handheld' ? '#22c55e' : '#60a5fa';
       const icon = L.divIcon({
         className: 'eud-marker',
-        html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,0.6);"></div>`,
+        html: `<div style="width:12px;height:12px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,0.6);"></div>`,
         iconSize: [12, 12],
         iconAnchor: [6, 6]
       });
@@ -117,15 +117,15 @@ class TacticalMapActivity : AppCompatActivity() {
         markers[id].setLatLng([lat, lon]);
         markers[id].setIcon(icon);
       }
-      markers[id].bindPopup(`<b>${id}</b><br/>${sourceType || 'unknown'}<br/>${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+      markers[id].bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`);
     }
 
     async function pollDelta() {
       const statusEl = document.getElementById('status');
       const countEl = document.getElementById('count');
       try {
-        const resp = await fetch(`/api/delta?device_id=android-eud-map&cursor=${cursor}`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const resp = await fetch(`/api/delta?device_id=android-eud-map&cursor=${'$'}{cursor}`);
+        if (!resp.ok) throw new Error(`HTTP ${'$'}{resp.status}`);
         const data = await resp.json();
         cursor = data.cursor || cursor;
 
@@ -141,10 +141,10 @@ class TacticalMapActivity : AppCompatActivity() {
           });
         });
 
-        statusEl.textContent = `Connected • cursor ${cursor}`;
-        countEl.textContent = `Entities: ${Object.keys(markers).length} • updates: ${seen}`;
+        statusEl.textContent = `Connected • cursor ${'$'}{cursor}`;
+        countEl.textContent = `Entities: ${'$'}{Object.keys(markers).length} • updates: ${'$'}{seen}`;
       } catch (e) {
-        statusEl.textContent = `Delta error: ${e}`;
+        statusEl.textContent = `Delta error: ${'$'}{e}`;
       }
     }
 
