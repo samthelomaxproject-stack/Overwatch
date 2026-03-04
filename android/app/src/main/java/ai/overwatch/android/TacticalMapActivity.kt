@@ -79,7 +79,9 @@ class TacticalMapActivity : AppCompatActivity() {
         return best
     }
 
-    private fun tacticalHtml(callsign: String, initLat: Double, initLon: Double): String = """
+    private fun tacticalHtml(callsign: String, initLat: Double, initLon: Double): String {
+        val callsignJs = org.json.JSONObject.quote(callsign)
+        return """
 <!doctype html>
 <html>
 <head>
@@ -109,7 +111,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const OWN_CALLSIGN = ${'$'}{JSON.stringify(callsign)};
+    const OWN_CALLSIGN = ${'$'}callsignJs;
     const map = L.map('map').setView([${initLat}, ${initLon}], 15);
 
     const layerDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -201,6 +203,7 @@ class TacticalMapActivity : AppCompatActivity() {
 </body>
 </html>
 """.trimIndent()
+    }
 
     companion object {
         const val EXTRA_HUB_URL = "extra_hub_url"
