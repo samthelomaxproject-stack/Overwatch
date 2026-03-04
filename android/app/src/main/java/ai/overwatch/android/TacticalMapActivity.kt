@@ -1,11 +1,16 @@
 package ai.overwatch.android
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 
 class TacticalMapActivity : AppCompatActivity() {
 
@@ -19,10 +24,14 @@ class TacticalMapActivity : AppCompatActivity() {
         setContentView(webView)
 
         val hub = intent.getStringExtra(EXTRA_HUB_URL)?.trim().orEmpty()
+        val callsign = intent.getStringExtra(EXTRA_CALLSIGN)?.trim().orEmpty().ifEmpty { "ANDROID-EUD" }
         val baseUrl = normalizeHubBase(hub)
+        val loc = getBestLocation()
+        val initLat = loc?.latitude ?: 32.7767
+        val initLon = loc?.longitude ?: -96.7970
 
         supportActionBar?.title = "Tactical Map"
-        supportActionBar?.subtitle = baseUrl
+        supportActionBar?.subtitle = "$callsign • $baseUrl"
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -33,7 +42,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
         webView.webChromeClient = WebChromeClient()
 
-        val html = tacticalHtml()
+        val html = tacticalHtml(callsign, initLat, initLon)
         runCatching {
             webView.loadDataWithBaseURL(
                 baseUrl,
@@ -53,7 +62,24 @@ class TacticalMapActivity : AppCompatActivity() {
         return hubUrl.trimEnd('/') + "/"
     }
 
-    private fun tacticalHtml(): String = """
+    private fun getBestLocation(): Location? {
+        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return null
+        }
+
+        val providers = runCatching { lm.getProviders(true) }.getOrDefault(emptyList())
+        var best: Location? = null
+        for (p in providers) {
+            val loc = runCatching { lm.getLastKnownLocation(p) }.getOrNull() ?: continue
+            if (best == null || loc.accuracy < best!!.accuracy) best = loc
+        }
+        return best
+    }
+
+    private fun tacticalHtml(callsign: String, initLat: Double, initLon: Double): String = """
 <!doctype html>
 <html>
 <head>
@@ -68,6 +94,7 @@ class TacticalMapActivity : AppCompatActivity() {
       background: rgba(11,18,32,0.85); color: #cbd5e1;
       border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
       font: 12px monospace; padding: 8px 10px;
+      max-width: 60vw;
     }
     .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#22c55e; margin-right:6px; }
   </style>
@@ -75,24 +102,37 @@ class TacticalMapActivity : AppCompatActivity() {
 <body>
   <div id="map"></div>
   <div class="hud">
-    <div><span class="dot"></span>EUD Tactical Map</div>
+    <div><span class="dot"></span>EUD Tactical Map • ${callsign}</div>
     <div id="status">Connecting…</div>
     <div id="count">Entities: 0</div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([32.7767, -96.7970], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const OWN_CALLSIGN = ${'$'}{JSON.stringify(callsign)};
+    const map = L.map('map').setView([${initLat}, ${initLon}], 15);
+
+    const layerDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap &copy; CARTO'
+    });
+    const layerSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri'
+    });
+    const layerTopo = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap'
-    }).addTo(map);
+    });
+
+    layerDark.addTo(map);
+    L.control.layers({ 'Dark': layerDark, 'Satellite': layerSat, 'Topo': layerTopo }).addTo(map);
 
     let cursor = 0;
     const markers = {};
+    let centeredOnOwn = false;
 
     function parseAndroidTile(tileId) {
-      // Collector MVP tile format: android_{latQ}_{lonQ} where lat/lon were multiplied by 10000
       if (!tileId || !tileId.startsWith('android_')) return null;
       const parts = tileId.split('_');
       if (parts.length !== 3) return null;
@@ -103,12 +143,14 @@ class TacticalMapActivity : AppCompatActivity() {
     }
 
     function upsertMarker(id, lat, lon, sourceType) {
-      const color = sourceType === 'drone' ? '#f97316' : sourceType === 'handheld' ? '#22c55e' : '#60a5fa';
+      const isOwn = String(id || '').toUpperCase() === String(OWN_CALLSIGN || '').toUpperCase();
+      const color = isOwn ? '#22c55e' : (sourceType === 'drone' ? '#f97316' : '#60a5fa');
+      const size = isOwn ? 16 : 12;
       const icon = L.divIcon({
         className: 'eud-marker',
-        html: `<div style="width:12px;height:12px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,0.6);"></div>`,
-        iconSize: [12, 12],
-        iconAnchor: [6, 6]
+        html: `<div style="width:${'$'}{size}px;height:${'$'}{size}px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div>`,
+        iconSize: [size, size],
+        iconAnchor: [Math.round(size/2), Math.round(size/2)]
       });
 
       if (!markers[id]) {
@@ -118,6 +160,11 @@ class TacticalMapActivity : AppCompatActivity() {
         markers[id].setIcon(icon);
       }
       markers[id].bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`);
+
+      if (isOwn && !centeredOnOwn) {
+        map.setView([lat, lon], 16);
+        centeredOnOwn = true;
+      }
     }
 
     async function pollDelta() {
@@ -157,5 +204,6 @@ class TacticalMapActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_HUB_URL = "extra_hub_url"
+        const val EXTRA_CALLSIGN = "extra_callsign"
     }
 }

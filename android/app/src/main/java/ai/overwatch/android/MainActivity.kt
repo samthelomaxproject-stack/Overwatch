@@ -98,8 +98,10 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.openMapBtn).setOnClickListener {
             val hub = hubUrlInput.text.toString().trim().ifEmpty { ConfigStore.getHubUrl(this) }
+            val callsign = callsignInput.text.toString().trim().ifEmpty { ConfigStore.getCallsign(this) }
             val intent = Intent(this, TacticalMapActivity::class.java)
                 .putExtra(TacticalMapActivity.EXTRA_HUB_URL, hub)
+                .putExtra(TacticalMapActivity.EXTRA_CALLSIGN, callsign)
             startActivity(intent)
         }
     }
