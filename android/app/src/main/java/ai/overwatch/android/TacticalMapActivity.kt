@@ -111,7 +111,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const OWN_CALLSIGN = ${'$'}callsignJs;
+    const OWN_CALLSIGN = $callsignJs;
     const map = L.map('map').setView([${initLat}, ${initLon}], 15);
 
     const layerDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -129,6 +129,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
     layerDark.addTo(map);
     L.control.layers({ 'Dark': layerDark, 'Satellite': layerSat, 'Topo': layerTopo }).addTo(map);
+    document.getElementById('status').textContent = 'Map loaded • connecting to hub delta…';
 
     let cursor = 0;
     const markers = {};
