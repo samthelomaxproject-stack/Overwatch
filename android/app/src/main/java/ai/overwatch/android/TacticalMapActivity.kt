@@ -191,7 +191,7 @@ class TacticalMapActivity : AppCompatActivity() {
     const markers = {};
     let ownGpsMarker = null;
     let centeredOnOwn = false;
-    let ownGps = null;
+    let ownGps = { lat: ${initLat}, lon: ${initLon} }; // native fallback until web geolocation callback
     let hubMarkerPos = null;
 
     function ownCallsign() {
@@ -217,7 +217,9 @@ class TacticalMapActivity : AppCompatActivity() {
       const latQ = parseInt(parts[1], 10);
       const lonQ = parseInt(parts[2], 10);
       if (!Number.isFinite(latQ) || !Number.isFinite(lonQ)) return null;
-      return { lat: latQ / 10000.0, lon: lonQ / 10000.0 };
+      // Backward-compatible parse: some senders used *100, newer uses *10000.
+      const divisor = (Math.abs(latQ) > 9000 || Math.abs(lonQ) > 9000) ? 10000.0 : 100.0;
+      return { lat: latQ / divisor, lon: lonQ / divisor };
     }
 
     const entityLast = {};
@@ -237,6 +239,7 @@ class TacticalMapActivity : AppCompatActivity() {
       const d = haversineKm(ownGps.lat, ownGps.lon, hubMarkerPos.lat, hubMarkerPos.lon);
       cmpEl.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)} • Hub ${'$'}{hubMarkerPos.lat.toFixed(5)}, ${'$'}{hubMarkerPos.lon.toFixed(5)} • Δ ${'$'}{d.toFixed(2)} km`;
     }
+    updateCompareHud();
 
     function upsertMarker(id, lat, lon, sourceType) {
       // Ignore clearly bogus geo points that plot in the ocean near Null Island.
@@ -306,6 +309,7 @@ class TacticalMapActivity : AppCompatActivity() {
             if (!p) return;
             const id = t.device_id || batch.device_id || 'unknown';
             const sourceType = t.source_type || batch.source_type || 'unknown';
+            if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
             upsertMarker(id, p.lat, p.lon, sourceType);
             seen += 1;
           });
