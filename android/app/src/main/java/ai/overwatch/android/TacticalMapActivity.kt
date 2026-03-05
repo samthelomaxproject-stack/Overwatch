@@ -218,7 +218,7 @@ class TacticalMapActivity : AppCompatActivity() {
       const s = String(id || '');
       for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
       const a = (h & 0xffff) / 65535.0 * Math.PI * 2;
-      return { dLat: Math.sin(a) * 0.00004, dLon: Math.cos(a) * 0.00004 };
+      return { dLat: Math.sin(a) * 0.00012, dLon: Math.cos(a) * 0.00012 };
     }
 
     function upsertMarker(id, lat, lon, sourceType) {
@@ -283,16 +283,21 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         // Keep delta cursor alive for other layers; entities come from /api/pli.
-        const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=0&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
-        const resp = await fetch(`${'$'}{hub}/api/delta?${'$'}{q}`);
-        if (!resp.ok) throw new Error(`HTTP ${'$'}{resp.status}`);
-        const data = await resp.json();
-        cursor = data.cursor || cursor;
+        try {
+          const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=0&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
+          const resp = await fetch(`${'$'}{hub}/api/delta?${'$'}{q}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            cursor = data.cursor || cursor;
+          }
+        } catch (_) {
+          // non-fatal; entities already came from /api/pli
+        }
 
         statusEl.textContent = `Connected • cursor ${'$'}{cursor}`;
         countEl.textContent = `Entities: ${'$'}{Object.keys(markers).length} • updates: ${'$'}{seen}`;
       } catch (e) {
-        statusEl.textContent = `Delta error: ${'$'}{e}`;
+        statusEl.textContent = `PLI pull error: ${'$'}{e}`;
       }
     }
 
