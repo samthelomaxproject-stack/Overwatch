@@ -179,7 +179,7 @@ class TacticalMapActivity : AppCompatActivity() {
     function updateCompare() {
       const cmp = document.getElementById('cmp');
       if (!cmp) return;
-      if (ownGps) cmp.textContent = `EUD ${ownGps.lat.toFixed(5)}, ${ownGps.lon.toFixed(5)}`;
+      if (ownGps) cmp.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)}`;
       else cmp.textContent = 'Compare: waiting for local GPS…';
     }
     function focusOwn() { const m = markers[ownCallsign()] || ownGpsMarker; if (m) map.setView(m.getLatLng(), 16); }
@@ -233,7 +233,7 @@ class TacticalMapActivity : AppCompatActivity() {
       // LOCAL mode = show only this EUD local marker and skip COP pulls.
       if (PLI_MODE === 'LOCAL') {
         statusEl.textContent = 'LOCAL mode • COP pull disabled';
-        countEl.textContent = `Entities: ${ownGpsMarker ? 1 : 0} • updates: local`;
+        countEl.textContent = `Entities: ${'$'}{ownGpsMarker ? 1 : 0} • updates: local`;
         return;
       }
 
@@ -271,7 +271,7 @@ class TacticalMapActivity : AppCompatActivity() {
         if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
         updateCompare();
       }, (err) => {
-        document.getElementById('status').textContent = `GPS fallback (${err.message})`;
+        document.getElementById('status').textContent = `GPS fallback (${'$'}{err.message})`;
         updateCompare();
       }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
     }
