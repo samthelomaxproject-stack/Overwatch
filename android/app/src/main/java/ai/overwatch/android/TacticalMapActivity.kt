@@ -324,7 +324,7 @@ class TacticalMapActivity : AppCompatActivity() {
             const ageSec = lastPliRxMs ? Math.max(0, Math.floor((Date.now() - lastPliRxMs) / 1000)) : -1;
             const idText = lastPliIds.length ? lastPliIds.join(', ') : 'none';
             diagEl.textContent = pliOk
-              ? `PLI(${pliSource}) ids: ${'$'}{idText} • age ${'$'}{ageSec >= 0 ? ageSec + 's' : 'n/a'}`
+              ? `PLI(${'$'}{pliSource}) ids: ${'$'}{idText} • age ${'$'}{ageSec >= 0 ? ageSec + 's' : 'n/a'}`
               : `PLI: fetch failed (hub/network)`;
           }
         }
