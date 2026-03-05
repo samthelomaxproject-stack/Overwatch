@@ -159,6 +159,8 @@ impl HubDb {
         let tx = self.conn.transaction()?;
 
         for tile in &update.tiles {
+            let mut tile_had_signal_data = false;
+
             // Merge RF aggregates
             if let Some(rf_list) = &tile.rf {
                 for agg in rf_list {
@@ -196,6 +198,7 @@ impl HubDb {
                         ],
                     )?;
                     accepted += 1;
+                    tile_had_signal_data = true;
                 }
             }
 
@@ -236,7 +239,33 @@ impl HubDb {
                         ],
                     )?;
                     accepted += 1;
+                    tile_had_signal_data = true;
                 }
+            }
+
+            // Always persist a lightweight PLI heartbeat row so clients can render
+            // entity position even when there is no RF/Wi-Fi payload this cycle.
+            // Position is encoded in tile_id; metadata uses last_device/source columns.
+            if !tile_had_signal_data {
+                tx.execute(
+                    r#"INSERT INTO merged_tiles
+                       (tile_id, time_bucket, sensor_type, dimension, mean_val, max_val,
+                        sample_count, source_count, confidence, updated_at, last_device_id, last_source_type)
+                       VALUES (?1, ?2, 'pli', 'heartbeat', 0.0, 0.0, 1, 1, 1.0, ?3, ?4, ?5)
+                       ON CONFLICT(tile_id, time_bucket, sensor_type, dimension) DO UPDATE SET
+                         updated_at = excluded.updated_at,
+                         last_device_id = excluded.last_device_id,
+                         last_source_type = excluded.last_source_type,
+                         confidence = 1.0"#,
+                    params![
+                        tile.tile_id,
+                        tile.time_bucket as i64,
+                        now as i64,
+                        update.device_id,
+                        update.source_type
+                    ],
+                )?;
+                accepted += 1;
             }
         }
 

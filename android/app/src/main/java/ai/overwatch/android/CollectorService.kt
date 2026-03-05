@@ -86,8 +86,7 @@ class CollectorService : Service() {
         val wifiScan = collectWifiNetworks(privacyMode)
 
         if (wifiScan.isEmpty()) {
-            updateNotification("No Wi-Fi scan results yet")
-            return
+            updateNotification("No Wi-Fi scan results; sending GPS heartbeat only")
         }
 
         val payload = buildTileUpdate(
@@ -107,7 +106,7 @@ class CollectorService : Service() {
         runCatching {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
-                updateNotification("$callsign • pushed ${wifiScan.size} Wi-Fi obs • ${location.latitude.format(4)}, ${location.longitude.format(4)} • $tileId")
+                updateNotification("$callsign • pushed ${wifiScan.size} Wi-Fi obs + GPS heartbeat • ${location.latitude.format(4)}, ${location.longitude.format(4)} • $tileId")
             }
         }.onFailure { err ->
             val reason = when (err) {
