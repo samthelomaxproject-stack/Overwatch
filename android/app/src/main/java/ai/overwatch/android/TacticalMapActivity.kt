@@ -128,6 +128,7 @@ class TacticalMapActivity : AppCompatActivity() {
     <div id="status">Connecting…</div>
     <div id="count">Entities: 0</div>
     <div id="cmp">Compare: booting…</div>
+    <div id="diag">PLI: n/a</div>
   </div>
   <div class="sidebar">
     <div class="sb-row"><div class="sb-label">Callsign</div><input id="cfgCallsign" class="sb-input" value="${callsign}" readonly /></div>
@@ -212,9 +213,20 @@ class TacticalMapActivity : AppCompatActivity() {
     window.applyLayerVisibility = applyLayerVisibility;
 
     const entityLast = {};
+    function idJitter(id) {
+      let h = 0;
+      const s = String(id || '');
+      for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+      const a = (h & 0xffff) / 65535.0 * Math.PI * 2;
+      return { dLat: Math.sin(a) * 0.00004, dLon: Math.cos(a) * 0.00004 };
+    }
+
     function upsertMarker(id, lat, lon, sourceType) {
       if (Math.abs(lat) < 0.2 && Math.abs(lon) < 0.2) return;
       const isOwn = String(id||'').toUpperCase() === String(ownCallsign()||'').toUpperCase();
+      const j = idJitter(id);
+      const rLat = lat + j.dLat;
+      const rLon = lon + j.dLon;
       const color = isOwn ? '#22c55e' : (sourceType === 'drone' ? '#f97316' : '#60a5fa');
       const prev = entityLast[id]; let heading = 0;
       if (prev) { const dy = lat - prev.lat, dx = lon - prev.lon; if (Math.abs(dx)+Math.abs(dy) > 0.00001) heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360; }
@@ -222,8 +234,8 @@ class TacticalMapActivity : AppCompatActivity() {
 
       const icon = L.divIcon({ className: 'eud-marker', html: `<div style="position:relative;width:22px;height:22px;"><div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div><div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${ '$'}{heading}deg);transform-origin:50% 12px;"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] });
 
-      if (!markers[id]) markers[id] = L.marker([lat, lon], { icon }).addTo(map);
-      else { markers[id].setLatLng([lat, lon]); markers[id].setIcon(icon); }
+      if (!markers[id]) markers[id] = L.marker([rLat, rLon], { icon }).addTo(map);
+      else { markers[id].setLatLng([rLat, rLon]); markers[id].setIcon(icon); }
       markers[id].bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`).bindTooltip(id, { permanent: true, direction: 'top', offset: [0,-12] });
 
       applyLayerVisibility();
@@ -243,6 +255,8 @@ class TacticalMapActivity : AppCompatActivity() {
         ensureOwnMarker();
         statusEl.textContent = 'LOCAL mode • COP pull disabled';
         countEl.textContent = `Entities: ${'$'}{markers[ownCallsign()] ? 1 : 0} • updates: local`;
+        const diagEl = document.getElementById('diag');
+        if (diagEl) diagEl.textContent = `PLI ids: local:${'$'}{ownCallsign()}`;
         return;
       }
 
@@ -255,13 +269,17 @@ class TacticalMapActivity : AppCompatActivity() {
           const pliResp = await fetch(`${'$'}{hub}/api/pli?max_age_secs=7200`);
           if (!pliResp.ok) throw new Error(`PLI HTTP ${'$'}{pliResp.status}`);
           const pli = await pliResp.json();
+          const ids = [];
           (pli || []).forEach(pt => {
             const p = parseAndroidTile(pt.tile_id); if (!p) return;
             const id = pt.device_id || 'unknown';
             const sourceType = pt.source_type || 'unknown';
             if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
+            ids.push(id);
             upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
           });
+          const diagEl = document.getElementById('diag');
+          if (diagEl) diagEl.textContent = `PLI ids: ${'$'}{[...new Set(ids)].join(', ') || 'none'}`;
         }
 
         // Keep delta cursor alive for other layers; entities come from /api/pli.
