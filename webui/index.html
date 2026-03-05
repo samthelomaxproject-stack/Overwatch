@@ -4855,6 +4855,7 @@ out body;
 
         function updateEntityOnMap(entity) {
             if (!map || !entity || !entity.lat || !entity.lon) return;
+            if (Math.abs(entity.lat) < 0.2 && Math.abs(entity.lon) < 0.2) return; // ignore null-island noise
             const affilColor = { friendly: 'var(--tac-friendly)', hostile: 'var(--tac-hostile)', neutral: 'var(--tac-neutral)', unknown: 'var(--tac-unknown)' };
             const color = affilColor[entity.affiliation] || 'var(--tac-unknown)';
 

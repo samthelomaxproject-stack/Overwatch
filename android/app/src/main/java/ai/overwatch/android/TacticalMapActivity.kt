@@ -127,6 +127,7 @@ class TacticalMapActivity : AppCompatActivity() {
     <div><span class="dot"></span>EUD Tactical Map • ${callsign}</div>
     <div id="status">Connecting…</div>
     <div id="count">Entities: 0</div>
+    <div id="cmp">Compare: waiting…</div>
   </div>
   <div class="sidebar">
     <div class="sb-row">
@@ -190,6 +191,8 @@ class TacticalMapActivity : AppCompatActivity() {
     const markers = {};
     let ownGpsMarker = null;
     let centeredOnOwn = false;
+    let ownGps = null;
+    let hubMarkerPos = null;
 
     function ownCallsign() {
       return (document.getElementById('cfgCallsign')?.value || OWN_CALLSIGN || 'ANDROID-EUD').trim();
@@ -218,7 +221,27 @@ class TacticalMapActivity : AppCompatActivity() {
     }
 
     const entityLast = {};
+    function haversineKm(aLat, aLon, bLat, bLon) {
+      const R = 6371;
+      const dLat = (bLat - aLat) * Math.PI / 180;
+      const dLon = (bLon - aLon) * Math.PI / 180;
+      const x = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(aLat*Math.PI/180) * Math.cos(bLat*Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+      return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+    }
+
+    function updateCompareHud() {
+      const cmpEl = document.getElementById('cmp');
+      if (!cmpEl) return;
+      if (!ownGps) { cmpEl.textContent = 'Compare: waiting for EUD GPS…'; return; }
+      if (!hubMarkerPos) { cmpEl.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)} • Hub marker: n/a`; return; }
+      const d = haversineKm(ownGps.lat, ownGps.lon, hubMarkerPos.lat, hubMarkerPos.lon);
+      cmpEl.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)} • Hub ${'$'}{hubMarkerPos.lat.toFixed(5)}, ${'$'}{hubMarkerPos.lon.toFixed(5)} • Δ ${'$'}{d.toFixed(2)} km`;
+    }
+
     function upsertMarker(id, lat, lon, sourceType) {
+      // Ignore clearly bogus geo points that plot in the ocean near Null Island.
+      if (Math.abs(lat) < 0.2 && Math.abs(lon) < 0.2) return;
+
       const isOwn = String(id || '').toUpperCase() === String(ownCallsign() || '').toUpperCase();
       const color = isOwn ? '#22c55e' : (sourceType === 'drone' ? '#f97316' : '#60a5fa');
       const prev = entityLast[id];
@@ -249,6 +272,11 @@ class TacticalMapActivity : AppCompatActivity() {
       markers[id]
         .bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`)
         .bindTooltip(id, { permanent: true, direction: 'top', offset: [0, -12] });
+
+      if (String(id || '').toLowerCase().includes('hub')) {
+        hubMarkerPos = { lat, lon };
+        updateCompareHud();
+      }
 
       if (isOwn && !centeredOnOwn) {
         map.setView([lat, lon], 16);
@@ -300,12 +328,14 @@ class TacticalMapActivity : AppCompatActivity() {
           iconSize: [18, 18],
           iconAnchor: [9, 9]
         });
+        ownGps = { lat, lon };
         if (!ownGpsMarker) {
           ownGpsMarker = L.marker([lat, lon], { icon }).addTo(map);
           ownGpsMarker.bindPopup(`<b>${'$'}{ownCallsign()}</b><br/>Live GPS`);
         } else {
           ownGpsMarker.setLatLng([lat, lon]);
         }
+        updateCompareHud();
         if (!centeredOnOwn) {
           map.setView([lat, lon], 16);
           centeredOnOwn = true;
