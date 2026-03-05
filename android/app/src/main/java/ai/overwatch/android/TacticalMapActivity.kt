@@ -132,11 +132,11 @@ class TacticalMapActivity : AppCompatActivity() {
   <div class="sidebar">
     <div class="sb-row">
       <div class="sb-label">Callsign</div>
-      <input id="cfgCallsign" class="sb-input" value="${callsign}" />
+      <input id="cfgCallsign" class="sb-input" value="${callsign}" readonly />
     </div>
     <div class="sb-row">
       <div class="sb-label">Hub</div>
-      <input id="cfgHub" class="sb-input" value="${hubBase}" />
+      <input id="cfgHub" class="sb-input" value="${hubBase}" readonly />
     </div>
     <div class="sb-row">
       <div class="sb-label">Map Type</div>
@@ -153,6 +153,7 @@ class TacticalMapActivity : AppCompatActivity() {
       <label><input id="pliCams" type="checkbox" /> Cameras</label>
       <label><input id="pliSat" type="checkbox" /> Satellites</label>
     </div>
+    <div class="sb-label">Config changes (callsign/hub) must be saved in main screen.</div>
     <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
     <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
   </div>
