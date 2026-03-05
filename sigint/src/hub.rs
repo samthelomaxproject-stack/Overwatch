@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS node_registry (
     source_type  TEXT,
     public_key   TEXT,
     trust_weight REAL NOT NULL DEFAULT 1.0,
-    last_seen    INTEGER
+    last_seen    INTEGER,
+    last_tile_id TEXT,
+    last_tile_bucket INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS delta_cursors (
@@ -83,6 +85,8 @@ impl HubDb {
         // Migrations for existing DBs
         let _ = conn.execute("ALTER TABLE merged_tiles ADD COLUMN last_device_id TEXT", []);
         let _ = conn.execute("ALTER TABLE merged_tiles ADD COLUMN last_source_type TEXT", []);
+        let _ = conn.execute("ALTER TABLE node_registry ADD COLUMN last_tile_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE node_registry ADD COLUMN last_tile_bucket INTEGER", []);
         Ok(Self { conn })
     }
 
@@ -246,6 +250,18 @@ impl HubDb {
             // Always persist a lightweight PLI heartbeat row so clients can render
             // entity position even when there is no RF/Wi-Fi payload this cycle.
             // Position is encoded in tile_id; metadata uses last_device/source columns.
+            // Track per-device last known tile for clean PLI fan-out in /api/delta.
+            tx.execute(
+                "UPDATE node_registry SET source_type = ?1, last_seen = ?2, last_tile_id = ?3, last_tile_bucket = ?4 WHERE device_id = ?5",
+                params![
+                    update.source_type,
+                    now as i64,
+                    tile.tile_id,
+                    tile.time_bucket as i64,
+                    update.device_id
+                ],
+            )?;
+
             if !tile_had_signal_data {
                 tx.execute(
                     r#"INSERT INTO merged_tiles
@@ -382,11 +398,38 @@ impl HubDb {
             }
         }
 
-        let tiles_vec: Vec<TileData> = tile_map.into_values().collect();
+        let mut tiles_vec: Vec<TileData> = tile_map.into_values().collect();
+
+        // Add per-device PLI heartbeat fan-out so clients can render each EUD independently
+        // even when multiple EUDs share a tile/time bucket.
+        let mut nstmt = self.conn.prepare(
+            "SELECT device_id, COALESCE(source_type,'unknown'), last_seen, last_tile_id, last_tile_bucket
+             FROM node_registry
+             WHERE last_seen > ?1 AND last_tile_id IS NOT NULL"
+        )?;
+        let nrows = nstmt.query_map(params![cursor_ts as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)? as u64,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<i64>>(4)?.unwrap_or(0) as u64,
+            ))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        let mut cursor_out = max_cursor;
+        for (device_id, source_type, last_seen, tile_id, bucket) in nrows {
+            let mut t = TileData::new(tile_id, if bucket > 0 { bucket } else { last_seen });
+            t.device_id = Some(device_id);
+            t.source_type = Some(source_type);
+            tiles_vec.push(t);
+            if last_seen > cursor_out { cursor_out = last_seen; }
+        }
+
         let mut update = TileUpdate::new("hub", "hub_local");
         update.tiles = tiles_vec;
 
-        Ok(TileDelta { tiles: vec![update], cursor: max_cursor })
+        Ok(TileDelta { tiles: vec![update], cursor: cursor_out })
     }
 }
 
