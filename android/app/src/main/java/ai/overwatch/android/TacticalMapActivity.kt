@@ -249,21 +249,28 @@ class TacticalMapActivity : AppCompatActivity() {
       try {
         if (PLI_MODE === 'MERGED') ensureOwnMarker();
         const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-        const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=${'$'}{PULL_ENTITIES?1:0}&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
+        let seen = 0;
+
+        if (PULL_ENTITIES) {
+          const pliResp = await fetch(`${'$'}{hub}/api/pli?max_age_secs=7200`);
+          if (!pliResp.ok) throw new Error(`PLI HTTP ${'$'}{pliResp.status}`);
+          const pli = await pliResp.json();
+          (pli || []).forEach(pt => {
+            const p = parseAndroidTile(pt.tile_id); if (!p) return;
+            const id = pt.device_id || 'unknown';
+            const sourceType = pt.source_type || 'unknown';
+            if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
+            upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+          });
+        }
+
+        // Keep delta cursor alive for other layers; entities come from /api/pli.
+        const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=0&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
         const resp = await fetch(`${'$'}{hub}/api/delta?${'$'}{q}`);
         if (!resp.ok) throw new Error(`HTTP ${'$'}{resp.status}`);
         const data = await resp.json();
         cursor = data.cursor || cursor;
-        let seen = 0;
-        (data.tiles || []).forEach(batch => {
-          (batch.tiles || []).forEach(t => {
-            const p = parseAndroidTile(t.tile_id); if (!p) return;
-            const id = t.device_id || batch.device_id || 'unknown';
-            const sourceType = t.source_type || batch.source_type || 'unknown';
-            if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
-            upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
-          });
-        });
+
         statusEl.textContent = `Connected • cursor ${'$'}{cursor}`;
         countEl.textContent = `Entities: ${'$'}{Object.keys(markers).length} • updates: ${'$'}{seen}`;
       } catch (e) {

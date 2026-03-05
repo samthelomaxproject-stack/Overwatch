@@ -431,6 +431,32 @@ impl HubDb {
 
         Ok(TileDelta { tiles: vec![update], cursor: cursor_out })
     }
+
+    pub fn get_pli_points(&self, max_age_secs: u64) -> Result<Vec<PliPoint>, Error> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let cutoff = now.saturating_sub(max_age_secs as i64);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT device_id, COALESCE(source_type,'unknown'), COALESCE(last_seen,0), COALESCE(last_tile_id,'')
+             FROM node_registry
+             WHERE COALESCE(last_tile_id,'') <> '' AND COALESCE(last_seen,0) >= ?1
+             ORDER BY last_seen DESC LIMIT 200"
+        )?;
+
+        let rows = stmt.query_map(params![cutoff], |r| {
+            Ok(PliPoint {
+                device_id: r.get::<_, String>(0)?,
+                source_type: r.get::<_, String>(1)?,
+                last_seen: (r.get::<_, i64>(2)?).max(0) as u64,
+                tile_id: r.get::<_, String>(3)?,
+            })
+        })?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(Error::Sqlite)
+    }
 }
 
 // ── Minimal HTTP server ───────────────────────────────────────────────────────
@@ -443,6 +469,14 @@ pub struct NodeStatus {
     pub last_seen: u64,
     pub age_secs: u64,
     pub status: String, // CONNECTED | STALE | OFFLINE
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PliPoint {
+    pub device_id: String,
+    pub source_type: String,
+    pub last_seen: u64,
+    pub tile_id: String,
 }
 
 /// Query node statuses from hub DB for debug/monitoring.
@@ -477,6 +511,7 @@ pub fn get_node_statuses(db_path: &str, stale_after_secs: u64) -> Result<Vec<Nod
 
     rows.collect::<Result<Vec<_>, _>>().map_err(Error::Sqlite)
 }
+
 
 /// Hub API server configuration.
 #[derive(Debug, Clone)]
@@ -586,6 +621,17 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             let s = state.lock().unwrap();
             match s.db.get_delta(&device_id, cursor) {
                 Ok(delta) => (200, serde_json::to_string(&delta).unwrap()),
+                Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/pli") => {
+            let max_age = parse_query_param(p, "max_age_secs")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3600u64);
+            let s = state.lock().unwrap();
+            match s.db.get_pli_points(max_age) {
+                Ok(points) => (200, serde_json::to_string(&points).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
             }
         }
