@@ -127,7 +127,7 @@ class TacticalMapActivity : AppCompatActivity() {
     <div>● EUD Tactical Map • ${callsign}</div>
     <div id="status">Connecting…</div>
     <div id="count">Entities: 0</div>
-    <div id="cmp">Compare: waiting…</div>
+    <div id="cmp">Compare: booting…</div>
   </div>
   <div class="sidebar">
     <div class="sb-row"><div class="sb-label">Callsign</div><input id="cfgCallsign" class="sb-input" value="${callsign}" readonly /></div>
@@ -176,6 +176,12 @@ class TacticalMapActivity : AppCompatActivity() {
     let ownGps = { lat: $initLat, lon: $initLon };
 
     function ownCallsign() { return OWN_CALLSIGN || 'ANDROID-EUD'; }
+    function updateCompare() {
+      const cmp = document.getElementById('cmp');
+      if (!cmp) return;
+      if (ownGps) cmp.textContent = `EUD ${ownGps.lat.toFixed(5)}, ${ownGps.lon.toFixed(5)}`;
+      else cmp.textContent = 'Compare: waiting for local GPS…';
+    }
     function focusOwn() { const m = markers[ownCallsign()] || ownGpsMarker; if (m) map.setView(m.getLatLng(), 16); }
     function reloadDelta() { cursor = 0; document.getElementById('status').textContent = 'Reconnecting hub delta…'; pollDelta(); }
 
@@ -213,12 +219,24 @@ class TacticalMapActivity : AppCompatActivity() {
       markers[id].bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`).bindTooltip(id, { permanent: true, direction: 'top', offset: [0,-12] });
 
       applyLayerVisibility();
+      if (isOwn) {
+        ownGps = { lat, lon };
+        updateCompare();
+      }
       if (isOwn && !centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
     }
 
     async function pollDelta() {
       const statusEl = document.getElementById('status');
       const countEl = document.getElementById('count');
+
+      // LOCAL mode = show only this EUD local marker and skip COP pulls.
+      if (PLI_MODE === 'LOCAL') {
+        statusEl.textContent = 'LOCAL mode • COP pull disabled';
+        countEl.textContent = `Entities: ${ownGpsMarker ? 1 : 0} • updates: local`;
+        return;
+      }
+
       try {
         const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
         const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=${'$'}{PULL_ENTITIES?1:0}&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
@@ -251,11 +269,15 @@ class TacticalMapActivity : AppCompatActivity() {
         if (!ownGpsMarker) ownGpsMarker = L.marker([lat, lon], { icon }).addTo(map).bindPopup(`<b>${'$'}{ownCallsign()}</b><br/>Live GPS`);
         else ownGpsMarker.setLatLng([lat, lon]);
         if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
-        document.getElementById('cmp').textContent = `EUD ${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`;
-      }, () => {}, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
+        updateCompare();
+      }, (err) => {
+        document.getElementById('status').textContent = `GPS fallback (${err.message})`;
+        updateCompare();
+      }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
     }
 
     document.getElementById('status').textContent = 'Map loaded • connecting to hub delta…';
+    updateCompare();
     setInterval(pollDelta, 3000);
     pollDelta();
   </script>
