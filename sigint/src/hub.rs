@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use crate::{Error, wire::TileUpdate};
+use crate::{Error, wire::{TileUpdate, TileData}};
 use crate::sync::{AckResult, TileDelta};
 use crate::sanitize::{sanitize_rf, sanitize_wifi, RateLimiter};
 use crate::crypto::verify_payload;
@@ -432,6 +432,43 @@ impl HubDb {
         Ok(TileDelta { tiles: vec![update], cursor: cursor_out })
     }
 
+    pub fn get_pli_delta(&self, cursor_ts: u64, max_age_secs: u64) -> Result<TileDelta, Error> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff = now.saturating_sub(max_age_secs);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT device_id, COALESCE(source_type,'unknown'), COALESCE(last_seen,0), COALESCE(last_tile_id,''), COALESCE(last_tile_bucket,0)
+             FROM node_registry
+             WHERE COALESCE(last_tile_id,'') <> '' AND COALESCE(last_seen,0) >= ?1 AND COALESCE(last_seen,0) > ?2
+             ORDER BY last_seen ASC LIMIT 500"
+        )?;
+
+        let rows = stmt.query_map(params![cutoff as i64, cursor_ts as i64], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                (r.get::<_, i64>(2)?).max(0) as u64,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4).unwrap_or(0).max(0) as u64,
+            ))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        let mut cursor_out = cursor_ts;
+        let mut update = TileUpdate::new("hub", "hub_local");
+        for (device_id, source_type, last_seen, tile_id, bucket) in rows {
+            let mut t = TileData::new(tile_id, if bucket > 0 { bucket } else { last_seen });
+            t.device_id = Some(device_id);
+            t.source_type = Some(source_type);
+            update.tiles.push(t);
+            if last_seen > cursor_out { cursor_out = last_seen; }
+        }
+
+        Ok(TileDelta { tiles: vec![update], cursor: cursor_out })
+    }
+
     pub fn get_pli_points(&self, max_age_secs: u64) -> Result<Vec<PliPoint>, Error> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -620,6 +657,20 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
 
             let s = state.lock().unwrap();
             match s.db.get_delta(&device_id, cursor) {
+                Ok(delta) => (200, serde_json::to_string(&delta).unwrap()),
+                Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/pli_delta") => {
+            let max_age = parse_query_param(p, "max_age_secs")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(7200u64);
+            let cursor = parse_query_param(p, "cursor")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0u64);
+            let s = state.lock().unwrap();
+            match s.db.get_pli_delta(cursor, max_age) {
                 Ok(delta) => (200, serde_json::to_string(&delta).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
             }

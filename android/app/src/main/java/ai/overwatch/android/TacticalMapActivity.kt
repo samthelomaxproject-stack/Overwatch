@@ -266,32 +266,35 @@ class TacticalMapActivity : AppCompatActivity() {
         let seen = 0;
 
         if (PULL_ENTITIES) {
-          const pliResp = await fetch(`${'$'}{hub}/api/pli?max_age_secs=7200`);
+          const pliResp = await fetch(`${'$'}{hub}/api/pli_delta?cursor=${'$'}{cursor}&max_age_secs=7200`);
           if (!pliResp.ok) throw new Error(`PLI HTTP ${'$'}{pliResp.status}`);
-          const pli = await pliResp.json();
+          const pliDelta = await pliResp.json();
+          cursor = pliDelta.cursor || cursor;
           const ids = [];
-          (pli || []).forEach(pt => {
-            const p = parseAndroidTile(pt.tile_id); if (!p) return;
-            const id = pt.device_id || 'unknown';
-            const sourceType = pt.source_type || 'unknown';
-            if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
-            ids.push(id);
-            upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+          (pliDelta.tiles || []).forEach(batch => {
+            (batch.tiles || []).forEach(pt => {
+              const p = parseAndroidTile(pt.tile_id); if (!p) return;
+              const id = pt.device_id || batch.device_id || 'unknown';
+              const sourceType = pt.source_type || batch.source_type || 'unknown';
+              if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
+              ids.push(id);
+              upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+            });
           });
           const diagEl = document.getElementById('diag');
           if (diagEl) diagEl.textContent = `PLI ids: ${'$'}{[...new Set(ids)].join(', ') || 'none'}`;
         }
 
-        // Keep delta cursor alive for other layers; entities come from /api/pli.
+        // Optional delta pull for non-entity layers.
         try {
           const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=0&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
           const resp = await fetch(`${'$'}{hub}/api/delta?${'$'}{q}`);
           if (resp.ok) {
             const data = await resp.json();
-            cursor = data.cursor || cursor;
+            cursor = Math.max(cursor, data.cursor || 0);
           }
         } catch (_) {
-          // non-fatal; entities already came from /api/pli
+          // non-fatal
         }
 
         statusEl.textContent = `Connected • cursor ${'$'}{cursor}`;
