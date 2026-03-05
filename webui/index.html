@@ -4801,6 +4801,7 @@ out body;
         let trackedEntities = [];
         let entityFilter = 'all';
         let entityMarkers = {}; // map markers keyed by entity uid
+        let entityLastPos = {}; // uid -> {lat, lon} for heading inference
 
         function ingestPLI(pli) {
             // pli = { uid, callsign, type, affiliation, lat, lon, altitude, speed, course, mgrs, timestamp }
@@ -4856,23 +4857,38 @@ out body;
             if (!map || !entity || !entity.lat || !entity.lon) return;
             const affilColor = { friendly: 'var(--tac-friendly)', hostile: 'var(--tac-hostile)', neutral: 'var(--tac-neutral)', unknown: 'var(--tac-unknown)' };
             const color = affilColor[entity.affiliation] || 'var(--tac-unknown)';
+
+            const prev = entityLastPos[entity.uid];
+            let heading = Number(entity.course);
+            if (!Number.isFinite(heading) && prev) {
+                const dy = entity.lat - prev.lat;
+                const dx = entity.lon - prev.lon;
+                if (Math.abs(dx) + Math.abs(dy) > 0.00001) {
+                    heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360;
+                }
+            }
+            if (!Number.isFinite(heading)) heading = 0;
+            entityLastPos[entity.uid] = { lat: entity.lat, lon: entity.lon };
+
             const icon = L.divIcon({
                 className: 'entity-marker',
-                html: `<div style="width:20px;height:20px;background:${color};border:2px solid white;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:white;">${(entity.callsign||'?')[0]}</div>`,
-                iconSize: [20, 20], iconAnchor: [10, 10]
+                html: `
+                    <div style="position:relative;width:24px;height:24px;">
+                        <div style="position:absolute;left:2px;top:2px;width:20px;height:20px;background:${color};border:2px solid white;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:white;">${(entity.callsign||'?')[0]}</div>
+                        <div style="position:absolute;left:9px;top:-2px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:8px solid #fff;transform:rotate(${heading}deg);transform-origin:50% 14px;"></div>
+                    </div>`,
+                iconSize: [24, 24], iconAnchor: [12, 12]
             });
             if (entityMarkers[entity.uid]) {
                 entityMarkers[entity.uid].setLatLng([entity.lat, entity.lon]);
                 entityMarkers[entity.uid].setIcon(icon);
+                entityMarkers[entity.uid].bindTooltip(entity.callsign || entity.uid, { permanent: true, direction: 'top', offset: [0, -14] });
             } else {
                 entityMarkers[entity.uid] = L.marker([entity.lat, entity.lon], { icon })
                     .addTo(map)
-                    .bindTooltip(entity.callsign || entity.uid, { permanent: false, direction: 'top' });
+                    .bindTooltip(entity.callsign || entity.uid, { permanent: true, direction: 'top', offset: [0, -14] });
             }
-            // Apply current layer visibility
-            if (!layerVisible.units) {
-                entityMarkers[entity.uid].remove();
-            }
+            if (!layerVisible.units) entityMarkers[entity.uid].remove();
         }
 
         // SATCOM functions

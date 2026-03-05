@@ -12,6 +12,9 @@ import android.webkit.WebView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class TacticalMapActivity : AppCompatActivity() {
 
@@ -20,6 +23,7 @@ class TacticalMapActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableImmersiveMode()
 
         webView = WebView(this)
         setContentView(webView)
@@ -133,6 +137,21 @@ class TacticalMapActivity : AppCompatActivity() {
       <div class="sb-label">Hub</div>
       <input id="cfgHub" class="sb-input" value="${hubBase}" />
     </div>
+    <div class="sb-row">
+      <div class="sb-label">Map Type</div>
+      <select id="mapType" class="sb-input" onchange="setMapType(this.value)">
+        <option value="dark">Dark</option>
+        <option value="sat">Satellite</option>
+        <option value="topo">Topo</option>
+      </select>
+    </div>
+    <div class="sb-row">
+      <div class="sb-label">PLI Pull</div>
+      <label><input id="pliEntities" type="checkbox" checked /> Entities</label>
+      <label><input id="pliHeat" type="checkbox" checked /> Heatmaps</label>
+      <label><input id="pliCams" type="checkbox" /> Cameras</label>
+      <label><input id="pliSat" type="checkbox" /> Satellites</label>
+    </div>
     <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
     <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
   </div>
@@ -155,8 +174,16 @@ class TacticalMapActivity : AppCompatActivity() {
       attribution: '&copy; OpenStreetMap'
     });
 
-    layerDark.addTo(map);
-    L.control.layers({ 'Dark': layerDark, 'Satellite': layerSat, 'Topo': layerTopo }).addTo(map);
+    const baseLayers = { dark: layerDark, sat: layerSat, topo: layerTopo };
+    let activeBase = 'dark';
+    baseLayers[activeBase].addTo(map);
+    function setMapType(kind) {
+      if (!baseLayers[kind] || kind === activeBase) return;
+      map.removeLayer(baseLayers[activeBase]);
+      baseLayers[kind].addTo(map);
+      activeBase = kind;
+    }
+    window.setMapType = setMapType;
     document.getElementById('status').textContent = 'Map loaded • connecting to hub delta…';
 
     let cursor = 0;
@@ -190,15 +217,27 @@ class TacticalMapActivity : AppCompatActivity() {
       return { lat: latQ / 10000.0, lon: lonQ / 10000.0 };
     }
 
+    const entityLast = {};
     function upsertMarker(id, lat, lon, sourceType) {
       const isOwn = String(id || '').toUpperCase() === String(ownCallsign() || '').toUpperCase();
       const color = isOwn ? '#22c55e' : (sourceType === 'drone' ? '#f97316' : '#60a5fa');
-      const size = isOwn ? 16 : 12;
+      const prev = entityLast[id];
+      let heading = 0;
+      if (prev) {
+        const dy = lat - prev.lat, dx = lon - prev.lon;
+        if (Math.abs(dx) + Math.abs(dy) > 0.00001) heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360;
+      }
+      entityLast[id] = { lat, lon };
+
       const icon = L.divIcon({
         className: 'eud-marker',
-        html: `<div style="width:${'$'}{size}px;height:${'$'}{size}px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div>`,
-        iconSize: [size, size],
-        iconAnchor: [Math.round(size/2), Math.round(size/2)]
+        html: `
+          <div style="position:relative;width:22px;height:22px;">
+            <div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div>
+            <div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${ '$'}{heading}deg);transform-origin:50% 12px;"></div>
+          </div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
       });
 
       if (!markers[id]) {
@@ -207,7 +246,9 @@ class TacticalMapActivity : AppCompatActivity() {
         markers[id].setLatLng([lat, lon]);
         markers[id].setIcon(icon);
       }
-      markers[id].bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`);
+      markers[id]
+        .bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`)
+        .bindTooltip(id, { permanent: true, direction: 'top', offset: [0, -12] });
 
       if (isOwn && !centeredOnOwn) {
         map.setView([lat, lon], 16);
@@ -219,7 +260,13 @@ class TacticalMapActivity : AppCompatActivity() {
       const statusEl = document.getElementById('status');
       const countEl = document.getElementById('count');
       try {
-        const resp = await fetch(`/api/delta?device_id=android-eud-map&cursor=${'$'}{cursor}`);
+        const hubBase = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+        const wantEntities = document.getElementById('pliEntities')?.checked !== false;
+        const wantHeat = document.getElementById('pliHeat')?.checked !== false;
+        const wantCams = document.getElementById('pliCams')?.checked === true;
+        const wantSat = document.getElementById('pliSat')?.checked === true;
+        const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&entities=${'$'}{wantEntities ? 1 : 0}&heat=${'$'}{wantHeat ? 1 : 0}&cams=${'$'}{wantCams ? 1 : 0}&sat=${'$'}{wantSat ? 1 : 0}`;
+        const resp = await fetch(`${'$'}{hubBase}/api/delta?${'$'}{q}`);
         if (!resp.ok) throw new Error(`HTTP ${'$'}{resp.status}`);
         const data = await resp.json();
         cursor = data.cursor || cursor;
@@ -274,6 +321,18 @@ class TacticalMapActivity : AppCompatActivity() {
 </body>
 </html>
 """.trimIndent()
+    }
+
+    private fun enableImmersiveMode() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enableImmersiveMode()
     }
 
     companion object {
