@@ -175,11 +175,19 @@ class TacticalMapActivity : AppCompatActivity() {
     let centeredOnOwn = false;
     let ownGps = { lat: $initLat, lon: $initLon };
 
+    function ensureOwnMarker() {
+      const lat = ownGps.lat, lon = ownGps.lon;
+      const icon = L.divIcon({ className:'eud-self', html:'<div style="width:18px;height:18px;border-radius:50%;background:#22c55e;border:3px solid #fff;box-shadow:0 0 12px rgba(34,197,94,0.8);"></div>', iconSize:[18,18], iconAnchor:[9,9] });
+      if (!ownGpsMarker) ownGpsMarker = L.marker([lat, lon], { icon }).addTo(map).bindPopup(`<b>${'$'}{ownCallsign()}</b><br/>Local GPS`);
+      else ownGpsMarker.setLatLng([lat, lon]);
+      if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
+    }
+
     function ownCallsign() { return OWN_CALLSIGN || 'ANDROID-EUD'; }
     function updateCompare() {
       const cmp = document.getElementById('cmp');
       if (!cmp) return;
-      if (ownGps) cmp.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)}`;
+      if (ownGps) cmp.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)} • mode ${'$'}{PLI_MODE}`;
       else cmp.textContent = 'Compare: waiting for local GPS…';
     }
     function focusOwn() { const m = markers[ownCallsign()] || ownGpsMarker; if (m) map.setView(m.getLatLng(), 16); }
@@ -232,12 +240,14 @@ class TacticalMapActivity : AppCompatActivity() {
 
       // LOCAL mode = show only this EUD local marker and skip COP pulls.
       if (PLI_MODE === 'LOCAL') {
+        ensureOwnMarker();
         statusEl.textContent = 'LOCAL mode • COP pull disabled';
         countEl.textContent = `Entities: ${'$'}{ownGpsMarker ? 1 : 0} • updates: local`;
         return;
       }
 
       try {
+        if (PLI_MODE === 'MERGED') ensureOwnMarker();
         const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
         const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=${'$'}{PULL_ENTITIES?1:0}&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
         const resp = await fetch(`${'$'}{hub}/api/delta?${'$'}{q}`);
@@ -265,10 +275,7 @@ class TacticalMapActivity : AppCompatActivity() {
       navigator.geolocation.watchPosition((pos) => {
         const lat = pos.coords.latitude, lon = pos.coords.longitude;
         ownGps = { lat, lon };
-        const icon = L.divIcon({ className:'eud-self', html:'<div style="width:18px;height:18px;border-radius:50%;background:#22c55e;border:3px solid #fff;box-shadow:0 0 12px rgba(34,197,94,0.8);"></div>', iconSize:[18,18], iconAnchor:[9,9] });
-        if (!ownGpsMarker) ownGpsMarker = L.marker([lat, lon], { icon }).addTo(map).bindPopup(`<b>${'$'}{ownCallsign()}</b><br/>Live GPS`);
-        else ownGpsMarker.setLatLng([lat, lon]);
-        if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
+        ensureOwnMarker();
         updateCompare();
       }, (err) => {
         document.getElementById('status').textContent = `GPS fallback (${'$'}{err.message})`;
@@ -276,6 +283,7 @@ class TacticalMapActivity : AppCompatActivity() {
       }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
     }
 
+    ensureOwnMarker();
     document.getElementById('status').textContent = 'Map loaded • connecting to hub delta…';
     updateCompare();
     setInterval(pollDelta, 3000);
