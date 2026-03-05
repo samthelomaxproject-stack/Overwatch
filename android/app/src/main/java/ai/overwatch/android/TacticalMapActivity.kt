@@ -174,6 +174,8 @@ class TacticalMapActivity : AppCompatActivity() {
     const markers = {};
     let centeredOnOwn = false;
     let ownGps = { lat: $initLat, lon: $initLon };
+    let lastPliIds = [];
+    let lastPliRxMs = 0;
 
     function ensureOwnMarker() {
       // In COP mode, do not overlay a second local marker for same callsign.
@@ -266,23 +268,65 @@ class TacticalMapActivity : AppCompatActivity() {
         let seen = 0;
 
         if (PULL_ENTITIES) {
-          const pliResp = await fetch(`${'$'}{hub}/api/pli_delta?cursor=${'$'}{cursor}&max_age_secs=7200`);
-          if (!pliResp.ok) throw new Error(`PLI HTTP ${'$'}{pliResp.status}`);
-          const pliDelta = await pliResp.json();
-          cursor = pliDelta.cursor || cursor;
-          const ids = [];
-          (pliDelta.tiles || []).forEach(batch => {
-            (batch.tiles || []).forEach(pt => {
-              const p = parseAndroidTile(pt.tile_id); if (!p) return;
-              const id = pt.device_id || batch.device_id || 'unknown';
-              const sourceType = pt.source_type || batch.source_type || 'unknown';
-              if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
-              ids.push(id);
-              upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
-            });
-          });
+          let ids = [];
+          let pliOk = false;
+          let pliSource = 'none';
+
+          // Preferred canonical feed
+          try {
+            const pliResp = await fetch(`${'$'}{hub}/api/pli_delta?device_id=${'$'}{encodeURIComponent(ownCallsign())}&cursor=${'$'}{cursor}&max_age_secs=7200`);
+            if (pliResp.ok) {
+              const pliDelta = await pliResp.json();
+              cursor = pliDelta.cursor || cursor;
+              (pliDelta.tiles || []).forEach(batch => {
+                (batch.tiles || []).forEach(pt => {
+                  const p = parseAndroidTile(pt.tile_id); if (!p) return;
+                  const id = pt.device_id || batch.device_id || 'unknown';
+                  const sourceType = pt.source_type || batch.source_type || 'unknown';
+                  if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
+                  ids.push(id);
+                  upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+                });
+              });
+              pliOk = true;
+              pliSource = 'delta';
+            }
+          } catch (_) {}
+
+          // If delta has no ids, refresh from snapshot to avoid "appears then disappears" behavior.
+          if (!pliOk || ids.length === 0) {
+            try {
+              const r = await fetch(`${'$'}{hub}/api/pli?max_age_secs=7200`);
+              if (r.ok) {
+                const pli = await r.json();
+                ids = [];
+                (pli || []).forEach(pt => {
+                  const p = parseAndroidTile(pt.tile_id); if (!p) return;
+                  const id = pt.device_id || 'unknown';
+                  const sourceType = pt.source_type || 'unknown';
+                  if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
+                  ids.push(id);
+                  upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+                });
+                pliOk = true;
+                pliSource = 'snapshot';
+              }
+            } catch (_) {}
+          }
+
+          if (ids.length > 0) {
+            lastPliIds = [...new Set(ids)];
+            lastPliRxMs = Date.now();
+          }
+
           const diagEl = document.getElementById('diag');
-          if (diagEl) diagEl.textContent = `PLI ids: ${'$'}{[...new Set(ids)].join(', ') || 'none'}`;
+          if (diagEl) {
+            const ageSec = lastPliRxMs ? Math.max(0, Math.floor((Date.now() - lastPliRxMs) / 1000)) : -1;
+            const idText = lastPliIds.length ? lastPliIds.join(', ') : 'none';
+            diagEl.textContent = pliOk
+              ? `PLI(${pliSource}) ids: ${'$'}{idText} • age ${'$'}{ageSec >= 0 ? ageSec + 's' : 'n/a'}`
+              : `PLI: fetch failed (hub/network)`;
+          }
         }
 
         // Optional delta pull for non-entity layers.
