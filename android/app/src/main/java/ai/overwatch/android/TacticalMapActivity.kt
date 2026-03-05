@@ -171,15 +171,15 @@ class TacticalMapActivity : AppCompatActivity() {
 
     let cursor = 0;
     const markers = {};
-    let ownGpsMarker = null;
     let centeredOnOwn = false;
     let ownGps = { lat: $initLat, lon: $initLon };
 
     function ensureOwnMarker() {
+      // In COP mode, do not overlay a second local marker for same callsign.
+      if (PLI_MODE === 'COP') return;
+      const id = ownCallsign();
       const lat = ownGps.lat, lon = ownGps.lon;
-      const icon = L.divIcon({ className:'eud-self', html:'<div style="width:18px;height:18px;border-radius:50%;background:#22c55e;border:3px solid #fff;box-shadow:0 0 12px rgba(34,197,94,0.8);"></div>', iconSize:[18,18], iconAnchor:[9,9] });
-      if (!ownGpsMarker) ownGpsMarker = L.marker([lat, lon], { icon }).addTo(map).bindPopup(`<b>${'$'}{ownCallsign()}</b><br/>Local GPS`);
-      else ownGpsMarker.setLatLng([lat, lon]);
+      upsertMarker(id, lat, lon, 'local');
       if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
     }
 
@@ -190,7 +190,7 @@ class TacticalMapActivity : AppCompatActivity() {
       if (ownGps) cmp.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)} • mode ${'$'}{PLI_MODE}`;
       else cmp.textContent = 'Compare: waiting for local GPS…';
     }
-    function focusOwn() { const m = markers[ownCallsign()] || ownGpsMarker; if (m) map.setView(m.getLatLng(), 16); }
+    function focusOwn() { const m = markers[ownCallsign()]; if (m) map.setView(m.getLatLng(), 16); }
     function reloadDelta() { cursor = 0; document.getElementById('status').textContent = 'Reconnecting hub delta…'; pollDelta(); }
 
     function parseAndroidTile(tileId) {
@@ -242,7 +242,7 @@ class TacticalMapActivity : AppCompatActivity() {
       if (PLI_MODE === 'LOCAL') {
         ensureOwnMarker();
         statusEl.textContent = 'LOCAL mode • COP pull disabled';
-        countEl.textContent = `Entities: ${'$'}{ownGpsMarker ? 1 : 0} • updates: local`;
+        countEl.textContent = `Entities: ${'$'}{markers[ownCallsign()] ? 1 : 0} • updates: local`;
         return;
       }
 
