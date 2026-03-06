@@ -150,6 +150,13 @@ class TacticalMapActivity : AppCompatActivity() {
     <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
   </div>
 
+  <div id="entityWheel" style="display:none;position:fixed;z-index:10000;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:8px;min-width:180px;">
+    <div id="wheelTitle" style="font:12px monospace;color:#cbd5e1;margin-bottom:6px;">Entity</div>
+    <button class="sb-btn" onclick="wheelDirectMessage()">Direct Message</button>
+    <button class="sb-btn" onclick="wheelAddToGroup()">Add to Group</button>
+    <button class="sb-btn" onclick="hideEntityWheel()">Close</button>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const OWN_CALLSIGN = $callsignJs;
@@ -160,6 +167,62 @@ class TacticalMapActivity : AppCompatActivity() {
     const PULL_SAT = $pullSatJs;
 
     const map = L.map('map').setView([$initLat, $initLon], 15);
+    let wheelSelectedId = null;
+
+    function hideEntityWheel() {
+      const el = document.getElementById('entityWheel');
+      if (el) el.style.display = 'none';
+      wheelSelectedId = null;
+    }
+
+    function showEntityWheel(id, latlng) {
+      wheelSelectedId = id;
+      const p = map.latLngToContainerPoint(latlng);
+      const wheel = document.getElementById('entityWheel');
+      const title = document.getElementById('wheelTitle');
+      if (!wheel || !title) return;
+      title.textContent = `Entity: ${'$'}{id}`;
+      wheel.style.left = `${'$'}{Math.max(8, p.x + 12)}px`;
+      wheel.style.top = `${'$'}{Math.max(8, p.y - 10)}px`;
+      wheel.style.display = 'block';
+    }
+
+    async function postJson(url, payload) {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!r.ok) throw new Error(`HTTP ${'$'}{r.status}`);
+      return await r.text();
+    }
+
+    async function wheelDirectMessage() {
+      if (!wheelSelectedId) return;
+      const body = prompt(`Message to ${'$'}{wheelSelectedId}:`);
+      if (!body) return;
+      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+      try {
+        await postJson(`${'$'}{hub}/api/msg/send`, { from: ownCallsign(), to_device: wheelSelectedId, body });
+        document.getElementById('status').textContent = `DM sent -> ${'$'}{wheelSelectedId}`;
+        hideEntityWheel();
+      } catch (e) {
+        document.getElementById('status').textContent = `DM failed: ${'$'}{e}`;
+      }
+    }
+
+    async function wheelAddToGroup() {
+      if (!wheelSelectedId) return;
+      const gid = prompt(`Group ID for ${'$'}{wheelSelectedId}:`);
+      if (!gid) return;
+      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+      try {
+        await postJson(`${'$'}{hub}/api/msg/group/join`, { group_id: gid, name: gid, device_id: wheelSelectedId });
+        document.getElementById('status').textContent = `${'$'}{wheelSelectedId} added to ${'$'}{gid}`;
+        hideEntityWheel();
+      } catch (e) {
+        document.getElementById('status').textContent = `Group add failed: ${'$'}{e}`;
+      }
+    }
+
+    map.on('click', () => hideEntityWheel());
+
     const layerDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' });
     const layerSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' });
     const layerTopo = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' });
@@ -238,7 +301,13 @@ class TacticalMapActivity : AppCompatActivity() {
 
       if (!markers[id]) markers[id] = L.marker([rLat, rLon], { icon }).addTo(map);
       else { markers[id].setLatLng([rLat, rLon]); markers[id].setIcon(icon); }
-      markers[id].bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`).bindTooltip(id, { permanent: true, direction: 'top', offset: [0,-12] });
+      markers[id]
+        .bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`)
+        .bindTooltip(id, { permanent: true, direction: 'top', offset: [0,-12] });
+      markers[id].off('click');
+      markers[id].on('click', (e) => {
+        showEntityWheel(id, e.latlng || markers[id].getLatLng());
+      });
 
       applyLayerVisibility();
       if (isOwn) {
