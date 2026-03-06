@@ -195,7 +195,7 @@ class TacticalMapActivity : AppCompatActivity() {
     async function refreshMsgGroups() {
       const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
       try {
-        const r = await fetch(`${hub}/api/msg/groups?device_id=${encodeURIComponent(ownCallsign())}`);
+        const r = await fetch(`${'$'}{hub}/api/msg/groups?device_id=${'$'}{encodeURIComponent(ownCallsign())}`);
         if (!r.ok) return;
         msgGroups = await r.json();
       } catch (_) {}
@@ -206,11 +206,11 @@ class TacticalMapActivity : AppCompatActivity() {
       const type = document.getElementById('msgType')?.value || 'device';
       if (!sel) return;
       if (type === 'group') {
-        const groups = (msgGroups || []).map(g => ({id:g.group_id, label:`${g.name} (${g.group_id})`}));
-        sel.innerHTML = groups.map(g => `<option value="${g.id}">${g.label}</option>`).join('');
+        const groups = (msgGroups || []).map(g => ({id:g.group_id, label:`${'$'}{g.name} (${'$'}{g.group_id})`}));
+        sel.innerHTML = groups.map(g => `<option value="${'$'}{g.id}">${'$'}{g.label}</option>`).join('');
       } else {
         const ids = Object.keys(markers).filter(x => x && x !== ownCallsign());
-        sel.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+        sel.innerHTML = ids.map(id => `<option value="${'$'}{id}">${'$'}{id}</option>`).join('');
       }
     }
 
@@ -224,12 +224,12 @@ class TacticalMapActivity : AppCompatActivity() {
       const req = { from: ownCallsign(), body };
       if (type === 'group') req.to_group = target; else req.to_device = target;
       try {
-        const r = await fetch(`${hub}/api/msg/send`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(req) });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        if (info) info.textContent = `Sent -> ${target}`;
+        const r = await fetch(`${'$'}{hub}/api/msg/send`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(req) });
+        if (!r.ok) throw new Error(`HTTP ${'$'}{r.status}`);
+        if (info) info.textContent = `Sent -> ${'$'}{target}`;
         const b = document.getElementById('msgBody'); if (b) b.value = '';
       } catch (e) {
-        if (info) info.textContent = `Send failed: ${e}`;
+        if (info) info.textContent = `Send failed: ${'$'}{e}`;
       }
     }
 
@@ -362,7 +362,7 @@ class TacticalMapActivity : AppCompatActivity() {
       if (prev) { const dy = lat - prev.lat, dx = lon - prev.lon; if (Math.abs(dx)+Math.abs(dy) > 0.00001) heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360; }
       entityLast[id] = { lat, lon };
 
-      const icon = L.divIcon({ className: 'eud-marker', html: `<div style="position:relative;width:22px;height:22px;"><div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div><div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${ '$'}{heading}deg);transform-origin:50% 12px;"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] });
+      const icon = L.divIcon({ className: 'eud-marker', html: `<div style="position:relative;width:22px;height:22px;"><div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div><div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${'$'}{ '$'}{heading}deg);transform-origin:50% 12px;"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] });
 
       if (!markers[id]) markers[id] = L.marker([rLat, rLon], { icon }).addTo(map);
       else { markers[id].setLatLng([rLat, rLon]); markers[id].setIcon(icon); }
