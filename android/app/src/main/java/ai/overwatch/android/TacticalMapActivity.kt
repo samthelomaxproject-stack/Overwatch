@@ -114,7 +114,7 @@ class TacticalMapActivity : AppCompatActivity() {
   <style>
     html, body, #map { height: 100%; margin: 0; background: #0b1220; }
     .hud { position: fixed; top: 8px; left: 8px; z-index: 9999; background: rgba(11,18,32,0.85); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font: 12px monospace; padding: 8px 10px; max-width: 64vw; }
-    .sidebar { position: fixed; top: 8px; right: 8px; z-index: 9999; width: 280px; background: rgba(11,18,32,0.9); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font: 12px monospace; padding: 10px; }
+    .sidebar { position: fixed; top: 8px; right: 8px; z-index: 9999; width: min(86vw, 280px); max-height: calc(100vh - 16px); overflow-y: auto; background: rgba(11,18,32,0.9); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font: 12px monospace; padding: 10px; }
     .sb-row { margin-bottom: 8px; }
     .sb-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; }
     .sb-input { width: 100%; box-sizing: border-box; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 6px; }
@@ -151,9 +151,9 @@ class TacticalMapActivity : AppCompatActivity() {
   </div>
 
 
-  <button id="msgFab" onclick="toggleMsgPanel()" style="position:fixed;right:18px;bottom:18px;z-index:10001;width:54px;height:54px;border-radius:50%;border:1px solid #334155;background:rgba(15,23,42,0.95);color:#e2e8f0;font-size:22px;">✉</button>
+  <button id="msgFab" onclick="toggleMsgPanel()" style="position:fixed;right:18px;bottom:18px;z-index:10001;width:54px;height:54px;border-radius:50%;border:1px solid #334155;background:rgba(15,23,42,0.95);color:#e2e8f0;font-size:22px;">✉<span id="msgBadge" style="display:none;position:absolute;right:8px;top:8px;width:10px;height:10px;border-radius:50%;background:#22c55e;"></span></button>
 
-  <div id="msgPanel" style="display:none;position:fixed;right:18px;bottom:82px;z-index:10001;width:320px;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:10px;">
+  <div id="msgPanel" style="display:none;position:fixed;right:18px;bottom:82px;z-index:10001;width:min(92vw,320px);max-height:55vh;overflow-y:auto;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:10px;">
     <div style="font:12px monospace;color:#cbd5e1;margin-bottom:6px;">Messaging</div>
     <div class="sb-label">Target Type</div>
     <select id="msgType" class="sb-input" onchange="refreshMsgTargets()"><option value="device">Individual</option><option value="group">Group</option></select>
@@ -162,7 +162,9 @@ class TacticalMapActivity : AppCompatActivity() {
     <div class="sb-label" style="margin-top:6px;">Body</div>
     <input id="msgBody" class="sb-input" placeholder="Message" />
     <button class="sb-btn" onclick="sendPanelMessage()">Send</button>
+    <button class="sb-btn" onclick="pollInbox()">Refresh Inbox</button>
     <div id="msgInfo" style="font:11px monospace;color:#93c5fd;margin-top:6px;">Ready</div>
+    <div id="msgInbox" style="margin-top:8px;max-height:180px;overflow-y:auto;border:1px solid #334155;border-radius:6px;padding:6px;font:11px monospace;color:#e2e8f0;"></div>
   </div>
 
   <div id="entityWheel" style="display:none;position:fixed;z-index:10000;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:8px;min-width:180px;">
@@ -184,12 +186,24 @@ class TacticalMapActivity : AppCompatActivity() {
     const map = L.map('map').setView([$initLat, $initLon], 15);
     let wheelSelectedId = null;
     let msgGroups = [];
+    let msgUnread = 0;
+    let msgAfterId = 0;
+
+    function renderMsgBadge() {
+      const b = document.getElementById('msgBadge');
+      if (!b) return;
+      b.style.display = msgUnread > 0 ? 'block' : 'none';
+    }
 
     function toggleMsgPanel() {
       const p = document.getElementById('msgPanel');
       if (!p) return;
       p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
-      if (p.style.display === 'block') { refreshMsgGroups(); refreshMsgTargets(); }
+      if (p.style.display === 'block') {
+        refreshMsgGroups();
+        refreshMsgTargets();
+        pollInbox(true);
+      }
     }
 
     async function refreshMsgGroups() {
@@ -230,6 +244,43 @@ class TacticalMapActivity : AppCompatActivity() {
         const b = document.getElementById('msgBody'); if (b) b.value = '';
       } catch (e) {
         if (info) info.textContent = `Send failed: ${'$'}{e}`;
+      }
+    }
+
+    async function pollInbox(markRead = false) {
+      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+      const info = document.getElementById('msgInfo');
+      const box = document.getElementById('msgInbox');
+      try {
+        const r = await fetch(`${'$'}{hub}/api/msg/inbox?device_id=${'$'}{encodeURIComponent(ownCallsign())}&after_id=${'$'}{msgAfterId}&limit=100`);
+        if (!r.ok) throw new Error(`HTTP ${'$'}{r.status}`);
+        const arr = await r.json();
+        if (!Array.isArray(arr)) return;
+        let maxId = msgAfterId;
+        const lines = [];
+        for (const m of arr) {
+          maxId = Math.max(maxId, Number(m.id || 0));
+          lines.push(`from ${'$'}{m.from}: ${'$'}{m.body}`);
+          if (markRead) {
+            try {
+              await fetch(`${'$'}{hub}/api/msg/ack`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ device_id: ownCallsign(), id: m.id }) });
+            } catch (_) {}
+          }
+        }
+        if (arr.length > 0) {
+          msgAfterId = maxId;
+          if (!markRead) msgUnread += arr.length;
+        }
+        if (markRead) msgUnread = 0;
+        renderMsgBadge();
+        if (box && lines.length) {
+          const existing = box.innerText || '';
+          box.innerText = `${'$'}{existing}${'$'}{existing ? '\n' : ''}${'$'}{lines.join('\n')}`.trim();
+          box.scrollTop = box.scrollHeight;
+        }
+        if (info) info.textContent = `Inbox ${'$'}{arr.length ? 'updated' : 'no new messages'}`;
+      } catch (e) {
+        if (info) info.textContent = `Inbox failed: ${'$'}{e}`;
       }
     }
 
@@ -497,7 +548,10 @@ class TacticalMapActivity : AppCompatActivity() {
     ensureOwnMarker();
     document.getElementById('status').textContent = 'Map loaded • connecting to hub delta…';
     updateCompare();
+    renderMsgBadge();
+    setInterval(() => pollInbox(false), 5000);
     setInterval(pollDelta, 3000);
+    pollInbox(false);
     pollDelta();
   </script>
 </body>
