@@ -2525,6 +2525,7 @@ dependencies = [
  "once_cell",
  "prost",
  "prost-build",
+ "regex",
  "serde",
  "serde_json",
  "serialport",
