@@ -150,6 +150,21 @@ class TacticalMapActivity : AppCompatActivity() {
     <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
   </div>
 
+
+  <button id="msgFab" onclick="toggleMsgPanel()" style="position:fixed;right:18px;bottom:18px;z-index:10001;width:54px;height:54px;border-radius:50%;border:1px solid #334155;background:rgba(15,23,42,0.95);color:#e2e8f0;font-size:22px;">✉</button>
+
+  <div id="msgPanel" style="display:none;position:fixed;right:18px;bottom:82px;z-index:10001;width:320px;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:10px;">
+    <div style="font:12px monospace;color:#cbd5e1;margin-bottom:6px;">Messaging</div>
+    <div class="sb-label">Target Type</div>
+    <select id="msgType" class="sb-input" onchange="refreshMsgTargets()"><option value="device">Individual</option><option value="group">Group</option></select>
+    <div class="sb-label" style="margin-top:6px;">Target</div>
+    <select id="msgTarget" class="sb-input"></select>
+    <div class="sb-label" style="margin-top:6px;">Body</div>
+    <input id="msgBody" class="sb-input" placeholder="Message" />
+    <button class="sb-btn" onclick="sendPanelMessage()">Send</button>
+    <div id="msgInfo" style="font:11px monospace;color:#93c5fd;margin-top:6px;">Ready</div>
+  </div>
+
   <div id="entityWheel" style="display:none;position:fixed;z-index:10000;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:8px;min-width:180px;">
     <div id="wheelTitle" style="font:12px monospace;color:#cbd5e1;margin-bottom:6px;">Entity</div>
     <button class="sb-btn" onclick="wheelDirectMessage()">Direct Message</button>
@@ -168,6 +183,55 @@ class TacticalMapActivity : AppCompatActivity() {
 
     const map = L.map('map').setView([$initLat, $initLon], 15);
     let wheelSelectedId = null;
+    let msgGroups = [];
+
+    function toggleMsgPanel() {
+      const p = document.getElementById('msgPanel');
+      if (!p) return;
+      p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+      if (p.style.display === 'block') { refreshMsgGroups(); refreshMsgTargets(); }
+    }
+
+    async function refreshMsgGroups() {
+      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+      try {
+        const r = await fetch(`${hub}/api/msg/groups?device_id=${encodeURIComponent(ownCallsign())}`);
+        if (!r.ok) return;
+        msgGroups = await r.json();
+      } catch (_) {}
+    }
+
+    function refreshMsgTargets() {
+      const sel = document.getElementById('msgTarget');
+      const type = document.getElementById('msgType')?.value || 'device';
+      if (!sel) return;
+      if (type === 'group') {
+        const groups = (msgGroups || []).map(g => ({id:g.group_id, label:`${g.name} (${g.group_id})`}));
+        sel.innerHTML = groups.map(g => `<option value="${g.id}">${g.label}</option>`).join('');
+      } else {
+        const ids = Object.keys(markers).filter(x => x && x !== ownCallsign());
+        sel.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+      }
+    }
+
+    async function sendPanelMessage() {
+      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+      const type = document.getElementById('msgType')?.value || 'device';
+      const target = document.getElementById('msgTarget')?.value || '';
+      const body = document.getElementById('msgBody')?.value || '';
+      const info = document.getElementById('msgInfo');
+      if (!target || !body) { if (info) info.textContent = 'Target/body required'; return; }
+      const req = { from: ownCallsign(), body };
+      if (type === 'group') req.to_group = target; else req.to_device = target;
+      try {
+        const r = await fetch(`${hub}/api/msg/send`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(req) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        if (info) info.textContent = `Sent -> ${target}`;
+        const b = document.getElementById('msgBody'); if (b) b.value = '';
+      } catch (e) {
+        if (info) info.textContent = `Send failed: ${e}`;
+      }
+    }
 
     function hideEntityWheel() {
       const el = document.getElementById('entityWheel');
@@ -215,6 +279,7 @@ class TacticalMapActivity : AppCompatActivity() {
       try {
         await postJson(`${'$'}{hub}/api/msg/group/join`, { group_id: gid, name: gid, device_id: wheelSelectedId });
         document.getElementById('status').textContent = `${'$'}{wheelSelectedId} added to ${'$'}{gid}`;
+        refreshMsgGroups();
         hideEntityWheel();
       } catch (e) {
         document.getElementById('status').textContent = `Group add failed: ${'$'}{e}`;

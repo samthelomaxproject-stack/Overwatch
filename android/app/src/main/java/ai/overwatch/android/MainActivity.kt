@@ -14,14 +14,6 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.Executors
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -39,13 +31,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pullSatCheck: CheckBox
     private lateinit var statusText: TextView
     private lateinit var debugLogText: TextView
-    private lateinit var msgTargetInput: EditText
-    private lateinit var msgBodyInput: EditText
-    private lateinit var groupIdInput: EditText
-    private lateinit var msgLogText: TextView
-
-    private val io = Executors.newSingleThreadExecutor()
-    private var lastInboxId: Long = 0
 
     private val collectorReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -80,10 +65,6 @@ class MainActivity : AppCompatActivity() {
         pullSatCheck = findViewById(R.id.pullSatCheck)
         statusText = findViewById(R.id.statusText)
         debugLogText = findViewById(R.id.debugLogText)
-        msgTargetInput = findViewById(R.id.msgTargetInput)
-        msgBodyInput = findViewById(R.id.msgBodyInput)
-        groupIdInput = findViewById(R.id.groupIdInput)
-        msgLogText = findViewById(R.id.msgLogText)
 
         callsignInput.setText(ConfigStore.getCallsign(this))
         hubUrlInput.setText(ConfigStore.getHubUrl(this))
@@ -154,10 +135,6 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
-        findViewById<Button>(R.id.sendMsgBtn).setOnClickListener { sendMessage() }
-        findViewById<Button>(R.id.pollInboxBtn).setOnClickListener { pollInbox() }
-        findViewById<Button>(R.id.createGroupBtn).setOnClickListener { upsertGroup(join = false) }
-        findViewById<Button>(R.id.joinGroupBtn).setOnClickListener { upsertGroup(join = true) }
     }
 
     override fun onStart() {
@@ -182,110 +159,6 @@ class MainActivity : AppCompatActivity() {
         val lines = (existing + "\n[$now] $msg").trim().lines()
         val trimmed = if (lines.size > 80) lines.takeLast(80).joinToString("\n") else lines.joinToString("\n")
         debugLogText.text = trimmed
-    }
-
-    private fun appendMsgLog(msg: String) {
-        val now = java.time.LocalTime.now().withNano(0).toString()
-        val existing = msgLogText.text?.toString().orEmpty()
-        val lines = (existing + "\n[$now] $msg").trim().lines()
-        val trimmed = if (lines.size > 120) lines.takeLast(120).joinToString("\n") else lines.joinToString("\n")
-        msgLogText.text = trimmed
-    }
-
-    private fun hubBase(): String = ConfigStore.getHubUrl(this).trim().trimEnd('/')
-    private fun selfId(): String = ConfigStore.getCallsign(this).trim().ifEmpty { "ANDROID-EUD" }
-
-    private fun httpJson(method: String, url: String, body: JSONObject? = null): String {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.requestMethod = method
-        conn.connectTimeout = 5000
-        conn.readTimeout = 7000
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.doInput = true
-        if (body != null) {
-            conn.doOutput = true
-            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-        }
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val text = BufferedReader(InputStreamReader(stream)).use { it.readText() }
-        if (code !in 200..299) throw IllegalStateException("HTTP $code: $text")
-        return text
-    }
-
-    private fun sendMessage() {
-        val target = msgTargetInput.text.toString().trim()
-        val body = msgBodyInput.text.toString().trim()
-        if (target.isEmpty() || body.isEmpty()) {
-            statusText.text = "Message target/body required"
-            return
-        }
-        io.execute {
-            try {
-                val req = JSONObject().put("from", selfId()).put("body", body)
-                if (target.startsWith("group:")) req.put("to_group", target.removePrefix("group:"))
-                else req.put("to_device", target)
-                val out = httpJson("POST", "${hubBase()}/api/msg/send", req)
-                runOnUiThread {
-                    appendMsgLog("TX -> $target :: $body")
-                    statusText.text = "Message sent"
-                    msgBodyInput.setText("")
-                }
-            } catch (e: Exception) {
-                runOnUiThread { statusText.text = "Send failed: ${e.message}" }
-            }
-        }
-    }
-
-    private fun pollInbox() {
-        io.execute {
-            try {
-                val raw = httpJson("GET", "${hubBase()}/api/msg/inbox?device_id=${selfId()}&after_id=$lastInboxId&limit=100")
-                val arr = JSONArray(raw)
-                var maxId = lastInboxId
-                val logs = mutableListOf<String>()
-                for (i in 0 until arr.length()) {
-                    val m = arr.getJSONObject(i)
-                    val id = m.optLong("id", 0L)
-                    val from = m.optString("from", "?")
-                    val txt = m.optString("body", "")
-                    logs += "RX <$from>: $txt"
-                    if (id > maxId) maxId = id
-                }
-                lastInboxId = maxId
-                runOnUiThread {
-                    if (logs.isEmpty()) appendMsgLog("Inbox: no new messages")
-                    else logs.forEach { appendMsgLog(it) }
-                    statusText.text = "Inbox synced"
-                }
-            } catch (e: Exception) {
-                runOnUiThread { statusText.text = "Inbox failed: ${e.message}" }
-            }
-        }
-    }
-
-    private fun upsertGroup(join: Boolean) {
-        val gid = groupIdInput.text.toString().trim()
-        if (gid.isEmpty()) {
-            statusText.text = "Group ID required"
-            return
-        }
-        io.execute {
-            try {
-                val req = JSONObject()
-                    .put("group_id", gid)
-                    .put("name", gid)
-                    .put("device_id", selfId())
-                val endpoint = if (join) "/api/msg/group/join" else "/api/msg/group/upsert"
-                httpJson("POST", "${hubBase()}$endpoint", req)
-                runOnUiThread {
-                    appendMsgLog(if (join) "Joined group: $gid" else "Created group: $gid")
-                    statusText.text = "Group updated"
-                }
-            } catch (e: Exception) {
-                runOnUiThread { statusText.text = "Group op failed: ${e.message}" }
-            }
-        }
     }
 
     private fun requestPermissionsIfNeeded() {
