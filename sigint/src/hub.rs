@@ -69,6 +69,32 @@ CREATE TABLE IF NOT EXISTS delta_cursors (
     device_id  TEXT PRIMARY KEY,
     cursor_ts  INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS msg_groups (
+    group_id    TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    created_by  TEXT,
+    updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS msg_group_members (
+    group_id    TEXT NOT NULL,
+    device_id   TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'member',
+    joined_at   INTEGER NOT NULL,
+    PRIMARY KEY (group_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_device_id     TEXT NOT NULL,
+    to_device_id       TEXT,
+    to_group_id        TEXT,
+    body               TEXT NOT NULL,
+    sent_at            INTEGER NOT NULL,
+    delivered_at       INTEGER,
+    read_at            INTEGER
+);
 "#;
 
 // ── Hub DB ────────────────────────────────────────────────────────────────────
@@ -494,7 +520,133 @@ impl HubDb {
 
         rows.collect::<Result<Vec<_>, _>>().map_err(Error::Sqlite)
     }
+
+    pub fn upsert_group(&mut self, group_id: &str, name: &str, device_id: &str, now: u64) -> Result<(), Error> {
+        self.conn.execute(
+            "INSERT INTO msg_groups (group_id, name, created_by, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(group_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at",
+            params![group_id, name, device_id, now as i64],
+        )?;
+        self.conn.execute(
+            "INSERT INTO msg_group_members (group_id, device_id, role, joined_at) VALUES (?1, ?2, 'owner', ?3)
+             ON CONFLICT(group_id, device_id) DO UPDATE SET role = excluded.role",
+            params![group_id, device_id, now as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn join_group(&mut self, group_id: &str, device_id: &str, now: u64) -> Result<(), Error> {
+        self.conn.execute(
+            "INSERT INTO msg_group_members (group_id, device_id, role, joined_at) VALUES (?1, ?2, 'member', ?3)
+             ON CONFLICT(group_id, device_id) DO NOTHING",
+            params![group_id, device_id, now as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_groups(&self, device_id: Option<&str>) -> Result<Vec<GroupInfo>, Error> {
+        let mut groups = Vec::new();
+        let mut stmt = if device_id.is_some() {
+            self.conn.prepare(
+                "SELECT g.group_id, g.name FROM msg_groups g
+                 JOIN msg_group_members m ON m.group_id = g.group_id
+                 WHERE m.device_id = ?1 ORDER BY g.updated_at DESC"
+            )?
+        } else {
+            self.conn.prepare("SELECT group_id, name FROM msg_groups ORDER BY updated_at DESC")?
+        };
+
+        let rows = if let Some(d) = device_id {
+            stmt.query_map(params![d], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        for (gid, name) in rows {
+            let mut mstmt = self.conn.prepare("SELECT device_id FROM msg_group_members WHERE group_id = ?1 ORDER BY joined_at ASC")?;
+            let members = mstmt.query_map(params![gid.clone()], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            groups.push(GroupInfo { group_id: gid, name, members });
+        }
+        Ok(groups)
+    }
+
+    pub fn send_message(&mut self, req: &MsgSendReq, now: u64) -> Result<u64, Error> {
+        if req.body.trim().is_empty() { return Err(Error::Other("empty body".into())); }
+        if req.to_device.is_none() && req.to_group.is_none() {
+            return Err(Error::Other("missing recipient".into()));
+        }
+
+        let tx = self.conn.transaction()?;
+        let mut last_id = 0u64;
+
+        if let Some(to_device) = &req.to_device {
+            tx.execute(
+                "INSERT INTO messages (from_device_id, to_device_id, to_group_id, body, sent_at) VALUES (?1, ?2, NULL, ?3, ?4)",
+                params![req.from, to_device, req.body, now as i64],
+            )?;
+            last_id = tx.last_insert_rowid() as u64;
+        }
+
+        if let Some(to_group) = &req.to_group {
+            let mut stmt = tx.prepare("SELECT device_id FROM msg_group_members WHERE group_id = ?1")?;
+            let members = stmt.query_map(params![to_group], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            for m in members {
+                tx.execute(
+                    "INSERT INTO messages (from_device_id, to_device_id, to_group_id, body, sent_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![req.from, m, to_group, req.body, now as i64],
+                )?;
+                last_id = tx.last_insert_rowid() as u64;
+            }
+        }
+
+        tx.commit()?;
+        Ok(last_id)
+    }
+
+    pub fn inbox(&mut self, device_id: &str, after_id: u64, limit: u64) -> Result<Vec<MsgRow>, Error> {
+        let lim = limit.clamp(1, 200) as i64;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, from_device_id, to_device_id, to_group_id, body, sent_at, delivered_at, read_at
+             FROM messages
+             WHERE to_device_id = ?1 AND id > ?2
+             ORDER BY id ASC LIMIT ?3"
+        )?;
+        let rows = stmt.query_map(params![device_id, after_id as i64, lim], |r| {
+            Ok(MsgRow {
+                id: r.get::<_, i64>(0)? as u64,
+                from: r.get::<_, String>(1)?,
+                to_device: r.get::<_, Option<String>>(2)?,
+                to_group: r.get::<_, Option<String>>(3)?,
+                body: r.get::<_, String>(4)?,
+                sent_at: (r.get::<_, i64>(5)?).max(0) as u64,
+                delivered_at: r.get::<_, Option<i64>>(6)?.map(|v| v.max(0) as u64),
+                read_at: r.get::<_, Option<i64>>(7)?.map(|v| v.max(0) as u64),
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        self.conn.execute(
+            "UPDATE messages SET delivered_at = COALESCE(delivered_at, ?2)
+             WHERE to_device_id = ?1 AND id > ?3",
+            params![device_id, now, after_id as i64],
+        )?;
+
+        Ok(rows)
+    }
+
+    pub fn ack_read(&mut self, device_id: &str, id: u64, now: u64) -> Result<(), Error> {
+        self.conn.execute(
+            "UPDATE messages SET read_at = ?1 WHERE id = ?2 AND to_device_id = ?3",
+            params![now as i64, id as i64, device_id],
+        )?;
+        Ok(())
+    }
 }
+
 
 // ── Minimal HTTP server ───────────────────────────────────────────────────────
 
@@ -514,6 +666,46 @@ pub struct PliPoint {
     pub source_type: String,
     pub last_seen: u64,
     pub tile_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MsgSendReq {
+    pub from: String,
+    pub to_device: Option<String>,
+    pub to_group: Option<String>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MsgRow {
+    pub id: u64,
+    pub from: String,
+    pub to_device: Option<String>,
+    pub to_group: Option<String>,
+    pub body: String,
+    pub sent_at: u64,
+    pub delivered_at: Option<u64>,
+    pub read_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GroupUpsertReq {
+    pub group_id: String,
+    pub name: Option<String>,
+    pub device_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GroupInfo {
+    pub group_id: String,
+    pub name: String,
+    pub members: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MsgAckReq {
+    pub device_id: String,
+    pub id: u64,
 }
 
 /// Query node statuses from hub DB for debug/monitoring.
@@ -683,6 +875,113 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             let s = state.lock().unwrap();
             match s.db.get_pli_points(max_age) {
                 Ok(points) => (200, serde_json::to_string(&points).unwrap()),
+                Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
+        }
+
+        ("POST", "/api/msg/send") => {
+            let mut buf = vec![0u8; content_length.min(512_000)];
+            use std::io::Read;
+            if let Err(e) = reader.read_exact(&mut buf) {
+                (400, format!(r#"{{"error":"bad body: {e}"}}"#))
+            } else {
+                match serde_json::from_slice::<MsgSendReq>(&buf) {
+                    Ok(req) => {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let mut s = state.lock().unwrap();
+                        match s.db.send_message(&req, now) {
+                            Ok(id) => (200, format!(r#"{{"ok":true,"id":{id}}}"#)),
+                            Err(e) => (400, format!(r#"{{"error":"{e}"}}"#)),
+                        }
+                    }
+                    Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
+                }
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/msg/inbox") => {
+            let device_id = parse_query_param(p, "device_id").unwrap_or_default();
+            let after_id = parse_query_param(p, "after_id").and_then(|v| v.parse().ok()).unwrap_or(0u64);
+            let limit = parse_query_param(p, "limit").and_then(|v| v.parse().ok()).unwrap_or(100u64);
+            if device_id.is_empty() {
+                (400, r#"{"error":"missing device_id"}"#.to_string())
+            } else {
+                let mut s = state.lock().unwrap();
+                match s.db.inbox(&device_id, after_id, limit) {
+                    Ok(rows) => (200, serde_json::to_string(&rows).unwrap()),
+                    Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+                }
+            }
+        }
+
+        ("POST", "/api/msg/ack") => {
+            let mut buf = vec![0u8; content_length.min(64_000)];
+            use std::io::Read;
+            if let Err(e) = reader.read_exact(&mut buf) {
+                (400, format!(r#"{{"error":"bad body: {e}"}}"#))
+            } else {
+                match serde_json::from_slice::<MsgAckReq>(&buf) {
+                    Ok(req) => {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let mut s = state.lock().unwrap();
+                        match s.db.ack_read(&req.device_id, req.id, now) {
+                            Ok(_) => (200, r#"{"ok":true}"#.to_string()),
+                            Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+                        }
+                    }
+                    Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
+                }
+            }
+        }
+
+        ("POST", "/api/msg/group/upsert") => {
+            let mut buf = vec![0u8; content_length.min(64_000)];
+            use std::io::Read;
+            if let Err(e) = reader.read_exact(&mut buf) {
+                (400, format!(r#"{{"error":"bad body: {e}"}}"#))
+            } else {
+                match serde_json::from_slice::<GroupUpsertReq>(&buf) {
+                    Ok(req) => {
+                        let name = req.name.clone().unwrap_or_else(|| req.group_id.clone());
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let mut s = state.lock().unwrap();
+                        let a = s.db.upsert_group(&req.group_id, &name, &req.device_id, now);
+                        let b = s.db.join_group(&req.group_id, &req.device_id, now);
+                        match (a,b) {
+                            (Ok(_), Ok(_)) => (200, r#"{"ok":true}"#.to_string()),
+                            (Err(e), _) | (_, Err(e)) => (500, format!(r#"{{"error":"{e}"}}"#)),
+                        }
+                    }
+                    Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
+                }
+            }
+        }
+
+        ("POST", "/api/msg/group/join") => {
+            let mut buf = vec![0u8; content_length.min(64_000)];
+            use std::io::Read;
+            if let Err(e) = reader.read_exact(&mut buf) {
+                (400, format!(r#"{{"error":"bad body: {e}"}}"#))
+            } else {
+                match serde_json::from_slice::<GroupUpsertReq>(&buf) {
+                    Ok(req) => {
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let mut s = state.lock().unwrap();
+                        match s.db.join_group(&req.group_id, &req.device_id, now) {
+                            Ok(_) => (200, r#"{"ok":true}"#.to_string()),
+                            Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+                        }
+                    }
+                    Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
+                }
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/msg/groups") => {
+            let device_id = parse_query_param(p, "device_id");
+            let s = state.lock().unwrap();
+            match s.db.list_groups(device_id.as_deref()) {
+                Ok(groups) => (200, serde_json::to_string(&groups).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
             }
         }
