@@ -521,6 +521,72 @@ impl HubDb {
         rows.collect::<Result<Vec<_>, _>>().map_err(Error::Sqlite)
     }
 
+    pub fn get_cop_snapshot(&self, max_age_secs: u64) -> Result<CopSnapshot, Error> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff = (ts as i64).saturating_sub(max_age_secs as i64);
+
+        let entities = self.get_pli_points(max_age_secs)?;
+
+        let mut heat_stmt = self.conn.prepare(
+            "SELECT tile_id, sensor_type, dimension, mean_val, max_val, sample_count, updated_at
+             FROM merged_tiles
+             WHERE updated_at >= ?1 AND sensor_type IN ('rf','wifi')
+             ORDER BY updated_at DESC LIMIT 2000"
+        )?;
+        let heat = heat_stmt.query_map(params![cutoff], |r| {
+            Ok(serde_json::json!({
+                "tile_id": r.get::<_, String>(0)?,
+                "sensor_type": r.get::<_, String>(1)?,
+                "dimension": r.get::<_, String>(2)?,
+                "mean": r.get::<_, f64>(3)?,
+                "max": r.get::<_, f64>(4)?,
+                "count": r.get::<_, i64>(5)?,
+                "updated_at": r.get::<_, i64>(6)?,
+            }))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        let mut cam_stmt = self.conn.prepare(
+            "SELECT tile_id, sensor_type, dimension, mean_val, max_val, sample_count, updated_at
+             FROM merged_tiles
+             WHERE updated_at >= ?1 AND sensor_type = 'cctv'
+             ORDER BY updated_at DESC LIMIT 1000"
+        )?;
+        let cameras = cam_stmt.query_map(params![cutoff], |r| {
+            Ok(serde_json::json!({
+                "tile_id": r.get::<_, String>(0)?,
+                "sensor_type": r.get::<_, String>(1)?,
+                "dimension": r.get::<_, String>(2)?,
+                "mean": r.get::<_, f64>(3)?,
+                "max": r.get::<_, f64>(4)?,
+                "count": r.get::<_, i64>(5)?,
+                "updated_at": r.get::<_, i64>(6)?,
+            }))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        let mut sat_stmt = self.conn.prepare(
+            "SELECT tile_id, sensor_type, dimension, mean_val, max_val, sample_count, updated_at
+             FROM merged_tiles
+             WHERE updated_at >= ?1 AND sensor_type = 'sat'
+             ORDER BY updated_at DESC LIMIT 1000"
+        )?;
+        let satellites = sat_stmt.query_map(params![cutoff], |r| {
+            Ok(serde_json::json!({
+                "tile_id": r.get::<_, String>(0)?,
+                "sensor_type": r.get::<_, String>(1)?,
+                "dimension": r.get::<_, String>(2)?,
+                "mean": r.get::<_, f64>(3)?,
+                "max": r.get::<_, f64>(4)?,
+                "count": r.get::<_, i64>(5)?,
+                "updated_at": r.get::<_, i64>(6)?,
+            }))
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        Ok(CopSnapshot { ts, entities, heat, cameras, satellites })
+    }
+
     pub fn upsert_group(&mut self, group_id: &str, name: &str, device_id: &str, now: u64) -> Result<(), Error> {
         self.conn.execute(
             "INSERT INTO msg_groups (group_id, name, created_by, updated_at) VALUES (?1, ?2, ?3, ?4)
@@ -868,12 +934,8 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7200u64);
             let s = state.lock().unwrap();
-            match s.db.get_pli_points(max_age) {
-                Ok(entities) => {
-                    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                    let snap = CopSnapshot { ts, entities, heat: vec![], cameras: vec![], satellites: vec![] };
-                    (200, serde_json::to_string(&snap).unwrap())
-                }
+            match s.db.get_cop_snapshot(max_age) {
+                Ok(snap) => (200, serde_json::to_string(&snap).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
             }
         }

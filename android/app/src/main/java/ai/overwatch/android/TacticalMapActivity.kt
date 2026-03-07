@@ -471,6 +471,10 @@ class TacticalMapActivity : AppCompatActivity() {
                   ids.push(id);
                   upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
                 });
+                const diagEl = document.getElementById('diag');
+                if (diagEl) {
+                  diagEl.textContent = `COP ts:${'$'}{snap.ts || 'n/a'} ent:${'$'}{(snap.entities||[]).length} heat:${'$'}{(snap.heat||[]).length} cam:${'$'}{(snap.cameras||[]).length} sat:${'$'}{(snap.satellites||[]).length}`;
+                }
                 pliOk = true;
                 pliSource = 'cop_snapshot';
               }
