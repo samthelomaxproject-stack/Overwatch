@@ -467,14 +467,14 @@ class TacticalMapActivity : AppCompatActivity() {
       const nextHeat = {};
       for (const h of heat) {
         const p = parseAnyTile(h.tile_id); if (!p) continue;
-        const key = `${h.tile_id}:${h.dimension || ''}`;
+        const key = `${'$'}{h.tile_id}:${'$'}{h.dimension || ''}`;
         const intensity = Math.max(0.1, Math.min(1.0, Number(h.max || h.mean || 0) / 100.0));
         const radius = 18 + Math.round(intensity * 26);
         const color = (h.sensor_type === 'wifi') ? '#22d3ee' : '#f97316';
         let c = heatLayers[key];
         if (!c) {
           c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
-          c.bindPopup(`HEAT ${h.sensor_type || ''} ${h.dimension || ''}<br/>max:${h.max} mean:${h.mean}`);
+          c.bindPopup(`HEAT ${'$'}{h.sensor_type || ''} ${'$'}{h.dimension || ''}<br/>max:${'$'}{h.max} mean:${'$'}{h.mean}`);
           heatLayers[key] = c;
         } else {
           c.setLatLng([p.lat, p.lon]);
@@ -487,12 +487,12 @@ class TacticalMapActivity : AppCompatActivity() {
       const nextCam = {};
       for (const c of cams) {
         const p = parseAnyTile(c.tile_id); if (!p) continue;
-        const key = `${c.tile_id}:${c.dimension || ''}`;
+        const key = `${'$'}{c.tile_id}:${'$'}{c.dimension || ''}`;
         let m = camLayers[key];
         const icon = L.divIcon({ className:'cop-cam', html:'<div style="width:10px;height:10px;border-radius:50%;background:#22c55e;border:2px solid #fff"></div>', iconSize:[10,10], iconAnchor:[5,5] });
         if (!m) {
           m = L.marker([p.lat,p.lon], { icon });
-          m.bindPopup(`CAM ${c.dimension || ''}<br/>count:${c.count || 0}`);
+          m.bindPopup(`CAM ${'$'}{c.dimension || ''}<br/>count:${'$'}{c.count || 0}`);
           camLayers[key] = m;
         } else m.setLatLng([p.lat,p.lon]);
         nextCam[key] = true;
@@ -502,12 +502,12 @@ class TacticalMapActivity : AppCompatActivity() {
       const nextSat = {};
       for (const t of sats) {
         const p = parseAnyTile(t.tile_id); if (!p) continue;
-        const key = `${t.tile_id}:${t.dimension || ''}`;
+        const key = `${'$'}{t.tile_id}:${'$'}{t.dimension || ''}`;
         let m = satLayers[key];
         const icon = L.divIcon({ className:'cop-sat', html:'<div style="width:10px;height:10px;border-radius:50%;background:#ffea00;border:2px solid #111"></div>', iconSize:[10,10], iconAnchor:[5,5] });
         if (!m) {
           m = L.marker([p.lat,p.lon], { icon });
-          m.bindPopup(`SAT ${t.dimension || ''}<br/>count:${t.count || 0}`);
+          m.bindPopup(`SAT ${'$'}{t.dimension || ''}<br/>count:${'$'}{t.count || 0}`);
           satLayers[key] = m;
         } else m.setLatLng([p.lat,p.lon]);
         nextSat[key] = true;
