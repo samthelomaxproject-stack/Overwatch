@@ -366,6 +366,19 @@ class TacticalMapActivity : AppCompatActivity() {
       const id = ownCallsign();
       const lat = ownGps.lat, lon = ownGps.lon;
       upsertMarker(id, lat, lon, 'local');
+      localRxMs = Date.now();
+
+      // Local heat point (single-node immediate awareness); merged with COP by unique key.
+      const hk = `local:${id}`;
+      let h = heatLayers[hk];
+      if (!h) {
+        h = L.circleMarker([lat, lon], { radius: 16, color: '#22c55e', weight: 1, fillColor: '#22c55e', fillOpacity: 0.25 });
+        h.bindPopup('LOCAL HEAT');
+        heatLayers[hk] = h;
+      } else {
+        h.setLatLng([lat, lon]);
+      }
+
       if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
     }
 
@@ -483,6 +496,7 @@ class TacticalMapActivity : AppCompatActivity() {
       const heat = snap?.heat || [];
       const cams = snap?.cameras || [];
       const sats = snap?.satellites || [];
+      copRxMs = Date.now();
 
       const nextHeat = {};
       for (const h of heat) {
@@ -502,7 +516,10 @@ class TacticalMapActivity : AppCompatActivity() {
         }
         nextHeat[key] = true;
       }
-      Object.keys(heatLayers).forEach(k => { if (!nextHeat[k]) { if (map.hasLayer(heatLayers[k])) map.removeLayer(heatLayers[k]); delete heatLayers[k]; } });
+      Object.keys(heatLayers).forEach(k => {
+        if (k.startsWith('local:')) return;
+        if (!nextHeat[k]) { if (map.hasLayer(heatLayers[k])) map.removeLayer(heatLayers[k]); delete heatLayers[k]; }
+      });
 
       const nextCam = {};
       for (const c of cams) {
@@ -547,7 +564,11 @@ class TacticalMapActivity : AppCompatActivity() {
         statusEl.textContent = 'LOCAL mode • COP pull disabled';
         countEl.textContent = `Entities: ${'$'}{markers[ownCallsign()] ? 1 : 0} • updates: local`;
         const diagEl = document.getElementById('diag');
-        if (diagEl) diagEl.textContent = `PLI ids: local:${'$'}{ownCallsign()}`;
+        if (diagEl) {
+          const la = localRxMs ? Math.floor((Date.now()-localRxMs)/1000) : -1;
+          diagEl.textContent = `SRC local:${'$'}{la>=0?la+'s':'n/a'} cop:off • ids:${'$'}{ownCallsign()}`;
+        }
+        applyLayerVisibility();
         return;
       }
 
@@ -637,12 +658,13 @@ class TacticalMapActivity : AppCompatActivity() {
 
           const diagEl = document.getElementById('diag');
           if (diagEl) {
-            const ageSec = lastPliRxMs ? Math.max(0, Math.floor((Date.now() - lastPliRxMs) / 1000)) : -1;
+            const copAge = copRxMs ? Math.max(0, Math.floor((Date.now() - copRxMs) / 1000)) : -1;
+            const localAge = localRxMs ? Math.max(0, Math.floor((Date.now() - localRxMs) / 1000)) : -1;
             const idText = lastPliIds.length ? lastPliIds.join(', ') : 'none';
             const localOnMap = !!markers[ownCallsign()];
             diagEl.textContent = pliOk
-              ? `PLI(${'$'}{pliSource}) ids: ${'$'}{idText} • age ${'$'}{ageSec >= 0 ? ageSec + 's' : 'n/a'} • local:${'$'}{localOnMap?'on':'off'}`
-              : `PLI: fetch failed (hub/network) • local:${'$'}{localOnMap?'on':'off'}`;
+              ? `SRC local:${'$'}{localAge>=0?localAge+'s':'n/a'} cop:${'$'}{copAge>=0?copAge+'s':'n/a'} via:${'$'}{pliSource} • ids:${'$'}{idText} • local:${'$'}{localOnMap?'on':'off'}`
+              : `SRC local:${'$'}{localAge>=0?localAge+'s':'n/a'} cop:fail • local:${'$'}{localOnMap?'on':'off'}`;
           }
         }
 
