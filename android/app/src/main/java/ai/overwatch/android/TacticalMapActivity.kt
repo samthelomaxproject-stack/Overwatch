@@ -351,6 +351,10 @@ class TacticalMapActivity : AppCompatActivity() {
 
     let cursor = 0;
     const markers = {};
+    const heatLayers = {};
+    const camLayers = {};
+    const satLayers = {};
+
     let centeredOnOwn = false;
     let ownGps = { lat: $initLat, lon: $initLon };
     let lastPliIds = [];
@@ -375,6 +379,12 @@ class TacticalMapActivity : AppCompatActivity() {
     function focusOwn() { const m = markers[ownCallsign()]; if (m) map.setView(m.getLatLng(), 16); }
     function reloadDelta() { cursor = 0; document.getElementById('status').textContent = 'Reconnecting hub delta…'; pollDelta(); }
 
+    function parseAnyTile(tileId) {
+      // Current EUD collectors use android_lat_lon quantized tile IDs.
+      // If/when H3 tiles are added, hook decoder here.
+      return parseAndroidTile(tileId);
+    }
+
     function parseAndroidTile(tileId) {
       if (!tileId || !tileId.startsWith('android_')) return null;
       const parts = tileId.split('_'); if (parts.length !== 3) return null;
@@ -386,9 +396,25 @@ class TacticalMapActivity : AppCompatActivity() {
 
     function applyLayerVisibility() {
       const showEntities = document.getElementById('layerEntities')?.checked !== false;
+      const showHeat = document.getElementById('layerHeat')?.checked !== false;
+      const showCams = document.getElementById('layerCams')?.checked !== false;
+      const showSat = document.getElementById('layerSat')?.checked !== false;
+
       Object.values(markers).forEach(m => {
         if (showEntities) { if (!map.hasLayer(m)) m.addTo(map); }
         else { if (map.hasLayer(m)) map.removeLayer(m); }
+      });
+      Object.values(heatLayers).forEach(l => {
+        if (showHeat) { if (!map.hasLayer(l)) l.addTo(map); }
+        else { if (map.hasLayer(l)) map.removeLayer(l); }
+      });
+      Object.values(camLayers).forEach(l => {
+        if (showCams) { if (!map.hasLayer(l)) l.addTo(map); }
+        else { if (map.hasLayer(l)) map.removeLayer(l); }
+      });
+      Object.values(satLayers).forEach(l => {
+        if (showSat) { if (!map.hasLayer(l)) l.addTo(map); }
+        else { if (map.hasLayer(l)) map.removeLayer(l); }
       });
     }
     window.applyLayerVisibility = applyLayerVisibility;
@@ -433,6 +459,64 @@ class TacticalMapActivity : AppCompatActivity() {
       if (isOwn && !centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
     }
 
+    function renderCopLayers(snap) {
+      const heat = snap?.heat || [];
+      const cams = snap?.cameras || [];
+      const sats = snap?.satellites || [];
+
+      const nextHeat = {};
+      for (const h of heat) {
+        const p = parseAnyTile(h.tile_id); if (!p) continue;
+        const key = `${h.tile_id}:${h.dimension || ''}`;
+        const intensity = Math.max(0.1, Math.min(1.0, Number(h.max || h.mean || 0) / 100.0));
+        const radius = 18 + Math.round(intensity * 26);
+        const color = (h.sensor_type === 'wifi') ? '#22d3ee' : '#f97316';
+        let c = heatLayers[key];
+        if (!c) {
+          c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
+          c.bindPopup(`HEAT ${h.sensor_type || ''} ${h.dimension || ''}<br/>max:${h.max} mean:${h.mean}`);
+          heatLayers[key] = c;
+        } else {
+          c.setLatLng([p.lat, p.lon]);
+          c.setStyle({ radius, color, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
+        }
+        nextHeat[key] = true;
+      }
+      Object.keys(heatLayers).forEach(k => { if (!nextHeat[k]) { if (map.hasLayer(heatLayers[k])) map.removeLayer(heatLayers[k]); delete heatLayers[k]; } });
+
+      const nextCam = {};
+      for (const c of cams) {
+        const p = parseAnyTile(c.tile_id); if (!p) continue;
+        const key = `${c.tile_id}:${c.dimension || ''}`;
+        let m = camLayers[key];
+        const icon = L.divIcon({ className:'cop-cam', html:'<div style="width:10px;height:10px;border-radius:50%;background:#22c55e;border:2px solid #fff"></div>', iconSize:[10,10], iconAnchor:[5,5] });
+        if (!m) {
+          m = L.marker([p.lat,p.lon], { icon });
+          m.bindPopup(`CAM ${c.dimension || ''}<br/>count:${c.count || 0}`);
+          camLayers[key] = m;
+        } else m.setLatLng([p.lat,p.lon]);
+        nextCam[key] = true;
+      }
+      Object.keys(camLayers).forEach(k => { if (!nextCam[k]) { if (map.hasLayer(camLayers[k])) map.removeLayer(camLayers[k]); delete camLayers[k]; } });
+
+      const nextSat = {};
+      for (const t of sats) {
+        const p = parseAnyTile(t.tile_id); if (!p) continue;
+        const key = `${t.tile_id}:${t.dimension || ''}`;
+        let m = satLayers[key];
+        const icon = L.divIcon({ className:'cop-sat', html:'<div style="width:10px;height:10px;border-radius:50%;background:#ffea00;border:2px solid #111"></div>', iconSize:[10,10], iconAnchor:[5,5] });
+        if (!m) {
+          m = L.marker([p.lat,p.lon], { icon });
+          m.bindPopup(`SAT ${t.dimension || ''}<br/>count:${t.count || 0}`);
+          satLayers[key] = m;
+        } else m.setLatLng([p.lat,p.lon]);
+        nextSat[key] = true;
+      }
+      Object.keys(satLayers).forEach(k => { if (!nextSat[k]) { if (map.hasLayer(satLayers[k])) map.removeLayer(satLayers[k]); delete satLayers[k]; } });
+
+      applyLayerVisibility();
+    }
+
     async function pollDelta() {
       const statusEl = document.getElementById('status');
       const countEl = document.getElementById('count');
@@ -471,6 +555,7 @@ class TacticalMapActivity : AppCompatActivity() {
                   ids.push(id);
                   upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
                 });
+                renderCopLayers(snap);
                 const diagEl = document.getElementById('diag');
                 if (diagEl) {
                   diagEl.textContent = `COP ts:${'$'}{snap.ts || 'n/a'} ent:${'$'}{(snap.entities||[]).length} heat:${'$'}{(snap.heat||[]).length} cam:${'$'}{(snap.cameras||[]).length} sat:${'$'}{(snap.satellites||[]).length}`;
