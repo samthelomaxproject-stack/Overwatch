@@ -361,8 +361,7 @@ class TacticalMapActivity : AppCompatActivity() {
     let lastPliRxMs = 0;
 
     function ensureOwnMarker() {
-      // In COP mode, do not overlay a second local marker for same callsign.
-      if (PLI_MODE === 'COP') return;
+      // Always maintain a local marker from device GPS. Dedupe is handled by same callsign key.
       const id = ownCallsign();
       const lat = ownGps.lat, lon = ownGps.lon;
       upsertMarker(id, lat, lon, 'local');
@@ -619,9 +618,10 @@ class TacticalMapActivity : AppCompatActivity() {
           if (diagEl) {
             const ageSec = lastPliRxMs ? Math.max(0, Math.floor((Date.now() - lastPliRxMs) / 1000)) : -1;
             const idText = lastPliIds.length ? lastPliIds.join(', ') : 'none';
+            const localOnMap = !!markers[ownCallsign()];
             diagEl.textContent = pliOk
-              ? `PLI(${'$'}{pliSource}) ids: ${'$'}{idText} • age ${'$'}{ageSec >= 0 ? ageSec + 's' : 'n/a'}`
-              : `PLI: fetch failed (hub/network)`;
+              ? `PLI(${'$'}{pliSource}) ids: ${'$'}{idText} • age ${'$'}{ageSec >= 0 ? ageSec + 's' : 'n/a'} • local:${'$'}{localOnMap?'on':'off'}`
+              : `PLI: fetch failed (hub/network) • local:${'$'}{localOnMap?'on':'off'}`;
           }
         }
 
