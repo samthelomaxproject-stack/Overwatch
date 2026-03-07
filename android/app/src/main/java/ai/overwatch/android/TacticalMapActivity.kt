@@ -369,7 +369,7 @@ class TacticalMapActivity : AppCompatActivity() {
       localRxMs = Date.now();
 
       // Local heat point (single-node immediate awareness); merged with COP by unique key.
-      const hk = `local:${id}`;
+      const hk = 'local:' + id;
       let h = heatLayers[hk];
       if (!h) {
         h = L.circleMarker([lat, lon], { radius: 16, color: '#22c55e', weight: 1, fillColor: '#22c55e', fillOpacity: 0.25 });
@@ -566,7 +566,8 @@ class TacticalMapActivity : AppCompatActivity() {
         const diagEl = document.getElementById('diag');
         if (diagEl) {
           const la = localRxMs ? Math.floor((Date.now()-localRxMs)/1000) : -1;
-          diagEl.textContent = `SRC local:${'$'}{la>=0?la+'s':'n/a'} cop:off • ids:${'$'}{ownCallsign()}`;
+          const localAgeTxt = (la >= 0) ? (la + 's') : 'n/a';
+          diagEl.textContent = 'SRC local:' + localAgeTxt + ' cop:off • ids:' + ownCallsign();
         }
         applyLayerVisibility();
         return;
@@ -662,9 +663,11 @@ class TacticalMapActivity : AppCompatActivity() {
             const localAge = localRxMs ? Math.max(0, Math.floor((Date.now() - localRxMs) / 1000)) : -1;
             const idText = lastPliIds.length ? lastPliIds.join(', ') : 'none';
             const localOnMap = !!markers[ownCallsign()];
+            const localAgeTxt = (localAge >= 0) ? (localAge + 's') : 'n/a';
+            const copAgeTxt = (copAge >= 0) ? (copAge + 's') : 'n/a';
             diagEl.textContent = pliOk
-              ? `SRC local:${'$'}{localAge>=0?localAge+'s':'n/a'} cop:${'$'}{copAge>=0?copAge+'s':'n/a'} via:${'$'}{pliSource} • ids:${'$'}{idText} • local:${'$'}{localOnMap?'on':'off'}`
-              : `SRC local:${'$'}{localAge>=0?localAge+'s':'n/a'} cop:fail • local:${'$'}{localOnMap?'on':'off'}`;
+              ? ('SRC local:' + localAgeTxt + ' cop:' + copAgeTxt + ' via:' + pliSource + ' • ids:' + idText + ' • local:' + (localOnMap ? 'on' : 'off'))
+              : ('SRC local:' + localAgeTxt + ' cop:fail • local:' + (localOnMap ? 'on' : 'off'));
           }
         }
 
