@@ -668,6 +668,15 @@ pub struct PliPoint {
     pub tile_id: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CopSnapshot {
+    pub ts: u64,
+    pub entities: Vec<PliPoint>,
+    pub heat: Vec<serde_json::Value>,
+    pub cameras: Vec<serde_json::Value>,
+    pub satellites: Vec<serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MsgSendReq {
     pub from: String,
@@ -850,6 +859,21 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             let s = state.lock().unwrap();
             match s.db.get_delta(&device_id, cursor) {
                 Ok(delta) => (200, serde_json::to_string(&delta).unwrap()),
+                Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/cop_snapshot") => {
+            let max_age = parse_query_param(p, "max_age_secs")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(7200u64);
+            let s = state.lock().unwrap();
+            match s.db.get_pli_points(max_age) {
+                Ok(entities) => {
+                    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                    let snap = CopSnapshot { ts, entities, heat: vec![], cameras: vec![], satellites: vec![] };
+                    (200, serde_json::to_string(&snap).unwrap())
+                }
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
             }
         }

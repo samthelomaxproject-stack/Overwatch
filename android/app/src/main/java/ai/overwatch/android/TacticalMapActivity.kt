@@ -457,26 +457,48 @@ class TacticalMapActivity : AppCompatActivity() {
           let pliOk = false;
           let pliSource = 'none';
 
-          // Preferred canonical feed
+          // COP snapshot feed (authoritative hub -> EUD entity view)
           try {
-            const pliResp = await fetch(`${'$'}{hub}/api/pli_delta?device_id=${'$'}{encodeURIComponent(ownCallsign())}&cursor=${'$'}{cursor}&max_age_secs=7200`);
-            if (pliResp.ok) {
-              const pliDelta = await pliResp.json();
-              cursor = pliDelta.cursor || cursor;
-              (pliDelta.tiles || []).forEach(batch => {
-                (batch.tiles || []).forEach(pt => {
+            if (PLI_MODE === 'COP' || PLI_MODE === 'MERGED') {
+              const snapResp = await fetch(`${'$'}{hub}/api/cop_snapshot?max_age_secs=7200`);
+              if (snapResp.ok) {
+                const snap = await snapResp.json();
+                (snap.entities || []).forEach(pt => {
                   const p = parseAndroidTile(pt.tile_id); if (!p) return;
-                  const id = pt.device_id || batch.device_id || 'unknown';
-                  const sourceType = pt.source_type || batch.source_type || 'unknown';
+                  const id = pt.device_id || 'unknown';
+                  const sourceType = pt.source_type || 'unknown';
                   if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
                   ids.push(id);
                   upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
                 });
-              });
-              pliOk = true;
-              pliSource = 'delta';
+                pliOk = true;
+                pliSource = 'cop_snapshot';
+              }
             }
           } catch (_) {}
+
+          // Legacy/cursor feed fallback
+          if (!pliOk) {
+            try {
+              const pliResp = await fetch(`${'$'}{hub}/api/pli_delta?device_id=${'$'}{encodeURIComponent(ownCallsign())}&cursor=${'$'}{cursor}&max_age_secs=7200`);
+              if (pliResp.ok) {
+                const pliDelta = await pliResp.json();
+                cursor = pliDelta.cursor || cursor;
+                (pliDelta.tiles || []).forEach(batch => {
+                  (batch.tiles || []).forEach(pt => {
+                    const p = parseAndroidTile(pt.tile_id); if (!p) return;
+                    const id = pt.device_id || batch.device_id || 'unknown';
+                    const sourceType = pt.source_type || batch.source_type || 'unknown';
+                    if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
+                    ids.push(id);
+                    upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+                  });
+                });
+                pliOk = true;
+                pliSource = 'delta';
+              }
+            } catch (_) {}
+          }
 
           // If delta has no ids, refresh from snapshot to avoid "appears then disappears" behavior.
           if (!pliOk || ids.length === 0) {
