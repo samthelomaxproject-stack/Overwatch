@@ -175,6 +175,7 @@ class TacticalMapActivity : AppCompatActivity() {
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
   <script>
     const OWN_CALLSIGN = $callsignJs;
     const PLI_MODE = $pliModeJs;
@@ -379,9 +380,29 @@ class TacticalMapActivity : AppCompatActivity() {
     function reloadDelta() { cursor = 0; document.getElementById('status').textContent = 'Reconnecting hub delta…'; pollDelta(); }
 
     function parseAnyTile(tileId) {
-      // Current EUD collectors use android_lat_lon quantized tile IDs.
-      // If/when H3 tiles are added, hook decoder here.
-      return parseAndroidTile(tileId);
+      // 1) Android quantized tile id
+      const a = parseAndroidTile(tileId);
+      if (a) return a;
+
+      // 2) H3 index tile id from hub COP heat/rf/wifi layers
+      try {
+        const h = String(tileId || '').trim();
+        if (!h) return null;
+        const h3 = window.h3 || window.h3js || null;
+        if (!h3) return null;
+
+        // h3-js v4: cellToLatLng ; v3: h3ToGeo
+        if (typeof h3.cellToLatLng === 'function') {
+          const [lat, lon] = h3.cellToLatLng(h);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+        }
+        if (typeof h3.h3ToGeo === 'function') {
+          const [lat, lon] = h3.h3ToGeo(h);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+        }
+      } catch (_) {}
+
+      return null;
     }
 
     function parseAndroidTile(tileId) {
