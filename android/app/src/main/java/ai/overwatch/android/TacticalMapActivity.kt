@@ -148,6 +148,7 @@ class TacticalMapActivity : AppCompatActivity() {
       <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} onchange="applyLayerVisibility()" /> Heatmaps</label>
       <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} onchange="applyLayerVisibility()" /> Cameras</label>
       <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> Satellites</label>
+      <label><input id="layerAdsb" type="checkbox" checked onchange="applyLayerVisibility()" /> ADS-B</label>
     </div>
     <button class="sb-btn" onclick="applySettings()">Apply Settings</button>
     <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
@@ -187,6 +188,7 @@ class TacticalMapActivity : AppCompatActivity() {
     let PULL_HEAT = $pullHeatJs;
     let PULL_CAMS = $pullCamsJs;
     let PULL_SAT = $pullSatJs;
+    let PULL_ADSB = true;
 
     const map = L.map('map').setView([$initLat, $initLon], 15);
     let wheelSelectedId = null;
@@ -359,6 +361,7 @@ class TacticalMapActivity : AppCompatActivity() {
     const heatLayers = {};
     const camLayers = {};
     const satLayers = {};
+    const adsbLayers = {};
 
     let centeredOnOwn = false;
     let ownGps = { lat: $initLat, lon: $initLon };
@@ -402,6 +405,7 @@ class TacticalMapActivity : AppCompatActivity() {
       PULL_HEAT = document.getElementById('layerHeat')?.checked === true;
       PULL_CAMS = document.getElementById('layerCams')?.checked === true;
       PULL_SAT = document.getElementById('layerSat')?.checked === true;
+      PULL_ADSB = document.getElementById('layerAdsb')?.checked !== false;
       PULL_ENTITIES = document.getElementById('layerEntities')?.checked !== false;
 
       try {
@@ -412,6 +416,7 @@ class TacticalMapActivity : AppCompatActivity() {
         localStorage.setItem('eud:pull_heat', PULL_HEAT ? '1' : '0');
         localStorage.setItem('eud:pull_cams', PULL_CAMS ? '1' : '0');
         localStorage.setItem('eud:pull_sat', PULL_SAT ? '1' : '0');
+        localStorage.setItem('eud:pull_adsb', PULL_ADSB ? '1' : '0');
       } catch (_) {}
 
       const statusEl = document.getElementById('status');
@@ -461,6 +466,7 @@ class TacticalMapActivity : AppCompatActivity() {
       const showHeat = document.getElementById('layerHeat')?.checked !== false;
       const showCams = document.getElementById('layerCams')?.checked !== false;
       const showSat = document.getElementById('layerSat')?.checked !== false;
+      const showAdsb = document.getElementById('layerAdsb')?.checked !== false;
 
       Object.values(markers).forEach(m => {
         if (showEntities) { if (!map.hasLayer(m)) m.addTo(map); }
@@ -476,6 +482,10 @@ class TacticalMapActivity : AppCompatActivity() {
       });
       Object.values(satLayers).forEach(l => {
         if (showSat) { if (!map.hasLayer(l)) l.addTo(map); }
+        else { if (map.hasLayer(l)) map.removeLayer(l); }
+      });
+      Object.values(adsbLayers).forEach(l => {
+        if (showAdsb) { if (!map.hasLayer(l)) l.addTo(map); }
         else { if (map.hasLayer(l)) map.removeLayer(l); }
       });
     }
@@ -609,6 +619,59 @@ class TacticalMapActivity : AppCompatActivity() {
       applyLayerVisibility();
     }
 
+    async function pushLocalPliToHub() {
+      try {
+        const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+        const h3 = window.h3 || window.h3js || null;
+        if (!h3 || !ownGps || !Number.isFinite(ownGps.lat) || !Number.isFinite(ownGps.lon)) return;
+        const tileId = (typeof h3.latLngToCell === 'function') ? h3.latLngToCell(ownGps.lat, ownGps.lon, 10) : null;
+        if (!tileId) return;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const payload = {
+          schema_version: 1,
+          device_id: ownCallsign(),
+          source_type: 'entity',
+          timestamp_utc: nowSec,
+          tiles: [{ tile_id: tileId, time_bucket: Math.floor(nowSec / 60) * 60 }]
+        };
+        await fetch(`${hub}/api/push`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (_) {}
+    }
+
+    async function pollAdsb() {
+      if (!PULL_ADSB) return;
+      try {
+        const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
+        const resp = await fetch(`${hub}/api/adsb?max_age_secs=1200`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const arr = Array.isArray(data?.aircraft) ? data.aircraft : (Array.isArray(data) ? data : []);
+        const next = {};
+        for (const ac of arr) {
+          const lat = Number(ac.latitude ?? ac.lat);
+          const lon = Number(ac.longitude ?? ac.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+          const id = String(ac.icao || ac.callsign || ac.id || 'AC');
+          let m = adsbLayers[id];
+          const icon = L.divIcon({ className:'adsb-marker', html:'<div style="width:10px;height:10px;border-radius:50%;background:#f59e0b;border:2px solid #fff"></div>', iconSize:[10,10], iconAnchor:[5,5] });
+          if (!m) {
+            m = L.marker([lat, lon], { icon }).addTo(map);
+            adsbLayers[id] = m;
+          } else {
+            m.setLatLng([lat, lon]);
+            if (!map.hasLayer(m)) m.addTo(map);
+          }
+          m.bindPopup(`ADS-B ${id}<br/>${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+          next[id] = true;
+        }
+        Object.keys(adsbLayers).forEach(id => { if (!next[id]) { if (map.hasLayer(adsbLayers[id])) map.removeLayer(adsbLayers[id]); delete adsbLayers[id]; } });
+      } catch (_) {}
+    }
+
     async function pollDelta() {
       const statusEl = document.getElementById('status');
       const countEl = document.getElementById('count');
@@ -629,7 +692,8 @@ class TacticalMapActivity : AppCompatActivity() {
       }
 
       try {
-        if (PLI_MODE === 'MERGED') ensureOwnMarker();
+        if (PLI_MODE === 'MERGED' || PLI_MODE === 'COP') ensureOwnMarker();
+        await pushLocalPliToHub();
         const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
         let seen = 0;
 
@@ -738,8 +802,9 @@ class TacticalMapActivity : AppCompatActivity() {
           // non-fatal
         }
 
+        await pollAdsb();
         statusEl.textContent = `Connected • cursor ${'$'}{cursor}`;
-        countEl.textContent = `Entities: ${'$'}{Object.keys(markers).length} • updates: ${'$'}{seen}`;
+        countEl.textContent = `Entities: ${'$'}{Object.keys(markers).length} • updates: ${'$'}{seen} • ADS-B: ${'$'}{Object.keys(adsbLayers).length}`;
       } catch (e) {
         statusEl.textContent = `PLI pull error: ${'$'}{e}`;
       }
@@ -754,6 +819,7 @@ class TacticalMapActivity : AppCompatActivity() {
       const savedHeat = localStorage.getItem('eud:pull_heat');
       const savedCams = localStorage.getItem('eud:pull_cams');
       const savedSat = localStorage.getItem('eud:pull_sat');
+      const savedAdsb = localStorage.getItem('eud:pull_adsb');
       if (savedCallsign) { OWN_CALLSIGN = savedCallsign; const e = document.getElementById('cfgCallsign'); if (e) e.value = savedCallsign; }
       if (savedHub) { const h = document.getElementById('cfgHub'); if (h) h.value = savedHub; }
       if (savedMode) { PLI_MODE = savedMode; }
@@ -761,6 +827,7 @@ class TacticalMapActivity : AppCompatActivity() {
       if (savedHeat !== null) PULL_HEAT = savedHeat === '1';
       if (savedCams !== null) PULL_CAMS = savedCams === '1';
       if (savedSat !== null) PULL_SAT = savedSat === '1';
+      if (savedAdsb !== null) PULL_ADSB = savedAdsb === '1';
     } catch (_) {}
 
     const modeSel = document.getElementById('pliModeSel');
@@ -769,6 +836,7 @@ class TacticalMapActivity : AppCompatActivity() {
     const heatChk = document.getElementById('layerHeat'); if (heatChk) heatChk.checked = !!PULL_HEAT;
     const camChk = document.getElementById('layerCams'); if (camChk) camChk.checked = !!PULL_CAMS;
     const satChk = document.getElementById('layerSat'); if (satChk) satChk.checked = !!PULL_SAT;
+    const adsbChk = document.getElementById('layerAdsb'); if (adsbChk) adsbChk.checked = !!PULL_ADSB;
 
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition((pos) => {
