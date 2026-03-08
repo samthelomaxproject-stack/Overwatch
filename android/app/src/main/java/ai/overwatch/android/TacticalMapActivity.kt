@@ -141,7 +141,7 @@ class TacticalMapActivity : AppCompatActivity() {
     </div>
     <div class="sb-row"><div class="sb-label">Layer Visibility</div>
       <label><input id="layerEntities" type="checkbox" checked onchange="applyLayerVisibility()" /> Entities</label>
-      <label><input id="layerHeat" type="checkbox" checked onchange="applyLayerVisibility()" /> Heatmaps</label>
+      <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} onchange="applyLayerVisibility()" /> Heatmaps</label>
       <label><input id="layerCams" type="checkbox" onchange="applyLayerVisibility()" /> Cameras</label>
       <label><input id="layerSat" type="checkbox" onchange="applyLayerVisibility()" /> Satellites</label>
     </div>
@@ -512,23 +512,25 @@ class TacticalMapActivity : AppCompatActivity() {
       copRxMs = Date.now();
 
       const nextHeat = {};
-      for (const h of heat) {
-        const p = parseAnyTile(h.tile_id); if (!p) continue;
-        const key = `${'$'}{h.tile_id}:${'$'}{h.dimension || ''}`;
-        const intensity = Math.max(0.1, Math.min(1.0, Number(h.max || h.mean || 0) / 100.0));
-        const radius = 18 + Math.round(intensity * 26);
-        const color = (h.sensor_type === 'wifi') ? '#22d3ee' : '#f97316';
-        let c = heatLayers[key];
-        if (!c) {
-          c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 }).addTo(map);
-          c.bindPopup(`HEAT ${'$'}{h.sensor_type || ''} ${'$'}{h.dimension || ''}<br/>max:${'$'}{h.max} mean:${'$'}{h.mean}`);
-          heatLayers[key] = c;
-        } else {
-          c.setLatLng([p.lat, p.lon]);
-          c.setStyle({ radius, color, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
-          if (!map.hasLayer(c)) c.addTo(map);
+      if (PULL_HEAT) {
+        for (const h of heat) {
+          const p = parseAnyTile(h.tile_id); if (!p) continue;
+          const key = `${'$'}{h.tile_id}:${'$'}{h.dimension || ''}`;
+          const intensity = Math.max(0.1, Math.min(1.0, Number(h.max || h.mean || 0) / 100.0));
+          const radius = 18 + Math.round(intensity * 26);
+          const color = (h.sensor_type === 'wifi') ? '#22d3ee' : '#f97316';
+          let c = heatLayers[key];
+          if (!c) {
+            c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 }).addTo(map);
+            c.bindPopup(`HEAT ${'$'}{h.sensor_type || ''} ${'$'}{h.dimension || ''}<br/>max:${'$'}{h.max} mean:${'$'}{h.mean}`);
+            heatLayers[key] = c;
+          } else {
+            c.setLatLng([p.lat, p.lon]);
+            c.setStyle({ radius, color, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
+            if (!map.hasLayer(c)) c.addTo(map);
+          }
+          nextHeat[key] = true;
         }
-        nextHeat[key] = true;
       }
       Object.keys(heatLayers).forEach(k => {
         if (k.startsWith('local:')) return;

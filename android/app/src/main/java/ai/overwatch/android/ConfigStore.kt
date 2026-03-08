@@ -54,7 +54,7 @@ object ConfigStore {
     }
 
     fun getPullEntities(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PULL_ENTITIES, true)
-    fun getPullHeat(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PULL_HEAT, true)
+    fun getPullHeat(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PULL_HEAT, false)
     fun getPullCams(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PULL_CAMS, false)
     fun getPullSat(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PULL_SAT, false)
 
