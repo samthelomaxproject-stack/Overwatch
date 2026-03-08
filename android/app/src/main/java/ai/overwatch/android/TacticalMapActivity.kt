@@ -112,6 +112,8 @@ class TacticalMapActivity : AppCompatActivity() {
         val pullHeatJs = if (pullHeat) "true" else "false"
         val pullCamsJs = if (pullCams) "true" else "false"
         val pullSatJs = if (pullSat) "true" else "false"
+        val initLatJs = initLat.toString()
+        val initLonJs = initLon.toString()
 
         return """
 <!doctype html>
@@ -200,7 +202,7 @@ class TacticalMapActivity : AppCompatActivity() {
     let PULL_SAT = $pullSatJs;
     let PULL_ADSB = true;
 
-    const map = L.map('map').setView([$initLat, $initLon], 15);
+    const map = L.map('map').setView([$initLatJs, $initLonJs], 15);
     let wheelSelectedId = null;
     let msgGroups = [];
     let msgUnread = 0;
@@ -374,12 +376,13 @@ class TacticalMapActivity : AppCompatActivity() {
     const adsbLayers = {};
 
     let centeredOnOwn = false;
-    let ownGps = { lat: $initLat, lon: $initLon };
+    let ownGps = { lat: $initLatJs, lon: $initLonJs };
     let lastPliIds = [];
     let lastPliRxMs = 0;
 
     function ensureOwnMarker() {
       // Always maintain a local marker from device GPS. Dedupe is handled by same callsign key.
+      if (!ownGps || !Number.isFinite(ownGps.lat) || !Number.isFinite(ownGps.lon)) return;
       const id = ownCallsign();
       const lat = ownGps.lat, lon = ownGps.lon;
       upsertMarker(id, lat, lon, 'local');
