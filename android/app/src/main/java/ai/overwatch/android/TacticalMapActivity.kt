@@ -660,7 +660,7 @@ class TacticalMapActivity : AppCompatActivity() {
           timestamp_utc: nowSec,
           tiles: [{ tile_id: tileId, time_bucket: Math.floor(nowSec / 60) * 60 }]
         };
-        await fetch(`${hub}/api/push`, {
+        await fetch(`${'$'}{hub}/api/push`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -672,7 +672,7 @@ class TacticalMapActivity : AppCompatActivity() {
       if (!PULL_ADSB) return;
       try {
         const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-        const resp = await fetch(`${hub}/api/adsb?max_age_secs=1200`);
+        const resp = await fetch(`${'$'}{hub}/api/adsb?max_age_secs=1200`);
         if (!resp.ok) return;
         const data = await resp.json();
         const arr = Array.isArray(data?.aircraft) ? data.aircraft : (Array.isArray(data) ? data : []);
@@ -691,7 +691,7 @@ class TacticalMapActivity : AppCompatActivity() {
             m.setLatLng([lat, lon]);
             if (!map.hasLayer(m)) m.addTo(map);
           }
-          m.bindPopup(`ADS-B ${id}<br/>${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+          m.bindPopup(`ADS-B ${'$'}{id}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`);
           next[id] = true;
         }
         Object.keys(adsbLayers).forEach(id => { if (!next[id]) { if (map.hasLayer(adsbLayers[id])) map.removeLayer(adsbLayers[id]); delete adsbLayers[id]; } });
