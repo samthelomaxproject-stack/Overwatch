@@ -131,9 +131,13 @@ class TacticalMapActivity : AppCompatActivity() {
     <div id="diag">PLI: n/a</div>
   </div>
   <div class="sidebar">
-    <div class="sb-row"><div class="sb-label">Callsign</div><input id="cfgCallsign" class="sb-input" value="${callsign}" readonly /></div>
-    <div class="sb-row"><div class="sb-label">Hub</div><input id="cfgHub" class="sb-input" value="${hubBase}" readonly /></div>
-    <div class="sb-row"><div class="sb-label">PLI Mode (settings)</div><input class="sb-input" value="${pliMode}" readonly /></div>
+    <div class="sb-row"><div class="sb-label">Callsign</div><input id="cfgCallsign" class="sb-input" value="${callsign}" /></div>
+    <div class="sb-row"><div class="sb-label">Hub</div><input id="cfgHub" class="sb-input" value="${hubBase}" /></div>
+    <div class="sb-row"><div class="sb-label">PLI Mode</div>
+      <select id="pliModeSel" class="sb-input">
+        <option value="COP">COP</option><option value="LOCAL">LOCAL</option><option value="MERGED">MERGED</option>
+      </select>
+    </div>
     <div class="sb-row"><div class="sb-label">Map Type</div>
       <select id="mapType" class="sb-input" onchange="setMapType(this.value)">
         <option value="dark">Dark</option><option value="sat">Satellite</option><option value="topo">Topo</option>
@@ -142,10 +146,10 @@ class TacticalMapActivity : AppCompatActivity() {
     <div class="sb-row"><div class="sb-label">Layer Visibility</div>
       <label><input id="layerEntities" type="checkbox" checked onchange="applyLayerVisibility()" /> Entities</label>
       <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} onchange="applyLayerVisibility()" /> Heatmaps</label>
-      <label><input id="layerCams" type="checkbox" onchange="applyLayerVisibility()" /> Cameras</label>
-      <label><input id="layerSat" type="checkbox" onchange="applyLayerVisibility()" /> Satellites</label>
+      <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} onchange="applyLayerVisibility()" /> Cameras</label>
+      <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> Satellites</label>
     </div>
-    <div class="sb-label">PLI pull configured on main screen.</div>
+    <button class="sb-btn" onclick="applySettings()">Apply Settings</button>
     <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
     <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
   </div>
@@ -177,12 +181,12 @@ class TacticalMapActivity : AppCompatActivity() {
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
   <script>
-    const OWN_CALLSIGN = $callsignJs;
-    const PLI_MODE = $pliModeJs;
-    const PULL_ENTITIES = $pullEntitiesJs;
-    const PULL_HEAT = $pullHeatJs;
-    const PULL_CAMS = $pullCamsJs;
-    const PULL_SAT = $pullSatJs;
+    let OWN_CALLSIGN = $callsignJs;
+    let PLI_MODE = $pliModeJs;
+    let PULL_ENTITIES = $pullEntitiesJs;
+    let PULL_HEAT = $pullHeatJs;
+    let PULL_CAMS = $pullCamsJs;
+    let PULL_SAT = $pullSatJs;
 
     const map = L.map('map').setView([$initLat, $initLon], 15);
     let wheelSelectedId = null;
@@ -387,6 +391,35 @@ class TacticalMapActivity : AppCompatActivity() {
     }
     function focusOwn() { const m = markers[ownCallsign()]; if (m) map.setView(m.getLatLng(), 16); }
     function reloadDelta() { cursor = 0; document.getElementById('status').textContent = 'Reconnecting hub delta…'; pollDelta(); }
+
+    function applySettings() {
+      const cs = (document.getElementById('cfgCallsign')?.value || '').trim();
+      const hub = (document.getElementById('cfgHub')?.value || '').trim();
+      const mode = (document.getElementById('pliModeSel')?.value || 'COP').trim().toUpperCase();
+      OWN_CALLSIGN = cs || OWN_CALLSIGN || 'ANDROID-EUD';
+      if (hub) document.getElementById('cfgHub').value = hub.endsWith('/') ? hub : (hub + '/');
+      PLI_MODE = (mode === 'LOCAL' || mode === 'MERGED') ? mode : 'COP';
+      PULL_HEAT = document.getElementById('layerHeat')?.checked === true;
+      PULL_CAMS = document.getElementById('layerCams')?.checked === true;
+      PULL_SAT = document.getElementById('layerSat')?.checked === true;
+      PULL_ENTITIES = document.getElementById('layerEntities')?.checked !== false;
+
+      try {
+        localStorage.setItem('eud:callsign', OWN_CALLSIGN);
+        localStorage.setItem('eud:hub', document.getElementById('cfgHub').value);
+        localStorage.setItem('eud:pli_mode', PLI_MODE);
+        localStorage.setItem('eud:pull_entities', PULL_ENTITIES ? '1' : '0');
+        localStorage.setItem('eud:pull_heat', PULL_HEAT ? '1' : '0');
+        localStorage.setItem('eud:pull_cams', PULL_CAMS ? '1' : '0');
+        localStorage.setItem('eud:pull_sat', PULL_SAT ? '1' : '0');
+      } catch (_) {}
+
+      const statusEl = document.getElementById('status');
+      if (statusEl) statusEl.textContent = `Settings applied • ${'$'}{OWN_CALLSIGN} • ${'$'}{PLI_MODE}`;
+      applyLayerVisibility();
+      updateCompare();
+      reloadDelta();
+    }
 
     function parseAnyTile(tileId) {
       // 1) Android quantized tile id
@@ -712,6 +745,31 @@ class TacticalMapActivity : AppCompatActivity() {
       }
     }
 
+    // Restore persisted map settings (single-screen workflow; no separate settings page)
+    try {
+      const savedCallsign = localStorage.getItem('eud:callsign');
+      const savedHub = localStorage.getItem('eud:hub');
+      const savedMode = localStorage.getItem('eud:pli_mode');
+      const savedEntities = localStorage.getItem('eud:pull_entities');
+      const savedHeat = localStorage.getItem('eud:pull_heat');
+      const savedCams = localStorage.getItem('eud:pull_cams');
+      const savedSat = localStorage.getItem('eud:pull_sat');
+      if (savedCallsign) { OWN_CALLSIGN = savedCallsign; const e = document.getElementById('cfgCallsign'); if (e) e.value = savedCallsign; }
+      if (savedHub) { const h = document.getElementById('cfgHub'); if (h) h.value = savedHub; }
+      if (savedMode) { PLI_MODE = savedMode; }
+      if (savedEntities !== null) PULL_ENTITIES = savedEntities === '1';
+      if (savedHeat !== null) PULL_HEAT = savedHeat === '1';
+      if (savedCams !== null) PULL_CAMS = savedCams === '1';
+      if (savedSat !== null) PULL_SAT = savedSat === '1';
+    } catch (_) {}
+
+    const modeSel = document.getElementById('pliModeSel');
+    if (modeSel) modeSel.value = PLI_MODE;
+    const entChk = document.getElementById('layerEntities'); if (entChk) entChk.checked = !!PULL_ENTITIES;
+    const heatChk = document.getElementById('layerHeat'); if (heatChk) heatChk.checked = !!PULL_HEAT;
+    const camChk = document.getElementById('layerCams'); if (camChk) camChk.checked = !!PULL_CAMS;
+    const satChk = document.getElementById('layerSat'); if (satChk) satChk.checked = !!PULL_SAT;
+
     if (navigator.geolocation) {
       navigator.geolocation.watchPosition((pos) => {
         const lat = pos.coords.latitude, lon = pos.coords.longitude;
@@ -725,7 +783,7 @@ class TacticalMapActivity : AppCompatActivity() {
     }
 
     ensureOwnMarker();
-    document.getElementById('status').textContent = 'Map loaded • connecting to hub delta…';
+    document.getElementById('status').textContent = 'Map loaded • connecting to hub API…';
     updateCompare();
     renderMsgBadge();
     setInterval(() => pollInbox(false), 5000);
