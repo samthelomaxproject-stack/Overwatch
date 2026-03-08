@@ -2857,7 +2857,12 @@ out body;
                     const [lat, lng] = h3.cellToLatLng(cellId);
                     return [lat, lng];
                 }
-            } catch (e) {}
+                if (!window.h3) {
+                    debugLog(`⚠️ tileToLatLng: H3 library not loaded`);
+                }
+            } catch (e) {
+                debugLog(`⚠️ tileToLatLng error for ${cellId}: ${e.message}`);
+            }
 
             // Android fallback tile id parser
             if (cellId.startsWith('android_')) {
@@ -2871,6 +2876,7 @@ out body;
                     }
                 }
             }
+            debugLog(`⚠️ tileToLatLng: could not parse cellId: ${cellId}`);
             return null;
         }
 
@@ -3266,19 +3272,32 @@ out body;
                     cursor: hubPollCursor
                 });
                 if (result && result.tiles) {
+                    // Debug: log tile counts
+                    const updateCount = result.tiles.length;
+                    const totalTiles = result.tiles.reduce((sum, u) => sum + (u.tiles?.length || 0), 0);
+                    const pliTiles = result.tiles.flatMap(u => u.tiles || []).filter(t => t.device_id).length;
+                    if (updateCount > 0 || totalTiles > 0) {
+                        debugLog(`📡 Hub delta: ${updateCount} updates, ${totalTiles} tiles, ${pliTiles} PLI entities`);
+                    }
                     ingestSigintDelta(result);
                     if (result.cursor > hubPollCursor) {
                         hubPollCursor = result.cursor;
                     }
+                } else {
+                    debugLog('📡 Hub delta: empty (no tiles)');
                 }
             } catch (e) {
-                // Hub not running — silently ignore
+                debugLog('📡 Hub poll error: ' + (e?.message || e));
             }
         }
 
         function ingestSigintDelta(delta) {
-            if (!delta.tiles) return;
+            if (!delta.tiles) {
+                debugLog('📊 ingestSigintDelta: no delta.tiles');
+                return;
+            }
             let rfChanged = false, wifiChanged = false;
+            let entitiesIngested = 0;
 
             for (const update of delta.tiles) {
                 if (!update.tiles) continue;
@@ -3298,6 +3317,7 @@ out body;
                                 lat, lon,
                                 timestamp: Date.now(),
                             });
+                            entitiesIngested++;
                         }
                     }
 
@@ -3341,6 +3361,10 @@ out body;
             if (rfChanged && layerVisible.rf) updateHeatmap('rf');
             if (wifiChanged && layerVisible.wifi) updateHeatmap('wifi');
             updateSigintStats();
+
+            if (entitiesIngested > 0) {
+                debugLog(`📍 Ingested ${entitiesIngested} entities from hub delta`);
+            }
         }
 
         function formatFreq(startHz, endHz) {
@@ -4806,10 +4830,12 @@ out body;
         function ingestPLI(pli) {
             // pli = { uid, callsign, type, affiliation, lat, lon, altitude, speed, course, mgrs, timestamp }
             const existing = trackedEntities.findIndex(e => e.uid === pli.uid);
-            if (existing >= 0) {
-                trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now() };
-            } else {
+            const isNew = existing < 0;
+            if (isNew) {
                 trackedEntities.push({ ...pli, lastSeen: Date.now() });
+                debugLog(`📍 New entity: ${pli.callsign || pli.uid} [${pli.lat.toFixed(4)}, ${pli.lon.toFixed(4)}]`);
+            } else {
+                trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now() };
             }
             renderEntities();
             updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));

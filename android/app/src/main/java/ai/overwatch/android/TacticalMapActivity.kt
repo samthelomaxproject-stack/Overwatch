@@ -372,11 +372,12 @@ class TacticalMapActivity : AppCompatActivity() {
       const hk = 'local:' + id;
       let h = heatLayers[hk];
       if (!h) {
-        h = L.circleMarker([lat, lon], { radius: 16, color: '#22c55e', weight: 1, fillColor: '#22c55e', fillOpacity: 0.25 });
+        h = L.circleMarker([lat, lon], { radius: 16, color: '#22c55e', weight: 1, fillColor: '#22c55e', fillOpacity: 0.25 }).addTo(map);
         h.bindPopup('LOCAL HEAT');
         heatLayers[hk] = h;
       } else {
         h.setLatLng([lat, lon]);
+        if (!map.hasLayer(h)) h.addTo(map);
       }
 
       if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
@@ -507,12 +508,13 @@ class TacticalMapActivity : AppCompatActivity() {
         const color = (h.sensor_type === 'wifi') ? '#22d3ee' : '#f97316';
         let c = heatLayers[key];
         if (!c) {
-          c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
+          c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 }).addTo(map);
           c.bindPopup(`HEAT ${'$'}{h.sensor_type || ''} ${'$'}{h.dimension || ''}<br/>max:${'$'}{h.max} mean:${'$'}{h.mean}`);
           heatLayers[key] = c;
         } else {
           c.setLatLng([p.lat, p.lon]);
           c.setStyle({ radius, color, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
+          if (!map.hasLayer(c)) c.addTo(map);
         }
         nextHeat[key] = true;
       }
@@ -528,10 +530,13 @@ class TacticalMapActivity : AppCompatActivity() {
         let m = camLayers[key];
         const icon = L.divIcon({ className:'cop-cam', html:'<div style="width:10px;height:10px;border-radius:50%;background:#22c55e;border:2px solid #fff"></div>', iconSize:[10,10], iconAnchor:[5,5] });
         if (!m) {
-          m = L.marker([p.lat,p.lon], { icon });
+          m = L.marker([p.lat,p.lon], { icon }).addTo(map);
           m.bindPopup(`CAM ${'$'}{c.dimension || ''}<br/>count:${'$'}{c.count || 0}`);
           camLayers[key] = m;
-        } else m.setLatLng([p.lat,p.lon]);
+        } else {
+          m.setLatLng([p.lat,p.lon]);
+          if (!map.hasLayer(m)) m.addTo(map);
+        }
         nextCam[key] = true;
       }
       Object.keys(camLayers).forEach(k => { if (!nextCam[k]) { if (map.hasLayer(camLayers[k])) map.removeLayer(camLayers[k]); delete camLayers[k]; } });
@@ -543,10 +548,13 @@ class TacticalMapActivity : AppCompatActivity() {
         let m = satLayers[key];
         const icon = L.divIcon({ className:'cop-sat', html:'<div style="width:10px;height:10px;border-radius:50%;background:#ffea00;border:2px solid #111"></div>', iconSize:[10,10], iconAnchor:[5,5] });
         if (!m) {
-          m = L.marker([p.lat,p.lon], { icon });
+          m = L.marker([p.lat,p.lon], { icon }).addTo(map);
           m.bindPopup(`SAT ${'$'}{t.dimension || ''}<br/>count:${'$'}{t.count || 0}`);
           satLayers[key] = m;
-        } else m.setLatLng([p.lat,p.lon]);
+        } else {
+          m.setLatLng([p.lat,p.lon]);
+          if (!map.hasLayer(m)) m.addTo(map);
+        }
         nextSat[key] = true;
       }
       Object.keys(satLayers).forEach(k => { if (!nextSat[k]) { if (map.hasLayer(satLayers[k])) map.removeLayer(satLayers[k]); delete satLayers[k]; } });
