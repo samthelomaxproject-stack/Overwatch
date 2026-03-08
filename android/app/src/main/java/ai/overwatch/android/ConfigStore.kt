@@ -45,7 +45,7 @@ object ConfigStore {
 
     fun getPliMode(context: Context): String {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_PLI_MODE, "COP") ?: "COP"
+            .getString(KEY_PLI_MODE, "LOCAL") ?: "LOCAL"
     }
 
     fun setPliMode(context: Context, mode: String) {

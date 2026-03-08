@@ -7,6 +7,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Bundle
 import android.webkit.GeolocationPermissions
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Toast
@@ -19,6 +20,14 @@ import androidx.core.view.WindowInsetsControllerCompat
 class TacticalMapActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+
+    inner class Bridge {
+        @JavascriptInterface
+        fun getLocationJson(): String {
+            val loc = getBestLocation() ?: return "{}"
+            return "{\"lat\":${'$'}{loc.latitude},\"lon\":${'$'}{loc.longitude},\"acc\":${'$'}{loc.accuracy}}"
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,6 +66,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 callback?.invoke(origin, true, false)
             }
         }
+        webView.addJavascriptInterface(Bridge(), "OverwatchBridge")
 
         val html = tacticalHtml(callsign, baseUrl, pliMode, pullEntities, pullHeat, pullCams, pullSat, initLat, initLon)
         runCatching { webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
@@ -386,6 +396,22 @@ class TacticalMapActivity : AppCompatActivity() {
     }
 
     function ownCallsign() { return OWN_CALLSIGN || 'ANDROID-EUD'; }
+
+    function refreshNativeLocation() {
+      try {
+        if (window.OverwatchBridge && typeof window.OverwatchBridge.getLocationJson === 'function') {
+          const raw = window.OverwatchBridge.getLocationJson();
+          if (!raw) return;
+          const j = JSON.parse(raw);
+          const lat = Number(j.lat), lon = Number(j.lon);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) {
+            ownGps = { lat, lon };
+            ensureOwnMarker();
+          }
+        }
+      } catch (_) {}
+    }
+
     function updateCompare() {
       const cmp = document.getElementById('cmp');
       if (!cmp) return;
@@ -398,7 +424,7 @@ class TacticalMapActivity : AppCompatActivity() {
     function applySettings() {
       const cs = (document.getElementById('cfgCallsign')?.value || '').trim();
       const hub = (document.getElementById('cfgHub')?.value || '').trim();
-      const mode = (document.getElementById('pliModeSel')?.value || 'COP').trim().toUpperCase();
+      const mode = (document.getElementById('pliModeSel')?.value || 'LOCAL').trim().toUpperCase();
       OWN_CALLSIGN = cs || OWN_CALLSIGN || 'ANDROID-EUD';
       if (hub) document.getElementById('cfgHub').value = hub.endsWith('/') ? hub : (hub + '/');
       PLI_MODE = (mode === 'LOCAL' || mode === 'MERGED') ? mode : 'COP';
@@ -678,7 +704,9 @@ class TacticalMapActivity : AppCompatActivity() {
 
       // LOCAL mode = show only this EUD local marker and skip COP pulls.
       if (PLI_MODE === 'LOCAL') {
+        refreshNativeLocation();
         ensureOwnMarker();
+        await pushLocalPliToHub();
         statusEl.textContent = 'LOCAL mode • COP pull disabled';
         countEl.textContent = `Entities: ${'$'}{markers[ownCallsign()] ? 1 : 0} • updates: local`;
         const diagEl = document.getElementById('diag');
@@ -692,6 +720,7 @@ class TacticalMapActivity : AppCompatActivity() {
       }
 
       try {
+        refreshNativeLocation();
         if (PLI_MODE === 'MERGED' || PLI_MODE === 'COP') ensureOwnMarker();
         await pushLocalPliToHub();
         const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
