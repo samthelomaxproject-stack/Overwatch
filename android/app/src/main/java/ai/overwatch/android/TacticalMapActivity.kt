@@ -473,7 +473,7 @@ class TacticalMapActivity : AppCompatActivity() {
       if (prev) { const dy = lat - prev.lat, dx = lon - prev.lon; if (Math.abs(dx)+Math.abs(dy) > 0.00001) heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360; }
       entityLast[id] = { lat, lon };
 
-      const icon = L.divIcon({ className: 'eud-marker', html: `<div style="position:relative;width:22px;height:22px;"><div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div><div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${'$'}{ '$'}{heading}deg);transform-origin:50% 12px;"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] });
+      const icon = L.divIcon({ className: 'eud-marker', html: `<div style="position:relative;width:22px;height:22px;"><div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div><div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${'$'}{heading}deg);transform-origin:50% 12px;"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] });
 
       if (!markers[id]) markers[id] = L.marker([rLat, rLon], { icon }).addTo(map);
       else { markers[id].setLatLng([rLat, rLon]); markers[id].setIcon(icon); }
@@ -598,7 +598,7 @@ class TacticalMapActivity : AppCompatActivity() {
               if (snapResp.ok) {
                 const snap = await snapResp.json();
                 (snap.entities || []).forEach(pt => {
-                  const p = parseAndroidTile(pt.tile_id); if (!p) return;
+                  const p = parseAnyTile(pt.tile_id); if (!p) return;
                   const id = pt.device_id || 'unknown';
                   const sourceType = pt.source_type || 'unknown';
                   if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
@@ -625,7 +625,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 cursor = pliDelta.cursor || cursor;
                 (pliDelta.tiles || []).forEach(batch => {
                   (batch.tiles || []).forEach(pt => {
-                    const p = parseAndroidTile(pt.tile_id); if (!p) return;
+                    const p = parseAnyTile(pt.tile_id); if (!p) return;
                     const id = pt.device_id || batch.device_id || 'unknown';
                     const sourceType = pt.source_type || batch.source_type || 'unknown';
                     if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
@@ -647,7 +647,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 const pli = await r.json();
                 ids = [];
                 (pli || []).forEach(pt => {
-                  const p = parseAndroidTile(pt.tile_id); if (!p) return;
+                  const p = parseAnyTile(pt.tile_id); if (!p) return;
                   const id = pt.device_id || 'unknown';
                   const sourceType = pt.source_type || 'unknown';
                   if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
