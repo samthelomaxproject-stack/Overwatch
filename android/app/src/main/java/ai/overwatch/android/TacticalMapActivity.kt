@@ -368,16 +368,11 @@ class TacticalMapActivity : AppCompatActivity() {
       upsertMarker(id, lat, lon, 'local');
       localRxMs = Date.now();
 
-      // Local heat point (single-node immediate awareness); merged with COP by unique key.
+      // Remove legacy local heat ring (green circle) to match desktop tactical symbology.
       const hk = 'local:' + id;
-      let h = heatLayers[hk];
-      if (!h) {
-        h = L.circleMarker([lat, lon], { radius: 16, color: '#22c55e', weight: 1, fillColor: '#22c55e', fillOpacity: 0.25 }).addTo(map);
-        h.bindPopup('LOCAL HEAT');
-        heatLayers[hk] = h;
-      } else {
-        h.setLatLng([lat, lon]);
-        if (!map.hasLayer(h)) h.addTo(map);
+      if (heatLayers[hk]) {
+        if (map.hasLayer(heatLayers[hk])) map.removeLayer(heatLayers[hk]);
+        delete heatLayers[hk];
       }
 
       if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
@@ -466,14 +461,31 @@ class TacticalMapActivity : AppCompatActivity() {
       if (Math.abs(lat) < 0.2 && Math.abs(lon) < 0.2) return;
       const isOwn = String(id||'').toUpperCase() === String(ownCallsign()||'').toUpperCase();
       const j = idJitter(id);
-      const rLat = lat + j.dLat;
-      const rLon = lon + j.dLon;
-      const color = isOwn ? '#22c55e' : (sourceType === 'drone' ? '#f97316' : '#60a5fa');
+      const rLat = isOwn ? lat : (lat + j.dLat);
+      const rLon = isOwn ? lon : (lon + j.dLon);
       const prev = entityLast[id]; let heading = 0;
       if (prev) { const dy = lat - prev.lat, dx = lon - prev.lon; if (Math.abs(dx)+Math.abs(dy) > 0.00001) heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360; }
       entityLast[id] = { lat, lon };
 
-      const icon = L.divIcon({ className: 'eud-marker', html: `<div style="position:relative;width:22px;height:22px;"><div style="position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:${'$'}{color};border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.65);"></div><div style="position:absolute;left:9px;top:-1px;width:0;height:0;border-left:3px solid transparent;border-right:3px solid transparent;border-bottom:7px solid #fff;transform:rotate(${'$'}{heading}deg);transform-origin:50% 12px;"></div></div>`, iconSize:[22,22], iconAnchor:[11,11] });
+      let icon;
+      if (isOwn) {
+        // Match desktop own-position marker (cyan + pulse)
+        icon = L.divIcon({
+          className: 'my-location-marker',
+          html: `<div style="width:20px;height:20px;background:#00d4ff;border:3px solid white;border-radius:50%;box-shadow:0 0 15px #00d4ff;position:relative;"><div style="position:absolute;width:40px;height:40px;background:rgba(0,212,255,0.3);border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);"></div></div>`,
+          iconSize:[20,20],
+          iconAnchor:[10,10]
+        });
+      } else {
+        // Match desktop entity tactical symbol (square + heading tick + callsign initial)
+        const color = (sourceType === 'drone') ? '#f97316' : '#00c851';
+        icon = L.divIcon({
+          className: 'entity-marker',
+          html: `<div style="position:relative;width:24px;height:24px;"><div style="position:absolute;left:2px;top:2px;width:20px;height:20px;background:${'$'}{color};border:2px solid white;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:white;">${'$'}{(id||'?')[0]}</div><div style="position:absolute;left:9px;top:-2px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:8px solid #fff;transform:rotate(${'$'}{heading}deg);transform-origin:50% 14px;"></div></div>`,
+          iconSize:[24,24],
+          iconAnchor:[12,12]
+        });
+      }
 
       if (!markers[id]) markers[id] = L.marker([rLat, rLon], { icon }).addTo(map);
       else { markers[id].setLatLng([rLat, rLon]); markers[id].setIcon(icon); }
