@@ -349,6 +349,9 @@ class TacticalMapActivity : AppCompatActivity() {
         let camMarkers = {};
         let satMarkers = {};
         
+        // Track if we've centered the map on user's position
+        let hasCenteredOnUser = false;
+        
         // Initialize map
         const map = L.map('map', { zoomControl: false }).setView([ownPosition.lat, ownPosition.lon], 15);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -519,6 +522,12 @@ class TacticalMapActivity : AppCompatActivity() {
             ownPosition = { lat, lon };
             document.getElementById('position').textContent = lat.toFixed(5) + ', ' + lon.toFixed(5);
             
+            // Center map on user position on first GPS fix
+            if (!hasCenteredOnUser && map) {
+                map.setView([lat, lon], 16);
+                hasCenteredOnUser = true;
+            }
+            
             // Add self as tracked entity
             ingestPLI({
                 uid: OWN_CALLSIGN,
@@ -605,7 +614,9 @@ class TacticalMapActivity : AppCompatActivity() {
                 const data = await resp.json();
                 
                 // Process entities
+                let entityCount = 0;
                 if (data.entities && Array.isArray(data.entities)) {
+                    entityCount = data.entities.length;
                     data.entities.forEach(ent => {
                         if (!ent.tile_id) return;
                         
@@ -624,6 +635,10 @@ class TacticalMapActivity : AppCompatActivity() {
                     });
                 }
                 
+                let camCount = (data.cameras && Array.isArray(data.cameras)) ? data.cameras.length : 0;
+                let heatCount = (data.heat && Array.isArray(data.heat)) ? data.heat.length : 0;
+                let satCount = (data.satellites && Array.isArray(data.satellites)) ? data.satellites.length : 0;
+                
                 // Process cameras
                 if (data.cameras && Array.isArray(data.cameras)) {
                     renderCameras(data.cameras);
@@ -639,7 +654,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderSatellites(data.satellites);
                 }
                 
-                document.getElementById('status').textContent = 'COP Connected';
+                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat';
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
             }
