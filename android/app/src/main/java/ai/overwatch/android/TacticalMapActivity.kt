@@ -430,9 +430,14 @@ class TacticalMapActivity : AppCompatActivity() {
                 });
             }
             
+            console.log('Creating marker for', entity.uid, 'at', entity.lat, entity.lon);
+            
             if (entityMarkers[entity.uid]) {
                 entityMarkers[entity.uid].setLatLng([entity.lat, entity.lon]);
                 entityMarkers[entity.uid].setIcon(icon);
+                if (!map.hasLayer(entityMarkers[entity.uid])) {
+                    entityMarkers[entity.uid].addTo(map);
+                }
             } else {
                 entityMarkers[entity.uid] = L.marker([entity.lat, entity.lon], { icon }).addTo(map);
             }
@@ -447,7 +452,10 @@ class TacticalMapActivity : AppCompatActivity() {
                     offset: [0, -16] 
                 });
             
-            applyLayerVisibility();
+            // Force marker visible
+            if (!map.hasLayer(entityMarkers[entity.uid])) {
+                entityMarkers[entity.uid].addTo(map);
+            }
         }
         
         function renderEntityList() {
