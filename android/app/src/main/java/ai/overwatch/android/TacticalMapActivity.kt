@@ -25,7 +25,12 @@ class TacticalMapActivity : AppCompatActivity() {
         @JavascriptInterface
         fun getLocationJson(): String {
             val loc = getBestLocation() ?: return "{}"
-            return "{\"lat\":${'$'}{loc.latitude},\"lon\":${'$'}{loc.longitude},\"acc\":${'$'}{loc.accuracy}}"
+            return "{\"lat\":${loc.latitude},\"lon\":${loc.longitude},\"acc\":${loc.accuracy}}"
+        }
+        
+        @JavascriptInterface
+        fun getDeviceCallsign(): String {
+            return intent.getStringExtra(EXTRA_CALLSIGN)?.trim()?.ifEmpty { "ANDROID-EUD" } ?: "ANDROID-EUD"
         }
     }
 
@@ -39,9 +44,9 @@ class TacticalMapActivity : AppCompatActivity() {
 
         val hub = intent.getStringExtra(EXTRA_HUB_URL)?.trim().orEmpty()
         val callsign = intent.getStringExtra(EXTRA_CALLSIGN)?.trim().orEmpty().ifEmpty { "ANDROID-EUD" }
-        val pliMode = intent.getStringExtra(EXTRA_PLI_MODE)?.trim().orEmpty().ifEmpty { "COP" }
+        val pliMode = intent.getStringExtra(EXTRA_PLI_MODE)?.trim().orEmpty().ifEmpty { "LOCAL" }
         val pullEntities = intent.getBooleanExtra(EXTRA_PULL_ENTITIES, true)
-        val pullHeat = intent.getBooleanExtra(EXTRA_PULL_HEAT, true)
+        val pullHeat = intent.getBooleanExtra(EXTRA_PULL_HEAT, false)
         val pullCams = intent.getBooleanExtra(EXTRA_PULL_CAMS, false)
         val pullSat = intent.getBooleanExtra(EXTRA_PULL_SAT, false)
 
@@ -60,13 +65,14 @@ class TacticalMapActivity : AppCompatActivity() {
         webView.settings.allowFileAccess = true
         webView.settings.allowContentAccess = true
         webView.settings.setGeolocationEnabled(true)
+        webView.settings.mediaPlaybackRequiresUserGesture = false
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
                 callback?.invoke(origin, true, false)
             }
         }
-        webView.addJavascriptInterface(Bridge(), "OverwatchBridge")
+        webView.addJavascriptInterface(Bridge(), "AndroidBridge")
 
         val html = tacticalHtml(callsign, baseUrl, pliMode, pullEntities, pullHeat, pullCams, pullSat, initLat, initLon)
         runCatching { webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
@@ -116,781 +122,539 @@ class TacticalMapActivity : AppCompatActivity() {
         val initLonJs = initLon.toString()
 
         return """
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Overwatch EUD Tactical Map</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    html, body, #map { height: 100%; margin: 0; background: #0b1220; }
-    .hud { position: fixed; top: 8px; left: 8px; z-index: 9999; background: rgba(11,18,32,0.85); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font: 12px monospace; padding: 8px 10px; max-width: 64vw; }
-    .sidebar { position: fixed; top: 8px; right: 8px; z-index: 9999; width: min(86vw, 280px); max-height: calc(100vh - 16px); overflow-y: auto; background: rgba(11,18,32,0.9); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; font: 12px monospace; padding: 10px; }
-    .sb-row { margin-bottom: 8px; }
-    .sb-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; }
-    .sb-input { width: 100%; box-sizing: border-box; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 6px; }
-    .sb-btn { width: 100%; margin-top: 6px; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 6px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Overwatch EUD Tactical Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --tac-friendly: #00c851;
+            --tac-hostile: #ff3333;
+            --tac-neutral: #00d4ff;
+            --tac-unknown: #ffcc00;
+            --bg-panel: rgba(11, 18, 32, 0.95);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --border-subtle: rgba(255, 255, 255, 0.12);
+        }
+        html, body, #map { height: 100%; margin: 0; background: #0b1220; overflow: hidden; }
+        
+        /* Tactical Symbols - Matching macOS */
+        .tac-symbol {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 700;
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.5);
+        }
+        .tac-friendly { border-color: var(--tac-friendly); color: var(--tac-friendly); background: rgba(0, 200, 81, 0.15); }
+        .tac-hostile { border-color: var(--tac-hostile); color: var(--tac-hostile); background: rgba(255, 51, 51, 0.15); border-radius: 50%; }
+        .tac-neutral { border-color: var(--tac-neutral); color: var(--tac-neutral); background: rgba(0, 212, 255, 0.15); }
+        .tac-unknown { border-color: var(--tac-unknown); color: var(--tac-unknown); background: rgba(255, 204, 0, 0.15); }
+        
+        /* Own position marker */
+        .my-location-marker {
+            width: 20px;
+            height: 20px;
+            background: var(--tac-neutral);
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 15px var(--tac-neutral), 0 0 30px var(--tac-neutral);
+            position: relative;
+        }
+        .my-location-marker::after {
+            content: '';
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: rgba(0, 212, 255, 0.2);
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
+            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+        }
+        
+        /* HUD */
+        .hud {
+            position: fixed;
+            top: 8px;
+            left: 8px;
+            z-index: 9999;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 10px;
+            color: var(--text-primary);
+            font: 12px monospace;
+            max-width: 280px;
+            backdrop-filter: blur(8px);
+        }
+        .hud-title { font-weight: bold; margin-bottom: 6px; color: var(--tac-neutral); }
+        .hud-row { margin: 4px 0; }
+        .hud-label { color: var(--text-secondary); }
+        
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            z-index: 9999;
+            width: 260px;
+            max-height: calc(100vh - 16px);
+            overflow-y: auto;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 12px;
+            color: var(--text-primary);
+            font: 12px monospace;
+            backdrop-filter: blur(8px);
+        }
+        .sb-section { margin-bottom: 12px; }
+        .sb-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; }
+        .sb-input {
+            width: 100%;
+            box-sizing: border-box;
+            background: rgba(15, 23, 42, 0.8);
+            color: var(--text-primary);
+            border: 1px solid #334155;
+            border-radius: 4px;
+            padding: 6px;
+            font: 12px monospace;
+        }
+        .sb-btn {
+            width: 100%;
+            margin-top: 6px;
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--text-primary);
+            border: 1px solid #334155;
+            border-radius: 4px;
+            padding: 8px;
+            cursor: pointer;
+        }
+        .sb-btn:hover { background: rgba(51, 65, 85, 0.9); border-color: var(--tac-neutral); }
+        .layer-group { display: flex; flex-wrap: wrap; gap: 8px; }
+        .layer-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+        
+        /* Entity List */
+        .entity-list { max-height: 200px; overflow-y: auto; margin-top: 8px; }
+        .entity-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px;
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 4px;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+        .entity-item:hover { background: rgba(30, 41, 59, 0.8); }
+        
+        /* Leaflet customizations */
+        .leaflet-container { background: #0b1220; }
+        .leaflet-popup-content-wrapper {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            color: var(--text-primary);
+        }
+        .leaflet-popup-tip { background: var(--bg-panel); }
+    </style>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="hud">
-    <div>● EUD Tactical Map • ${callsign}</div>
-    <div id="status">Connecting…</div>
-    <div id="count">Entities: 0</div>
-    <div id="cmp">Compare: booting…</div>
-    <div id="diag">PLI: n/a</div>
-  </div>
-  <div class="sidebar">
-    <div class="sb-row"><div class="sb-label">Callsign</div><input id="cfgCallsign" class="sb-input" value="${callsign}" /></div>
-    <div class="sb-row"><div class="sb-label">Hub</div><input id="cfgHub" class="sb-input" value="${hubBase}" /></div>
-    <div class="sb-row"><div class="sb-label">PLI Mode</div>
-      <select id="pliModeSel" class="sb-input">
-        <option value="COP">COP</option><option value="LOCAL">LOCAL</option><option value="MERGED">MERGED</option>
-      </select>
+    <div id="map"></div>
+    
+    <div class="hud">
+        <div class="hud-title">● EUD Tactical Map • $callsign</div>
+        <div class="hud-row"><span class="hud-label">Status:</span> <span id="status">Initializing...</span></div>
+        <div class="hud-row"><span class="hud-label">Entities:</span> <span id="entityCount">0</span></div>
+        <div class="hud-row"><span class="hud-label">Position:</span> <span id="position">--</span></div>
     </div>
-    <div class="sb-row"><div class="sb-label">Map Type</div>
-      <select id="mapType" class="sb-input" onchange="setMapType(this.value)">
-        <option value="dark">Dark</option><option value="sat">Satellite</option><option value="topo">Topo</option>
-      </select>
+    
+    <div class="sidebar">
+        <div class="sb-section">
+            <div class="sb-label">Settings</div>
+            <input id="cfgCallsign" class="sb-input" value="$callsign" placeholder="Callsign" />
+            <input id="cfgHub" class="sb-input" value="$hubBase" placeholder="Hub URL" style="margin-top:6px;" />
+            <select id="pliModeSel" class="sb-input" style="margin-top:6px;">
+                <option value="LOCAL" ${if (pliMode == "LOCAL") "selected" else ""}>LOCAL</option>
+                <option value="COP" ${if (pliMode == "COP") "selected" else ""}>COP</option>
+                <option value="MERGED" ${if (pliMode == "MERGED") "selected" else ""}>MERGED</option>
+            </select>
+        </div>
+        
+        <div class="sb-section">
+            <div class="sb-label">Map Layers</div>
+            <div class="layer-group">
+                <label><input id="layerEntities" type="checkbox" checked /> Entities</label>
+                <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} /> Heat</label>
+                <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} /> Cams</label>
+                <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} /> SAT</label>
+            </div>
+        </div>
+        
+        <div class="sb-section">
+            <button class="sb-btn" onclick="applySettings()">Apply Settings</button>
+            <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
+            <button class="sb-btn" onclick="reconnectHub()">Reconnect</button>
+        </div>
+        
+        <div class="sb-section">
+            <div class="sb-label">Tracked Entities</div>
+            <div id="entityList" class="entity-list">No entities tracked</div>
+        </div>
     </div>
-    <div class="sb-row"><div class="sb-label">Layer Visibility</div>
-      <label><input id="layerEntities" type="checkbox" checked onchange="applyLayerVisibility()" /> Entities</label>
-      <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} onchange="applyLayerVisibility()" /> Heatmaps</label>
-      <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} onchange="applyLayerVisibility()" /> Cameras</label>
-      <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> Satellites</label>
-      <label><input id="layerAdsb" type="checkbox" checked onchange="applyLayerVisibility()" /> ADS-B</label>
-    </div>
-    <button class="sb-btn" onclick="applySettings()">Apply Settings</button>
-    <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
-    <button class="sb-btn" onclick="reloadDelta()">Reconnect Hub</button>
-  </div>
 
-
-  <button id="msgFab" onclick="toggleMsgPanel()" style="position:fixed;right:18px;bottom:18px;z-index:10001;width:54px;height:54px;border-radius:50%;border:1px solid #334155;background:rgba(15,23,42,0.95);color:#e2e8f0;font-size:22px;">✉<span id="msgBadge" style="display:none;position:absolute;right:8px;top:8px;width:10px;height:10px;border-radius:50%;background:#22c55e;"></span></button>
-
-  <div id="msgPanel" style="display:none;position:fixed;right:18px;bottom:82px;z-index:10001;width:min(92vw,320px);max-height:55vh;overflow-y:auto;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:10px;">
-    <div style="font:12px monospace;color:#cbd5e1;margin-bottom:6px;">Messaging</div>
-    <div class="sb-label">Target Type</div>
-    <select id="msgType" class="sb-input" onchange="refreshMsgTargets()"><option value="device">Individual</option><option value="group">Group</option></select>
-    <div class="sb-label" style="margin-top:6px;">Target</div>
-    <select id="msgTarget" class="sb-input"></select>
-    <div class="sb-label" style="margin-top:6px;">Body</div>
-    <input id="msgBody" class="sb-input" placeholder="Message" />
-    <button class="sb-btn" onclick="sendPanelMessage()">Send</button>
-    <button class="sb-btn" onclick="pollInbox()">Refresh Inbox</button>
-    <div id="msgInfo" style="font:11px monospace;color:#93c5fd;margin-top:6px;">Ready</div>
-    <div id="msgInbox" style="margin-top:8px;max-height:180px;overflow-y:auto;border:1px solid #334155;border-radius:6px;padding:6px;font:11px monospace;color:#e2e8f0;"></div>
-  </div>
-
-  <div id="entityWheel" style="display:none;position:fixed;z-index:10000;background:rgba(11,18,32,0.96);border:1px solid rgba(255,255,255,0.2);border-radius:12px;padding:8px;min-width:180px;">
-    <div id="wheelTitle" style="font:12px monospace;color:#cbd5e1;margin-bottom:6px;">Entity</div>
-    <button class="sb-btn" onclick="wheelDirectMessage()">Direct Message</button>
-    <button class="sb-btn" onclick="wheelAddToGroup()">Add to Group</button>
-    <button class="sb-btn" onclick="hideEntityWheel()">Close</button>
-  </div>
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
-  <script>
-    let OWN_CALLSIGN = $callsignJs;
-    let PLI_MODE = $pliModeJs;
-    let PULL_ENTITIES = $pullEntitiesJs;
-    let PULL_HEAT = $pullHeatJs;
-    let PULL_CAMS = $pullCamsJs;
-    let PULL_SAT = $pullSatJs;
-    let PULL_ADSB = true;
-
-    const map = L.map('map').setView([$initLatJs, $initLonJs], 15);
-    let wheelSelectedId = null;
-    let msgGroups = [];
-    let msgUnread = 0;
-    let msgAfterId = 0;
-
-    function renderMsgBadge() {
-      const b = document.getElementById('msgBadge');
-      if (!b) return;
-      b.style.display = msgUnread > 0 ? 'block' : 'none';
-    }
-
-    function toggleMsgPanel() {
-      const p = document.getElementById('msgPanel');
-      if (!p) return;
-      p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
-      if (p.style.display === 'block') {
-        refreshMsgGroups();
-        refreshMsgTargets();
-        pollInbox(true);
-      }
-    }
-
-    async function refreshMsgGroups() {
-      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-      try {
-        const r = await fetch(`${'$'}{hub}/api/msg/groups?device_id=${'$'}{encodeURIComponent(ownCallsign())}`);
-        if (!r.ok) return;
-        msgGroups = await r.json();
-      } catch (_) {}
-    }
-
-    function refreshMsgTargets() {
-      const sel = document.getElementById('msgTarget');
-      const type = document.getElementById('msgType')?.value || 'device';
-      if (!sel) return;
-      if (type === 'group') {
-        const groups = (msgGroups || []).map(g => ({id:g.group_id, label:`${'$'}{g.name} (${'$'}{g.group_id})`}));
-        sel.innerHTML = groups.map(g => `<option value="${'$'}{g.id}">${'$'}{g.label}</option>`).join('');
-      } else {
-        const ids = Object.keys(markers).filter(x => x && x !== ownCallsign());
-        sel.innerHTML = ids.map(id => `<option value="${'$'}{id}">${'$'}{id}</option>`).join('');
-      }
-    }
-
-    async function sendPanelMessage() {
-      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-      const type = document.getElementById('msgType')?.value || 'device';
-      const target = document.getElementById('msgTarget')?.value || '';
-      const body = document.getElementById('msgBody')?.value || '';
-      const info = document.getElementById('msgInfo');
-      if (!target || !body) { if (info) info.textContent = 'Target/body required'; return; }
-      const req = { from: ownCallsign(), body };
-      if (type === 'group') req.to_group = target; else req.to_device = target;
-      try {
-        const r = await fetch(`${'$'}{hub}/api/msg/send`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(req) });
-        if (!r.ok) throw new Error(`HTTP ${'$'}{r.status}`);
-        if (info) info.textContent = `Sent -> ${'$'}{target}`;
-        const b = document.getElementById('msgBody'); if (b) b.value = '';
-      } catch (e) {
-        if (info) info.textContent = `Send failed: ${'$'}{e}`;
-      }
-    }
-
-    async function pollInbox(markRead = false) {
-      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-      const info = document.getElementById('msgInfo');
-      const box = document.getElementById('msgInbox');
-      try {
-        const r = await fetch(`${'$'}{hub}/api/msg/inbox?device_id=${'$'}{encodeURIComponent(ownCallsign())}&after_id=${'$'}{msgAfterId}&limit=100`);
-        if (!r.ok) throw new Error(`HTTP ${'$'}{r.status}`);
-        const arr = await r.json();
-        if (!Array.isArray(arr)) return;
-        let maxId = msgAfterId;
-        const lines = [];
-        for (const m of arr) {
-          maxId = Math.max(maxId, Number(m.id || 0));
-          lines.push(`from ${'$'}{m.from}: ${'$'}{m.body}`);
-          if (markRead) {
-            try {
-              await fetch(`${'$'}{hub}/api/msg/ack`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ device_id: ownCallsign(), id: m.id }) });
-            } catch (_) {}
-          }
-        }
-        if (arr.length > 0) {
-          msgAfterId = maxId;
-          if (!markRead) msgUnread += arr.length;
-        }
-        if (markRead) msgUnread = 0;
-        renderMsgBadge();
-        if (box && lines.length) {
-          const existing = box.innerText || '';
-          box.innerText = `${'$'}{existing}${'$'}{existing ? '\n' : ''}${'$'}{lines.join('\n')}`.trim();
-          box.scrollTop = box.scrollHeight;
-        }
-        if (info) info.textContent = `Inbox ${'$'}{arr.length ? 'updated' : 'no new messages'}`;
-      } catch (e) {
-        if (info) info.textContent = `Inbox failed: ${'$'}{e}`;
-      }
-    }
-
-    function hideEntityWheel() {
-      const el = document.getElementById('entityWheel');
-      if (el) el.style.display = 'none';
-      wheelSelectedId = null;
-    }
-
-    function showEntityWheel(id, latlng) {
-      wheelSelectedId = id;
-      const p = map.latLngToContainerPoint(latlng);
-      const wheel = document.getElementById('entityWheel');
-      const title = document.getElementById('wheelTitle');
-      if (!wheel || !title) return;
-      title.textContent = `Entity: ${'$'}{id}`;
-      wheel.style.left = `${'$'}{Math.max(8, p.x + 12)}px`;
-      wheel.style.top = `${'$'}{Math.max(8, p.y - 10)}px`;
-      wheel.style.display = 'block';
-    }
-
-    async function postJson(url, payload) {
-      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!r.ok) throw new Error(`HTTP ${'$'}{r.status}`);
-      return await r.text();
-    }
-
-    async function wheelDirectMessage() {
-      if (!wheelSelectedId) return;
-      const body = prompt(`Message to ${'$'}{wheelSelectedId}:`);
-      if (!body) return;
-      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-      try {
-        await postJson(`${'$'}{hub}/api/msg/send`, { from: ownCallsign(), to_device: wheelSelectedId, body });
-        document.getElementById('status').textContent = `DM sent -> ${'$'}{wheelSelectedId}`;
-        hideEntityWheel();
-      } catch (e) {
-        document.getElementById('status').textContent = `DM failed: ${'$'}{e}`;
-      }
-    }
-
-    async function wheelAddToGroup() {
-      if (!wheelSelectedId) return;
-      const gid = prompt(`Group ID for ${'$'}{wheelSelectedId}:`);
-      if (!gid) return;
-      const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-      try {
-        await postJson(`${'$'}{hub}/api/msg/group/join`, { group_id: gid, name: gid, device_id: wheelSelectedId });
-        document.getElementById('status').textContent = `${'$'}{wheelSelectedId} added to ${'$'}{gid}`;
-        refreshMsgGroups();
-        hideEntityWheel();
-      } catch (e) {
-        document.getElementById('status').textContent = `Group add failed: ${'$'}{e}`;
-      }
-    }
-
-    map.on('click', () => hideEntityWheel());
-
-    const layerDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap &copy; CARTO' });
-    const layerSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' });
-    const layerTopo = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' });
-    const baseLayers = { dark: layerDark, sat: layerSat, topo: layerTopo };
-    let activeBase = 'dark';
-    baseLayers[activeBase].addTo(map);
-
-    function setMapType(kind) { if (!baseLayers[kind] || kind === activeBase) return; map.removeLayer(baseLayers[activeBase]); baseLayers[kind].addTo(map); activeBase = kind; }
-    window.setMapType = setMapType;
-
-    let cursor = 0;
-    const markers = {};
-    const heatLayers = {};
-    const camLayers = {};
-    const satLayers = {};
-    const adsbLayers = {};
-
-    let centeredOnOwn = false;
-    let ownGps = { lat: $initLatJs, lon: $initLonJs };
-    let lastPliIds = [];
-    let lastPliRxMs = 0;
-
-    function ensureOwnMarker() {
-      // Always maintain a local marker from device GPS. Dedupe is handled by same callsign key.
-      if (!ownGps || !Number.isFinite(ownGps.lat) || !Number.isFinite(ownGps.lon)) return;
-      const id = ownCallsign();
-      const lat = ownGps.lat, lon = ownGps.lon;
-      upsertMarker(id, lat, lon, 'local');
-      localRxMs = Date.now();
-
-      // Remove legacy local heat ring (green circle) to match desktop tactical symbology.
-      const hk = 'local:' + id;
-      if (heatLayers[hk]) {
-        if (map.hasLayer(heatLayers[hk])) map.removeLayer(heatLayers[hk]);
-        delete heatLayers[hk];
-      }
-
-      if (!centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
-    }
-
-    function ownCallsign() { return OWN_CALLSIGN || 'ANDROID-EUD'; }
-
-    function refreshNativeLocation() {
-      try {
-        if (window.OverwatchBridge && typeof window.OverwatchBridge.getLocationJson === 'function') {
-          const raw = window.OverwatchBridge.getLocationJson();
-          if (!raw) return;
-          const j = JSON.parse(raw);
-          const lat = Number(j.lat), lon = Number(j.lon);
-          if (Number.isFinite(lat) && Number.isFinite(lon)) {
-            ownGps = { lat, lon };
-            ensureOwnMarker();
-          }
-        }
-      } catch (_) {}
-    }
-
-    function updateCompare() {
-      const cmp = document.getElementById('cmp');
-      if (!cmp) return;
-      if (ownGps) cmp.textContent = `EUD ${'$'}{ownGps.lat.toFixed(5)}, ${'$'}{ownGps.lon.toFixed(5)} • mode ${'$'}{PLI_MODE}`;
-      else cmp.textContent = 'Compare: waiting for local GPS…';
-    }
-    function focusOwn() { const m = markers[ownCallsign()]; if (m) map.setView(m.getLatLng(), 16); }
-    function reloadDelta() { cursor = 0; document.getElementById('status').textContent = 'Reconnecting hub delta…'; pollDelta(); }
-
-    function applySettings() {
-      const cs = (document.getElementById('cfgCallsign')?.value || '').trim();
-      const hub = (document.getElementById('cfgHub')?.value || '').trim();
-      const mode = (document.getElementById('pliModeSel')?.value || 'LOCAL').trim().toUpperCase();
-      OWN_CALLSIGN = cs || OWN_CALLSIGN || 'ANDROID-EUD';
-      if (hub) document.getElementById('cfgHub').value = hub.endsWith('/') ? hub : (hub + '/');
-      PLI_MODE = (mode === 'LOCAL' || mode === 'MERGED') ? mode : 'COP';
-      PULL_HEAT = document.getElementById('layerHeat')?.checked === true;
-      PULL_CAMS = document.getElementById('layerCams')?.checked === true;
-      PULL_SAT = document.getElementById('layerSat')?.checked === true;
-      PULL_ADSB = document.getElementById('layerAdsb')?.checked !== false;
-      PULL_ENTITIES = document.getElementById('layerEntities')?.checked !== false;
-
-      try {
-        localStorage.setItem('eud:callsign', OWN_CALLSIGN);
-        localStorage.setItem('eud:hub', document.getElementById('cfgHub').value);
-        localStorage.setItem('eud:pli_mode', PLI_MODE);
-        localStorage.setItem('eud:pull_entities', PULL_ENTITIES ? '1' : '0');
-        localStorage.setItem('eud:pull_heat', PULL_HEAT ? '1' : '0');
-        localStorage.setItem('eud:pull_cams', PULL_CAMS ? '1' : '0');
-        localStorage.setItem('eud:pull_sat', PULL_SAT ? '1' : '0');
-        localStorage.setItem('eud:pull_adsb', PULL_ADSB ? '1' : '0');
-      } catch (_) {}
-
-      const statusEl = document.getElementById('status');
-      if (statusEl) statusEl.textContent = `Settings applied • ${'$'}{OWN_CALLSIGN} • ${'$'}{PLI_MODE}`;
-      applyLayerVisibility();
-      updateCompare();
-      reloadDelta();
-    }
-
-    function parseAnyTile(tileId) {
-      // 1) Android quantized tile id
-      const a = parseAndroidTile(tileId);
-      if (a) return a;
-
-      // 2) H3 index tile id from hub COP heat/rf/wifi layers
-      try {
-        const h = String(tileId || '').trim();
-        if (!h) return null;
-        const h3 = window.h3 || window.h3js || null;
-        if (!h3) return null;
-
-        // h3-js v4: cellToLatLng ; v3: h3ToGeo
-        if (typeof h3.cellToLatLng === 'function') {
-          const [lat, lon] = h3.cellToLatLng(h);
-          if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
-        }
-        if (typeof h3.h3ToGeo === 'function') {
-          const [lat, lon] = h3.h3ToGeo(h);
-          if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
-        }
-      } catch (_) {}
-
-      return null;
-    }
-
-    function parseAndroidTile(tileId) {
-      if (!tileId || !tileId.startsWith('android_')) return null;
-      const parts = tileId.split('_'); if (parts.length !== 3) return null;
-      const latQ = parseInt(parts[1], 10), lonQ = parseInt(parts[2], 10);
-      if (!Number.isFinite(latQ) || !Number.isFinite(lonQ)) return null;
-      const divisor = (Math.abs(latQ) > 9000 || Math.abs(lonQ) > 9000) ? 10000.0 : 100.0;
-      return { lat: latQ / divisor, lon: lonQ / divisor };
-    }
-
-    function applyLayerVisibility() {
-      const showEntities = document.getElementById('layerEntities')?.checked !== false;
-      const showHeat = document.getElementById('layerHeat')?.checked !== false;
-      const showCams = document.getElementById('layerCams')?.checked !== false;
-      const showSat = document.getElementById('layerSat')?.checked !== false;
-      const showAdsb = document.getElementById('layerAdsb')?.checked !== false;
-
-      Object.values(markers).forEach(m => {
-        if (showEntities) { if (!map.hasLayer(m)) m.addTo(map); }
-        else { if (map.hasLayer(m)) map.removeLayer(m); }
-      });
-      Object.values(heatLayers).forEach(l => {
-        if (showHeat) { if (!map.hasLayer(l)) l.addTo(map); }
-        else { if (map.hasLayer(l)) map.removeLayer(l); }
-      });
-      Object.values(camLayers).forEach(l => {
-        if (showCams) { if (!map.hasLayer(l)) l.addTo(map); }
-        else { if (map.hasLayer(l)) map.removeLayer(l); }
-      });
-      Object.values(satLayers).forEach(l => {
-        if (showSat) { if (!map.hasLayer(l)) l.addTo(map); }
-        else { if (map.hasLayer(l)) map.removeLayer(l); }
-      });
-      Object.values(adsbLayers).forEach(l => {
-        if (showAdsb) { if (!map.hasLayer(l)) l.addTo(map); }
-        else { if (map.hasLayer(l)) map.removeLayer(l); }
-      });
-    }
-    window.applyLayerVisibility = applyLayerVisibility;
-
-    const entityLast = {};
-    function idJitter(id) {
-      let h = 0;
-      const s = String(id || '');
-      for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-      const a = (h & 0xffff) / 65535.0 * Math.PI * 2;
-      return { dLat: Math.sin(a) * 0.00012, dLon: Math.cos(a) * 0.00012 };
-    }
-
-    function upsertMarker(id, lat, lon, sourceType) {
-      if (Math.abs(lat) < 0.2 && Math.abs(lon) < 0.2) return;
-      const isOwn = String(id||'').toUpperCase() === String(ownCallsign()||'').toUpperCase();
-      const j = idJitter(id);
-      const rLat = isOwn ? lat : (lat + j.dLat);
-      const rLon = isOwn ? lon : (lon + j.dLon);
-      const prev = entityLast[id]; let heading = 0;
-      if (prev) { const dy = lat - prev.lat, dx = lon - prev.lon; if (Math.abs(dx)+Math.abs(dy) > 0.00001) heading = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360; }
-      entityLast[id] = { lat, lon };
-
-      let icon;
-      if (isOwn) {
-        // Match desktop own-position marker (cyan + pulse)
-        icon = L.divIcon({
-          className: 'my-location-marker',
-          html: `<div style="width:20px;height:20px;background:#00d4ff;border:3px solid white;border-radius:50%;box-shadow:0 0 15px #00d4ff;position:relative;"><div style="position:absolute;width:40px;height:40px;background:rgba(0,212,255,0.3);border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);"></div></div>`,
-          iconSize:[20,20],
-          iconAnchor:[10,10]
-        });
-      } else {
-        // Match desktop entity tactical symbol (square + heading tick + callsign initial)
-        const color = (sourceType === 'drone') ? '#f97316' : '#00c851';
-        icon = L.divIcon({
-          className: 'entity-marker',
-          html: `<div style="position:relative;width:24px;height:24px;"><div style="position:absolute;left:2px;top:2px;width:20px;height:20px;background:${'$'}{color};border:2px solid white;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:bold;color:white;">${'$'}{(id||'?')[0]}</div><div style="position:absolute;left:9px;top:-2px;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:8px solid #fff;transform:rotate(${'$'}{heading}deg);transform-origin:50% 14px;"></div></div>`,
-          iconSize:[24,24],
-          iconAnchor:[12,12]
-        });
-      }
-
-      if (!markers[id]) markers[id] = L.marker([rLat, rLon], { icon }).addTo(map);
-      else { markers[id].setLatLng([rLat, rLon]); markers[id].setIcon(icon); }
-      markers[id]
-        .bindPopup(`<b>${'$'}{id}</b><br/>${'$'}{sourceType || 'unknown'}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`)
-        .bindTooltip(id, { permanent: true, direction: 'top', offset: [0,-12] });
-      markers[id].off('click');
-      markers[id].on('click', (e) => {
-        showEntityWheel(id, e.latlng || markers[id].getLatLng());
-      });
-
-      applyLayerVisibility();
-      if (isOwn) {
-        ownGps = { lat, lon };
-        updateCompare();
-      }
-      if (isOwn && !centeredOnOwn) { map.setView([lat, lon], 16); centeredOnOwn = true; }
-    }
-
-    function renderCopLayers(snap) {
-      const heat = snap?.heat || [];
-      const cams = snap?.cameras || [];
-      const sats = snap?.satellites || [];
-      copRxMs = Date.now();
-
-      const nextHeat = {};
-      if (PULL_HEAT) {
-        for (const h of heat) {
-          const p = parseAnyTile(h.tile_id); if (!p) continue;
-          const key = `${'$'}{h.tile_id}:${'$'}{h.dimension || ''}`;
-          const intensity = Math.max(0.1, Math.min(1.0, Number(h.max || h.mean || 0) / 100.0));
-          const radius = 18 + Math.round(intensity * 26);
-          const color = (h.sensor_type === 'wifi') ? '#22d3ee' : '#f97316';
-          let c = heatLayers[key];
-          if (!c) {
-            c = L.circleMarker([p.lat, p.lon], { radius, color, weight: 1, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 }).addTo(map);
-            c.bindPopup(`HEAT ${'$'}{h.sensor_type || ''} ${'$'}{h.dimension || ''}<br/>max:${'$'}{h.max} mean:${'$'}{h.mean}`);
-            heatLayers[key] = c;
-          } else {
-            c.setLatLng([p.lat, p.lon]);
-            c.setStyle({ radius, color, fillColor: color, fillOpacity: 0.28 + intensity * 0.35 });
-            if (!map.hasLayer(c)) c.addTo(map);
-          }
-          nextHeat[key] = true;
-        }
-      }
-      Object.keys(heatLayers).forEach(k => {
-        if (k.startsWith('local:')) return;
-        if (!nextHeat[k]) { if (map.hasLayer(heatLayers[k])) map.removeLayer(heatLayers[k]); delete heatLayers[k]; }
-      });
-
-      const nextCam = {};
-      for (const c of cams) {
-        const p = parseAnyTile(c.tile_id); if (!p) continue;
-        const key = `${'$'}{c.tile_id}:${'$'}{c.dimension || ''}`;
-        let m = camLayers[key];
-        const icon = L.divIcon({ className:'cop-cam', html:'<div style="width:10px;height:10px;border-radius:50%;background:#22c55e;border:2px solid #fff"></div>', iconSize:[10,10], iconAnchor:[5,5] });
-        if (!m) {
-          m = L.marker([p.lat,p.lon], { icon }).addTo(map);
-          m.bindPopup(`CAM ${'$'}{c.dimension || ''}<br/>count:${'$'}{c.count || 0}`);
-          camLayers[key] = m;
-        } else {
-          m.setLatLng([p.lat,p.lon]);
-          if (!map.hasLayer(m)) m.addTo(map);
-        }
-        nextCam[key] = true;
-      }
-      Object.keys(camLayers).forEach(k => { if (!nextCam[k]) { if (map.hasLayer(camLayers[k])) map.removeLayer(camLayers[k]); delete camLayers[k]; } });
-
-      const nextSat = {};
-      for (const t of sats) {
-        const p = parseAnyTile(t.tile_id); if (!p) continue;
-        const key = `${'$'}{t.tile_id}:${'$'}{t.dimension || ''}`;
-        let m = satLayers[key];
-        const icon = L.divIcon({ className:'cop-sat', html:'<div style="width:10px;height:10px;border-radius:50%;background:#ffea00;border:2px solid #111"></div>', iconSize:[10,10], iconAnchor:[5,5] });
-        if (!m) {
-          m = L.marker([p.lat,p.lon], { icon }).addTo(map);
-          m.bindPopup(`SAT ${'$'}{t.dimension || ''}<br/>count:${'$'}{t.count || 0}`);
-          satLayers[key] = m;
-        } else {
-          m.setLatLng([p.lat,p.lon]);
-          if (!map.hasLayer(m)) m.addTo(map);
-        }
-        nextSat[key] = true;
-      }
-      Object.keys(satLayers).forEach(k => { if (!nextSat[k]) { if (map.hasLayer(satLayers[k])) map.removeLayer(satLayers[k]); delete satLayers[k]; } });
-
-      applyLayerVisibility();
-    }
-
-    async function pushLocalPliToHub() {
-      try {
-        const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-        const h3 = window.h3 || window.h3js || null;
-        if (!h3 || !ownGps || !Number.isFinite(ownGps.lat) || !Number.isFinite(ownGps.lon)) return;
-        const tileId = (typeof h3.latLngToCell === 'function') ? h3.latLngToCell(ownGps.lat, ownGps.lon, 10) : null;
-        if (!tileId) return;
-        const nowSec = Math.floor(Date.now() / 1000);
-        const payload = {
-          schema_version: 1,
-          device_id: ownCallsign(),
-          source_type: 'entity',
-          timestamp_utc: nowSec,
-          tiles: [{ tile_id: tileId, time_bucket: Math.floor(nowSec / 60) * 60 }]
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+    <script>
+        // Configuration
+        const OWN_CALLSIGN = $callsignJs;
+        const INITIAL_PLI_MODE = $pliModeJs;
+        const PULL_ENTITIES_DEFAULT = $pullEntitiesJs;
+        const PULL_HEAT_DEFAULT = $pullHeatJs;
+        const PULL_CAMS_DEFAULT = $pullCamsJs;
+        const PULL_SAT_DEFAULT = $pullSatJs;
+        
+        // State
+        let PLI_MODE = localStorage.getItem('eud:pli_mode') || INITIAL_PLI_MODE;
+        let currentHub = localStorage.getItem('eud:hub') || document.getElementById('cfgHub').value;
+        let trackedEntities = [];
+        let entityMarkers = {};
+        let copCursor = 0;
+        let ownPosition = { lat: $initLatJs, lon: $initLonJs };
+        let layerVisibility = {
+            entities: true,
+            heat: $pullHeatJs,
+            cams: $pullCamsJs,
+            sat: $pullSatJs
         };
-        await fetch(`${'$'}{hub}/api/push`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      } catch (_) {}
-    }
-
-    async function pollAdsb() {
-      if (!PULL_ADSB) return;
-      try {
-        const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-        const resp = await fetch(`${'$'}{hub}/api/adsb?max_age_secs=1200`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const arr = Array.isArray(data?.aircraft) ? data.aircraft : (Array.isArray(data) ? data : []);
-        const next = {};
-        for (const ac of arr) {
-          const lat = Number(ac.latitude ?? ac.lat);
-          const lon = Number(ac.longitude ?? ac.lon);
-          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-          const id = String(ac.icao || ac.callsign || ac.id || 'AC');
-          let m = adsbLayers[id];
-          const icon = L.divIcon({ className:'adsb-marker', html:'<div style="width:10px;height:10px;border-radius:50%;background:#f59e0b;border:2px solid #fff"></div>', iconSize:[10,10], iconAnchor:[5,5] });
-          if (!m) {
-            m = L.marker([lat, lon], { icon }).addTo(map);
-            adsbLayers[id] = m;
-          } else {
-            m.setLatLng([lat, lon]);
-            if (!map.hasLayer(m)) m.addTo(map);
-          }
-          m.bindPopup(`ADS-B ${'$'}{id}<br/>${'$'}{lat.toFixed(5)}, ${'$'}{lon.toFixed(5)}`);
-          next[id] = true;
-        }
-        Object.keys(adsbLayers).forEach(id => { if (!next[id]) { if (map.hasLayer(adsbLayers[id])) map.removeLayer(adsbLayers[id]); delete adsbLayers[id]; } });
-      } catch (_) {}
-    }
-
-    async function pollDelta() {
-      const statusEl = document.getElementById('status');
-      const countEl = document.getElementById('count');
-
-      // LOCAL mode = show only this EUD local marker and skip COP pulls.
-      if (PLI_MODE === 'LOCAL') {
-        refreshNativeLocation();
-        ensureOwnMarker();
-        await pushLocalPliToHub();
-        statusEl.textContent = 'LOCAL mode • COP pull disabled';
-        countEl.textContent = `Entities: ${'$'}{markers[ownCallsign()] ? 1 : 0} • updates: local`;
-        const diagEl = document.getElementById('diag');
-        if (diagEl) {
-          const la = localRxMs ? Math.floor((Date.now()-localRxMs)/1000) : -1;
-          const localAgeTxt = (la >= 0) ? (la + 's') : 'n/a';
-          diagEl.textContent = 'SRC local:' + localAgeTxt + ' cop:off • ids:' + ownCallsign();
-        }
-        applyLayerVisibility();
-        return;
-      }
-
-      try {
-        refreshNativeLocation();
-        if (PLI_MODE === 'MERGED' || PLI_MODE === 'COP') ensureOwnMarker();
-        await pushLocalPliToHub();
-        const hub = (document.getElementById('cfgHub')?.value || '').trim().replace(/\/$/, '');
-        let seen = 0;
-
-        if (PULL_ENTITIES) {
-          let ids = [];
-          let pliOk = false;
-          let pliSource = 'none';
-
-          // COP snapshot feed (authoritative hub -> EUD entity view)
-          try {
-            if (PLI_MODE === 'COP' || PLI_MODE === 'MERGED') {
-              const snapResp = await fetch(`${'$'}{hub}/api/cop_snapshot?max_age_secs=7200`);
-              if (snapResp.ok) {
-                const snap = await snapResp.json();
-                (snap.entities || []).forEach(pt => {
-                  const p = parseAnyTile(pt.tile_id); if (!p) return;
-                  const id = pt.device_id || 'unknown';
-                  const sourceType = pt.source_type || 'unknown';
-                  if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
-                  ids.push(id);
-                  upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
+        
+        // Initialize map
+        const map = L.map('map', { zoomControl: false }).setView([ownPosition.lat, ownPosition.lon], 15);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        
+        // Dark theme tiles
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // Update PLI mode selector
+        document.getElementById('pliModeSel').value = PLI_MODE;
+        
+        // ===== ENTITY MANAGEMENT =====
+        
+        function ingestPLI(pli) {
+            // pli = { uid, callsign, type, affiliation, lat, lon, timestamp }
+            const existing = trackedEntities.findIndex(e => e.uid === pli.uid);
+            const now = Date.now();
+            
+            if (existing >= 0) {
+                trackedEntities[existing] = { 
+                    ...trackedEntities[existing], 
+                    ...pli, 
+                    lastSeen: now 
+                };
+            } else {
+                trackedEntities.push({ 
+                    ...pli, 
+                    lastSeen: now,
+                    affiliation: pli.affiliation || 'friendly'
                 });
-                renderCopLayers(snap);
-                const diagEl = document.getElementById('diag');
-                if (diagEl) {
-                  diagEl.textContent = `COP ts:${'$'}{snap.ts || 'n/a'} ent:${'$'}{(snap.entities||[]).length} heat:${'$'}{(snap.heat||[]).length} cam:${'$'}{(snap.cameras||[]).length} sat:${'$'}{(snap.satellites||[]).length}`;
-                }
-                pliOk = true;
-                pliSource = 'cop_snapshot';
-              }
             }
-          } catch (_) {}
-
-          // Legacy/cursor feed fallback
-          if (!pliOk) {
-            try {
-              const pliResp = await fetch(`${'$'}{hub}/api/pli_delta?device_id=${'$'}{encodeURIComponent(ownCallsign())}&cursor=${'$'}{cursor}&max_age_secs=7200`);
-              if (pliResp.ok) {
-                const pliDelta = await pliResp.json();
-                cursor = pliDelta.cursor || cursor;
-                (pliDelta.tiles || []).forEach(batch => {
-                  (batch.tiles || []).forEach(pt => {
-                    const p = parseAnyTile(pt.tile_id); if (!p) return;
-                    const id = pt.device_id || batch.device_id || 'unknown';
-                    const sourceType = pt.source_type || batch.source_type || 'unknown';
-                    if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
-                    ids.push(id);
-                    upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
-                  });
-                });
-                pliOk = true;
-                pliSource = 'delta';
-              }
-            } catch (_) {}
-          }
-
-          // If delta has no ids, refresh from snapshot to avoid "appears then disappears" behavior.
-          if (!pliOk || ids.length === 0) {
-            try {
-              const r = await fetch(`${'$'}{hub}/api/pli?max_age_secs=7200`);
-              if (r.ok) {
-                const pli = await r.json();
-                ids = [];
-                (pli || []).forEach(pt => {
-                  const p = parseAnyTile(pt.tile_id); if (!p) return;
-                  const id = pt.device_id || 'unknown';
-                  const sourceType = pt.source_type || 'unknown';
-                  if (sourceType === 'hub_local' || String(id).toLowerCase() === 'hub') return;
-                  ids.push(id);
-                  upsertMarker(id, p.lat, p.lon, sourceType); seen += 1;
-                });
-                pliOk = true;
-                pliSource = 'snapshot';
-              }
-            } catch (_) {}
-          }
-
-          if (ids.length > 0) {
-            lastPliIds = [...new Set(ids)];
-            lastPliRxMs = Date.now();
-          }
-
-          const diagEl = document.getElementById('diag');
-          if (diagEl) {
-            const copAge = copRxMs ? Math.max(0, Math.floor((Date.now() - copRxMs) / 1000)) : -1;
-            const localAge = localRxMs ? Math.max(0, Math.floor((Date.now() - localRxMs) / 1000)) : -1;
-            const idText = lastPliIds.length ? lastPliIds.join(', ') : 'none';
-            const localOnMap = !!markers[ownCallsign()];
-            const localAgeTxt = (localAge >= 0) ? (localAge + 's') : 'n/a';
-            const copAgeTxt = (copAge >= 0) ? (copAge + 's') : 'n/a';
-            diagEl.textContent = pliOk
-              ? ('SRC local:' + localAgeTxt + ' cop:' + copAgeTxt + ' via:' + pliSource + ' • ids:' + idText + ' • local:' + (localOnMap ? 'on' : 'off'))
-              : ('SRC local:' + localAgeTxt + ' cop:fail • local:' + (localOnMap ? 'on' : 'off'));
-          }
+            
+            updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
+            renderEntityList();
+            updateStatus();
         }
-
-        // Optional delta pull for non-entity layers.
-        try {
-          const q = `device_id=android-eud-map&cursor=${'$'}{cursor}&mode=${'$'}{encodeURIComponent(PLI_MODE)}&entities=0&heat=${'$'}{PULL_HEAT?1:0}&cams=${'$'}{PULL_CAMS?1:0}&sat=${'$'}{PULL_SAT?1:0}`;
-          const resp = await fetch(`${'$'}{hub}/api/delta?${'$'}{q}`);
-          if (resp.ok) {
-            const data = await resp.json();
-            cursor = Math.max(cursor, data.cursor || 0);
-          }
-        } catch (_) {
-          // non-fatal
+        
+        function updateEntityOnMap(entity) {
+            if (!entity || !entity.lat || !entity.lon) return;
+            if (Math.abs(entity.lat) < 0.2 && Math.abs(entity.lon) < 0.2) return;
+            
+            const affilColor = { 
+                friendly: '#00c851', 
+                hostile: '#ff3333', 
+                neutral: '#00d4ff', 
+                unknown: '#ffcc00' 
+            };
+            const color = affilColor[entity.affiliation] || '#ffcc00';
+            
+            const isOwn = entity.uid === OWN_CALLSIGN || entity.callsign === OWN_CALLSIGN;
+            
+            let icon;
+            if (isOwn) {
+                // Own position - cyan pulsing marker
+                icon = L.divIcon({
+                    className: '',
+                    html: '<div class="my-location-marker"></div>',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                });
+            } else {
+                // Other entities - tactical symbol
+                const affilClass = 'tac-' + (entity.affiliation || 'unknown');
+                const symbolChar = entity.affiliation === 'friendly' ? '◈' : 
+                                  entity.affiliation === 'hostile' ? '◉' : 
+                                  entity.affiliation === 'neutral' ? '◐' : '◆';
+                
+                icon = L.divIcon({
+                    className: '',
+                    html: '<div class="tac-symbol ' + affilClass + '">' + symbolChar + '</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+            }
+            
+            if (entityMarkers[entity.uid]) {
+                entityMarkers[entity.uid].setLatLng([entity.lat, entity.lon]);
+                entityMarkers[entity.uid].setIcon(icon);
+            } else {
+                entityMarkers[entity.uid] = L.marker([entity.lat, entity.lon], { icon }).addTo(map);
+            }
+            
+            entityMarkers[entity.uid]
+                .bindPopup('<b>' + (entity.callsign || entity.uid) + '</b><br>' + 
+                          (entity.type || 'Unknown') + '<br>' + 
+                          entity.lat.toFixed(5) + ', ' + entity.lon.toFixed(5))
+                .bindTooltip(entity.callsign || entity.uid, { 
+                    permanent: true, 
+                    direction: 'top', 
+                    offset: [0, -16] 
+                });
+            
+            applyLayerVisibility();
         }
-
-        await pollAdsb();
-        statusEl.textContent = `Connected • cursor ${'$'}{cursor}`;
-        countEl.textContent = `Entities: ${'$'}{Object.keys(markers).length} • updates: ${'$'}{seen} • ADS-B: ${'$'}{Object.keys(adsbLayers).length}`;
-      } catch (e) {
-        statusEl.textContent = `PLI pull error: ${'$'}{e}`;
-      }
-    }
-
-    // Restore persisted map settings (single-screen workflow; no separate settings page)
-    try {
-      const savedCallsign = localStorage.getItem('eud:callsign');
-      const savedHub = localStorage.getItem('eud:hub');
-      const savedMode = localStorage.getItem('eud:pli_mode');
-      const savedEntities = localStorage.getItem('eud:pull_entities');
-      const savedHeat = localStorage.getItem('eud:pull_heat');
-      const savedCams = localStorage.getItem('eud:pull_cams');
-      const savedSat = localStorage.getItem('eud:pull_sat');
-      const savedAdsb = localStorage.getItem('eud:pull_adsb');
-      if (savedCallsign) { OWN_CALLSIGN = savedCallsign; const e = document.getElementById('cfgCallsign'); if (e) e.value = savedCallsign; }
-      if (savedHub) { const h = document.getElementById('cfgHub'); if (h) h.value = savedHub; }
-      if (savedMode) { PLI_MODE = savedMode; }
-      if (savedEntities !== null) PULL_ENTITIES = savedEntities === '1';
-      if (savedHeat !== null) PULL_HEAT = savedHeat === '1';
-      if (savedCams !== null) PULL_CAMS = savedCams === '1';
-      if (savedSat !== null) PULL_SAT = savedSat === '1';
-      if (savedAdsb !== null) PULL_ADSB = savedAdsb === '1';
-    } catch (_) {}
-
-    const modeSel = document.getElementById('pliModeSel');
-    if (modeSel) modeSel.value = PLI_MODE;
-    const entChk = document.getElementById('layerEntities'); if (entChk) entChk.checked = !!PULL_ENTITIES;
-    const heatChk = document.getElementById('layerHeat'); if (heatChk) heatChk.checked = !!PULL_HEAT;
-    const camChk = document.getElementById('layerCams'); if (camChk) camChk.checked = !!PULL_CAMS;
-    const satChk = document.getElementById('layerSat'); if (satChk) satChk.checked = !!PULL_SAT;
-    const adsbChk = document.getElementById('layerAdsb'); if (adsbChk) adsbChk.checked = !!PULL_ADSB;
-
-    if (navigator.geolocation) {
-      navigator.geolocation.watchPosition((pos) => {
-        const lat = pos.coords.latitude, lon = pos.coords.longitude;
-        ownGps = { lat, lon };
-        ensureOwnMarker();
-        updateCompare();
-      }, (err) => {
-        document.getElementById('status').textContent = `GPS fallback (${'$'}{err.message})`;
-        updateCompare();
-      }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 });
-    }
-
-    ensureOwnMarker();
-    document.getElementById('status').textContent = 'Map loaded • connecting to hub API…';
-    updateCompare();
-    renderMsgBadge();
-    setInterval(() => pollInbox(false), 5000);
-    setInterval(pollDelta, 3000);
-    pollInbox(false);
-    pollDelta();
-  </script>
+        
+        function renderEntityList() {
+            const list = document.getElementById('entityList');
+            if (!trackedEntities.length) {
+                list.innerHTML = 'No entities tracked';
+                return;
+            }
+            
+            const now = Date.now();
+            list.innerHTML = trackedEntities.map(e => {
+                const age = Math.floor((now - e.lastSeen) / 1000);
+                const ageStr = age < 60 ? age + 's' : Math.floor(age / 60) + 'm';
+                const stale = age > 120;
+                const affilClass = 'tac-' + (e.affiliation || 'unknown');
+                const symbolChar = e.affiliation === 'friendly' ? '◈' : 
+                                  e.affiliation === 'hostile' ? '◉' : 
+                                  e.affiliation === 'neutral' ? '◐' : '◆';
+                
+                return '<div class="entity-item" style="opacity:' + (stale ? 0.5 : 1) + '" onclick="focusEntity(\'' + e.uid + '\')">' +
+                       '<div class="tac-symbol ' + affilClass + '" style="width:20px;height:20px;font-size:10px;">' + symbolChar + '</div>' +
+                       '<div style="flex:1;">' +
+                       '<div style="font-weight:bold;">' + (e.callsign || e.uid) + '</div>' +
+                       '<div style="font-size:10px;color:#94a3b8;">' + ageStr + (stale ? ' STALE' : '') + '</div>' +
+                       '</div>' +
+                       '</div>';
+            }).join('');
+        }
+        
+        function applyLayerVisibility() {
+            layerVisibility.entities = document.getElementById('layerEntities').checked;
+            layerVisibility.heat = document.getElementById('layerHeat').checked;
+            layerVisibility.cams = document.getElementById('layerCams').checked;
+            layerVisibility.sat = document.getElementById('layerSat').checked;
+            
+            Object.values(entityMarkers).forEach(m => {
+                if (layerVisibility.entities) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
+        }
+        
+        // ===== LOCATION HANDLING =====
+        
+        function updateOwnPosition(lat, lon) {
+            ownPosition = { lat, lon };
+            document.getElementById('position').textContent = lat.toFixed(5) + ', ' + lon.toFixed(5);
+            
+            // Add self as tracked entity
+            ingestPLI({
+                uid: OWN_CALLSIGN,
+                callsign: OWN_CALLSIGN,
+                type: 'EUD',
+                affiliation: 'friendly',
+                lat: lat,
+                lon: lon,
+                timestamp: Date.now()
+            });
+        }
+        
+        function refreshNativeLocation() {
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.getLocationJson === 'function') {
+                    const raw = window.AndroidBridge.getLocationJson();
+                    if (!raw || raw === '{}') return;
+                    const j = JSON.parse(raw);
+                    if (typeof j.lat === 'number' && typeof j.lon === 'number') {
+                        updateOwnPosition(j.lat, j.lon);
+                    }
+                }
+            } catch (e) {
+                console.error('Location refresh error:', e);
+            }
+        }
+        
+        // ===== COP/HUB INTEGRATION =====
+        
+        async function pollCOP() {
+            if (PLI_MODE === 'LOCAL') return;
+            
+            try {
+                const resp = await fetch(currentHub + 'api/cop_snapshot?max_age_secs=7200');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                
+                const data = await resp.json();
+                
+                // Process entities
+                if (data.entities && Array.isArray(data.entities)) {
+                    data.entities.forEach(ent => {
+                        if (!ent.tile_id) return;
+                        
+                        // Parse tile to lat/lon
+                        const pos = parseTileToLatLon(ent.tile_id);
+                        if (!pos) return;
+                        
+                        ingestPLI({
+                            uid: ent.device_id || 'unknown',
+                            callsign: ent.device_id || 'unknown',
+                            type: ent.source_type || 'unknown',
+                            affiliation: 'friendly',
+                            lat: pos.lat,
+                            lon: pos.lon,
+                            timestamp: Date.now()
+                        });
+                    });
+                }
+                
+                document.getElementById('status').textContent = 'COP Connected';
+            } catch (e) {
+                document.getElementById('status').textContent = 'COP Error: ' + e.message;
+            }
+        }
+        
+        function parseTileToLatLon(tileId) {
+            if (!tileId) return null;
+            
+            // Try H3 first
+            try {
+                if (window.h3 && /^[0-9a-f]{15}$/i.test(tileId)) {
+                    const [lat, lon] = window.h3.cellToLatLng(tileId);
+                    return { lat, lon };
+                }
+            } catch (e) {}
+            
+            // Android fallback tile format
+            if (tileId.startsWith('android_')) {
+                const parts = tileId.split('_');
+                if (parts.length >= 3) {
+                    const latQ = parseFloat(parts[1]);
+                    const lonQ = parseFloat(parts[2]);
+                    if (!isNaN(latQ) && !isNaN(lonQ)) {
+                        return { lat: latQ / 10000.0, lon: lonQ / 10000.0 };
+                    }
+                }
+            }
+            
+            return null;
+        }
+        
+        // ===== UI ACTIONS =====
+        
+        function applySettings() {
+            const cs = document.getElementById('cfgCallsign').value.trim();
+            const hub = document.getElementById('cfgHub').value.trim();
+            const mode = document.getElementById('pliModeSel').value;
+            
+            if (cs) localStorage.setItem('eud:callsign', cs);
+            if (hub) {
+                currentHub = hub.endsWith('/') ? hub : hub + '/';
+                localStorage.setItem('eud:hub', currentHub);
+                document.getElementById('cfgHub').value = currentHub;
+            }
+            PLI_MODE = mode;
+            localStorage.setItem('eud:pli_mode', PLI_MODE);
+            
+            applyLayerVisibility();
+            document.getElementById('status').textContent = 'Settings applied: ' + PLI_MODE;
+        }
+        
+        function focusOwn() {
+            const m = entityMarkers[OWN_CALLSIGN];
+            if (m) {
+                map.setView(m.getLatLng(), 16);
+            } else {
+                map.setView([ownPosition.lat, ownPosition.lon], 16);
+            }
+        }
+        
+        function focusEntity(uid) {
+            const m = entityMarkers[uid];
+            if (m) map.setView(m.getLatLng(), 16);
+        }
+        
+        function reconnectHub() {
+            copCursor = 0;
+            document.getElementById('status').textContent = 'Reconnecting...';
+            pollCOP();
+        }
+        
+        function updateStatus() {
+            document.getElementById('entityCount').textContent = trackedEntities.length;
+        }
+        
+        // ===== INIT =====
+        
+        // Try browser geolocation first
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(
+                (pos) => {
+                    updateOwnPosition(pos.coords.latitude, pos.coords.longitude);
+                },
+                (err) => {
+                    console.log('Browser geolocation error:', err.message);
+                    refreshNativeLocation();
+                },
+                { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+            );
+        }
+        
+        // Fallback to native location bridge
+        setInterval(refreshNativeLocation, 3000);
+        refreshNativeLocation();
+        
+        // Poll COP if not in LOCAL mode
+        if (PLI_MODE !== 'LOCAL') {
+            setInterval(pollCOP, 5000);
+            pollCOP();
+        }
+        
+        document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode' : 'Connecting...';
+        updateStatus();
+        
+    </script>
 </body>
 </html>
 """.trimIndent()
