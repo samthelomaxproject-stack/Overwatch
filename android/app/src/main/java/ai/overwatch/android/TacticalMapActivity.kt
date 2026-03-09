@@ -32,6 +32,13 @@ class TacticalMapActivity : AppCompatActivity() {
         fun getDeviceCallsign(): String {
             return intent.getStringExtra(EXTRA_CALLSIGN)?.trim()?.ifEmpty { "ANDROID-EUD" } ?: "ANDROID-EUD"
         }
+
+        @JavascriptInterface
+        fun updateCallsign(newCallsign: String): String {
+            val cs = newCallsign.trim().ifEmpty { "ANDROID-EUD" }
+            ConfigStore.setCallsign(this@TacticalMapActivity, cs)
+            return cs
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -325,7 +332,7 @@ class TacticalMapActivity : AppCompatActivity() {
     <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <script>
         // Configuration
-        const OWN_CALLSIGN = $callsignJs;
+        let OWN_CALLSIGN = $callsignJs;
         const INITIAL_PLI_MODE = $pliModeJs;
         const PULL_ENTITIES_DEFAULT = $pullEntitiesJs;
         const PULL_HEAT_DEFAULT = $pullHeatJs;
@@ -1155,7 +1162,30 @@ class TacticalMapActivity : AppCompatActivity() {
             const hub = document.getElementById('cfgHub').value.trim();
             const mode = document.getElementById('pliModeSel').value;
             
-            if (cs) localStorage.setItem('eud:callsign', cs);
+            // Update callsign: persist to Android app storage + update JS variable + re-push
+            if (cs) {
+                localStorage.setItem('eud:callsign', cs);
+                // Update Kotlin-side persistent storage
+                if (window.AndroidBridge && typeof window.AndroidBridge.updateCallsign === 'function') {
+                    try {
+                        const saved = window.AndroidBridge.updateCallsign(cs);
+                        console.log('Callsign saved to Android:', saved);
+                    } catch (e) {
+                        console.log('Failed to update Android callsign:', e);
+                    }
+                }
+                // Update current session variable
+                const oldCallsign = OWN_CALLSIGN;
+                OWN_CALLSIGN = cs;
+                // Update any existing entity marker for this callsign
+                if (entityMarkers[oldCallsign]) {
+                    entityMarkers[cs] = entityMarkers[oldCallsign];
+                    delete entityMarkers[oldCallsign];
+                }
+                // Immediately push with new callsign
+                pushLocalPliToHub();
+            }
+            
             if (hub) {
                 currentHub = hub.endsWith('/') ? hub : hub + '/';
                 localStorage.setItem('eud:hub', currentHub);
@@ -1165,7 +1195,7 @@ class TacticalMapActivity : AppCompatActivity() {
             localStorage.setItem('eud:pli_mode', PLI_MODE);
             
             applyLayerVisibility();
-            document.getElementById('status').textContent = 'Settings applied: ' + PLI_MODE;
+            document.getElementById('status').textContent = 'Callsign updated to: ' + OWN_CALLSIGN + ' • Mode: ' + PLI_MODE;
         }
         
         function focusOwn() {
