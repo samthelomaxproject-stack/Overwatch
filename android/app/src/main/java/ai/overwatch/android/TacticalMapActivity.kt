@@ -676,9 +676,15 @@ class TacticalMapActivity : AppCompatActivity() {
                 let heatCount = (data.heat && Array.isArray(data.heat)) ? data.heat.length : 0;
                 let satCount = (data.satellites && Array.isArray(data.satellites)) ? data.satellites.length : 0;
                 
-                // Process cameras
-                if (data.cameras && Array.isArray(data.cameras)) {
+                // Process cameras (COP first, local discovery fallback)
+                if (data.cameras && Array.isArray(data.cameras) && data.cameras.length > 0) {
                     renderCameras(data.cameras);
+                } else {
+                    const localCams = await fetchLocalCameras();
+                    if (localCams.length > 0) {
+                        camCount = localCams.length;
+                        renderCameras(localCams);
+                    }
                 }
                 
                 // Process heat from COP only when non-empty.
@@ -787,6 +793,37 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
         
+        async function fetchLocalCameras() {
+            try {
+                const lat = Number(ownPosition?.lat);
+                const lon = Number(ownPosition?.lon);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+
+                // same general source family as desktop fallback: OSM camera nodes
+                const d = 0.02; // ~2km box
+                const q = `[out:json][timeout:20];(node["man_made"="surveillance"](${lat-d},${lon-d},${lat+d},${lon+d});node["surveillance:type"](${lat-d},${lon-d},${lat+d},${lon+d}););out body 120;`;
+                const resp = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: q,
+                });
+                if (!resp.ok) return [];
+                const js = await resp.json();
+                const elems = Array.isArray(js?.elements) ? js.elements : [];
+                return elems.map((e, idx) => ({
+                    tile_id: `android_${Math.round(Number(e.lat||0)*10000)}_${Math.round(Number(e.lon||0)*10000)}`,
+                    dimension: 'local-osm',
+                    count: 1,
+                    bearing: Number(e?.tags?.direction || 0) || 0,
+                    fov: 70,
+                    id: `osm-cam-${e.id || idx}`,
+                })).filter(c => c.tile_id.includes('android_'));
+            } catch (e) {
+                console.log('Local camera discovery failed:', e.message);
+                return [];
+            }
+        }
+
         function conePolygon(lat, lon, bearing=0, fov=70, range=0.0022) {
             const pts = [[lat, lon]];
             const half = fov / 2;
