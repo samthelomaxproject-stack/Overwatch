@@ -300,10 +300,10 @@ class TacticalMapActivity : AppCompatActivity() {
         <div class="sb-section">
             <div class="sb-label">Map Layers</div>
             <div class="layer-group">
-                <label><input id="layerEntities" type="checkbox" checked /> Entities</label>
-                <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} /> Heat</label>
-                <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} /> Cams</label>
-                <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} /> SAT</label>
+                <label><input id="layerEntities" type="checkbox" checked onchange="applyLayerVisibility()" /> Entities</label>
+                <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} onchange="applyLayerVisibility()" /> Heat</label>
+                <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} onchange="applyLayerVisibility()" /> Cams</label>
+                <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> SAT</label>
             </div>
         </div>
         
@@ -343,6 +343,11 @@ class TacticalMapActivity : AppCompatActivity() {
             cams: $pullCamsJs,
             sat: $pullSatJs
         };
+        
+        // Layer markers storage
+        let heatMarkers = {};
+        let camMarkers = {};
+        let satMarkers = {};
         
         // Initialize map
         const map = L.map('map', { zoomControl: false }).setView([ownPosition.lat, ownPosition.lon], 15);
@@ -482,6 +487,30 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (map.hasLayer(m)) map.removeLayer(m);
                 }
             });
+            
+            Object.values(heatMarkers).forEach(m => {
+                if (layerVisibility.heat) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
+            
+            Object.values(camMarkers).forEach(m => {
+                if (layerVisibility.cams) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
+            
+            Object.values(satMarkers).forEach(m => {
+                if (layerVisibility.sat) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
         }
         
         // ===== LOCATION HANDLING =====
@@ -519,10 +548,57 @@ class TacticalMapActivity : AppCompatActivity() {
         
         // ===== COP/HUB INTEGRATION =====
         
+        async function pushLocalPliToHub() {
+            if (!ownPosition || PLI_MODE === 'LOCAL') return;
+            
+            try {
+                const hub = currentHub.endsWith('/') ? currentHub : currentHub + '/';
+                if (!hub.startsWith('http')) return;
+                
+                // Convert lat/lon to H3 tile
+                let tileId = null;
+                if (window.h3 && window.h3.latLngToCell) {
+                    try {
+                        tileId = window.h3.latLngToCell(ownPosition.lat, ownPosition.lon, 10);
+                    } catch (e) {}
+                }
+                
+                // Fallback to android_ format if H3 not available
+                if (!tileId) {
+                    tileId = 'android_' + Math.round(ownPosition.lat * 10000) + '_' + Math.round(ownPosition.lon * 10000);
+                }
+                
+                const nowSec = Math.floor(Date.now() / 1000);
+                const payload = {
+                    schema_version: 1,
+                    device_id: OWN_CALLSIGN,
+                    source_type: 'entity',
+                    timestamp_utc: nowSec,
+                    tiles: [{ 
+                        tile_id: tileId, 
+                        time_bucket: Math.floor(nowSec / 60) * 60,
+                        lat: ownPosition.lat,
+                        lon: ownPosition.lon
+                    }]
+                };
+                
+                await fetch(hub + 'api/push', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } catch (e) {
+                console.log('Push failed:', e.message);
+            }
+        }
+        
         async function pollCOP() {
             if (PLI_MODE === 'LOCAL') return;
             
             try {
+                // Push local position first
+                await pushLocalPliToHub();
+                
                 const resp = await fetch(currentHub + 'api/cop_snapshot?max_age_secs=7200');
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 
@@ -533,7 +609,6 @@ class TacticalMapActivity : AppCompatActivity() {
                     data.entities.forEach(ent => {
                         if (!ent.tile_id) return;
                         
-                        // Parse tile to lat/lon
                         const pos = parseTileToLatLon(ent.tile_id);
                         if (!pos) return;
                         
@@ -549,10 +624,166 @@ class TacticalMapActivity : AppCompatActivity() {
                     });
                 }
                 
+                // Process cameras
+                if (data.cameras && Array.isArray(data.cameras)) {
+                    renderCameras(data.cameras);
+                }
+                
+                // Process heat
+                if (data.heat && Array.isArray(data.heat)) {
+                    renderHeat(data.heat);
+                }
+                
+                // Process satellites
+                if (data.satellites && Array.isArray(data.satellites)) {
+                    renderSatellites(data.satellites);
+                }
+                
                 document.getElementById('status').textContent = 'COP Connected';
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
             }
+        }
+        
+        function renderCameras(cameras) {
+            const nextCams = {};
+            
+            cameras.forEach(cam => {
+                if (!cam.tile_id) return;
+                const pos = parseTileToLatLon(cam.tile_id);
+                if (!pos) return;
+                
+                const key = cam.tile_id + ':' + (cam.dimension || 'default');
+                const count = cam.count || 0;
+                
+                let marker = camMarkers[key];
+                const icon = L.divIcon({
+                    className: '',
+                    html: '<div style="width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #22c55e;background:rgba(34,197,94,0.7);"></div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+                
+                if (!marker) {
+                    marker = L.marker([pos.lat, pos.lon], { icon });
+                    camMarkers[key] = marker;
+                } else {
+                    marker.setLatLng([pos.lat, pos.lon]);
+                }
+                
+                marker.bindPopup('Camera<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
+                
+                if (layerVisibility.cams && !map.hasLayer(marker)) {
+                    marker.addTo(map);
+                }
+                
+                nextCams[key] = true;
+            });
+            
+            // Remove stale cameras
+            Object.keys(camMarkers).forEach(key => {
+                if (!nextCams[key]) {
+                    if (map.hasLayer(camMarkers[key])) map.removeLayer(camMarkers[key]);
+                    delete camMarkers[key];
+                }
+            });
+        }
+        
+        function renderHeat(heatData) {
+            const nextHeat = {};
+            
+            heatData.forEach(h => {
+                if (!h.tile_id) return;
+                const pos = parseTileToLatLon(h.tile_id);
+                if (!pos) return;
+                
+                const key = h.tile_id + ':' + (h.sensor_type || 'unknown') + ':' + (h.dimension || 'default');
+                const maxVal = h.max || 0;
+                const meanVal = h.mean || 0;
+                const intensity = Math.min(1, maxVal / 100);
+                const radius = 15 + (intensity * 25);
+                
+                const color = h.sensor_type === 'wifi' ? '#22d3ee' : '#f97316';
+                
+                let marker = heatMarkers[key];
+                
+                if (!marker) {
+                    marker = L.circleMarker([pos.lat, pos.lon], {
+                        radius: radius,
+                        color: color,
+                        weight: 1,
+                        fillColor: color,
+                        fillOpacity: 0.3 + (intensity * 0.3)
+                    });
+                    heatMarkers[key] = marker;
+                } else {
+                    marker.setLatLng([pos.lat, pos.lon]);
+                    marker.setStyle({
+                        radius: radius,
+                        fillOpacity: 0.3 + (intensity * 0.3)
+                    });
+                }
+                
+                marker.bindPopup('Heat ' + (h.sensor_type || 'unknown') + '<br>Max: ' + maxVal + '<br>Mean: ' + meanVal);
+                
+                if (layerVisibility.heat && !map.hasLayer(marker)) {
+                    marker.addTo(map);
+                }
+                
+                nextHeat[key] = true;
+            });
+            
+            // Remove stale heat
+            Object.keys(heatMarkers).forEach(key => {
+                if (!nextHeat[key]) {
+                    if (map.hasLayer(heatMarkers[key])) map.removeLayer(heatMarkers[key]);
+                    delete heatMarkers[key];
+                }
+            });
+        }
+        
+        function renderSatellites(sats) {
+            const nextSats = {};
+            
+            sats.forEach(sat => {
+                if (!sat.tile_id) return;
+                const pos = parseTileToLatLon(sat.tile_id);
+                if (!pos) return;
+                
+                const key = sat.tile_id + ':' + (sat.dimension || 'default');
+                const count = sat.count || 0;
+                
+                let marker = satMarkers[key];
+                const icon = L.divIcon({
+                    className: '',
+                    html: '<div style="width:16px;height:16px;transform:rotate(45deg);border:2px solid #ffea00;background:rgba(255,234,0,0.6);box-shadow:0 0 10px #ffea00;"></div>',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                });
+                
+                if (!marker) {
+                    marker = L.marker([pos.lat, pos.lon], { icon });
+                    satMarkers[key] = marker;
+                } else {
+                    marker.setLatLng([pos.lat, pos.lon]);
+                }
+                
+                marker.bindPopup('Satellite<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
+                
+                if (layerVisibility.sat && !map.hasLayer(marker)) {
+                    marker.addTo(map);
+                }
+                
+                nextSats[key] = true;
+            });
+            
+            // Remove stale satellites
+            Object.keys(satMarkers).forEach(key => {
+                if (!nextSats[key]) {
+                    if (map.hasLayer(satMarkers[key])) map.removeLayer(satMarkers[key]);
+                    delete satMarkers[key];
+                }
+            });
         }
         
         function parseTileToLatLon(tileId) {
