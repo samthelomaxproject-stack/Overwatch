@@ -304,6 +304,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 <label><input id="layerHeat" type="checkbox" ${if (pullHeat) "checked" else ""} onchange="applyLayerVisibility()" /> Heat</label>
                 <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} onchange="applyLayerVisibility()" /> Cams</label>
                 <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> SAT</label>
+                <label><input id="layerAdsb" type="checkbox" checked onchange="applyLayerVisibility()" /> ADS-B</label>
             </div>
         </div>
         
@@ -333,6 +334,7 @@ class TacticalMapActivity : AppCompatActivity() {
         // State
         let PLI_MODE = localStorage.getItem('eud:pli_mode') || INITIAL_PLI_MODE;
         let currentHub = localStorage.getItem('eud:hub') || document.getElementById('cfgHub').value;
+        if (currentHub && !currentHub.endsWith('/')) currentHub += '/';
         let trackedEntities = [];
         let entityMarkers = {};
         let copCursor = 0;
@@ -341,13 +343,15 @@ class TacticalMapActivity : AppCompatActivity() {
             entities: true,
             heat: $pullHeatJs,
             cams: $pullCamsJs,
-            sat: $pullSatJs
+            sat: $pullSatJs,
+            adsb: true
         };
         
         // Layer markers storage
         let heatMarkers = {};
         let camMarkers = {};
         let satMarkers = {};
+        let adsbMarkers = {};
         
         // Track if we've centered the map on user's position
         let hasCenteredOnUser = false;
@@ -490,6 +494,7 @@ class TacticalMapActivity : AppCompatActivity() {
             layerVisibility.heat = document.getElementById('layerHeat').checked;
             layerVisibility.cams = document.getElementById('layerCams').checked;
             layerVisibility.sat = document.getElementById('layerSat').checked;
+            layerVisibility.adsb = document.getElementById('layerAdsb').checked;
             
             Object.values(entityMarkers).forEach(m => {
                 if (layerVisibility.entities) {
@@ -517,6 +522,14 @@ class TacticalMapActivity : AppCompatActivity() {
             
             Object.values(satMarkers).forEach(m => {
                 if (layerVisibility.sat) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
+
+            Object.values(adsbMarkers).forEach(m => {
+                if (layerVisibility.adsb) {
                     if (!map.hasLayer(m)) m.addTo(map);
                 } else {
                     if (map.hasLayer(m)) map.removeLayer(m);
@@ -566,7 +579,7 @@ class TacticalMapActivity : AppCompatActivity() {
         // ===== COP/HUB INTEGRATION =====
         
         async function pushLocalPliToHub() {
-            if (!ownPosition || PLI_MODE === 'LOCAL') return;
+            if (!ownPosition) return;
             
             try {
                 const hub = currentHub.endsWith('/') ? currentHub : currentHub + '/';
@@ -610,8 +623,6 @@ class TacticalMapActivity : AppCompatActivity() {
         }
         
         async function pollCOP() {
-            if (PLI_MODE === 'LOCAL') return;
-            
             try {
                 // Push local position first
                 await pushLocalPliToHub();
@@ -808,6 +819,51 @@ class TacticalMapActivity : AppCompatActivity() {
                 }
             });
         }
+
+        async function pollAdsb() {
+            try {
+                const resp = await fetch(currentHub + 'api/adsb?max_age_secs=1200');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const aircraft = Array.isArray(data?.aircraft) ? data.aircraft : (Array.isArray(data) ? data : []);
+                const next = {};
+
+                aircraft.forEach(ac => {
+                    const lat = Number(ac.latitude ?? ac.lat);
+                    const lon = Number(ac.longitude ?? ac.lon);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+                    const id = String(ac.icao || ac.callsign || ac.id || 'AC');
+
+                    let marker = adsbMarkers[id];
+                    const icon = L.divIcon({
+                        className: '',
+                        html: '<div style="width:12px;height:12px;border-radius:50%;border:2px solid #fff;background:#f59e0b;box-shadow:0 0 8px #f59e0b;"></div>',
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6]
+                    });
+
+                    if (!marker) {
+                        marker = L.marker([lat, lon], { icon });
+                        adsbMarkers[id] = marker;
+                    } else {
+                        marker.setLatLng([lat, lon]);
+                    }
+
+                    marker.bindPopup('ADS-B ' + id + '<br>' + lat.toFixed(5) + ', ' + lon.toFixed(5));
+                    if (layerVisibility.adsb && !map.hasLayer(marker)) marker.addTo(map);
+                    next[id] = true;
+                });
+
+                Object.keys(adsbMarkers).forEach(id => {
+                    if (!next[id]) {
+                        if (map.hasLayer(adsbMarkers[id])) map.removeLayer(adsbMarkers[id]);
+                        delete adsbMarkers[id];
+                    }
+                });
+            } catch (e) {
+                console.log('ADS-B poll error:', e.message);
+            }
+        }
         
         function parseTileToLatLon(tileId) {
             if (!tileId) return null;
@@ -881,6 +937,9 @@ class TacticalMapActivity : AppCompatActivity() {
         
         // ===== INIT =====
         
+        // Seed local marker immediately from initial/fallback coordinates
+        updateOwnPosition(ownPosition.lat, ownPosition.lon);
+
         // Try browser geolocation first
         if (navigator.geolocation) {
             navigator.geolocation.watchPosition(
@@ -899,13 +958,13 @@ class TacticalMapActivity : AppCompatActivity() {
         setInterval(refreshNativeLocation, 3000);
         refreshNativeLocation();
         
-        // Poll COP if not in LOCAL mode
-        if (PLI_MODE !== 'LOCAL') {
-            setInterval(pollCOP, 5000);
-            pollCOP();
-        }
+        // Poll COP + ADS-B continuously (LOCAL keeps local primary but still syncs/pulls)
+        setInterval(pollCOP, 5000);
+        setInterval(pollAdsb, 5000);
+        pollCOP();
+        pollAdsb();
         
-        document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode' : 'Connecting...';
+        document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
         updateStatus();
         
     </script>
