@@ -801,7 +801,8 @@ class TacticalMapActivity : AppCompatActivity() {
 
                 // same general source family as desktop fallback: OSM camera nodes
                 const d = 0.02; // ~2km box
-                const q = `[out:json][timeout:20];(node["man_made"="surveillance"](${lat-d},${lon-d},${lat+d},${lon+d});node["surveillance:type"](${lat-d},${lon-d},${lat+d},${lon+d}););out body 120;`;
+                const bbox = '(' + (lat - d).toFixed(6) + ',' + (lon - d).toFixed(6) + ',' + (lat + d).toFixed(6) + ',' + (lon + d).toFixed(6) + ')';
+                const q = '[out:json][timeout:20];(node["man_made"="surveillance"]' + bbox + ';node["surveillance:type"]' + bbox + ';);out body 120;';
                 const resp = await fetch('https://overpass-api.de/api/interpreter', {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
@@ -811,12 +812,12 @@ class TacticalMapActivity : AppCompatActivity() {
                 const js = await resp.json();
                 const elems = Array.isArray(js?.elements) ? js.elements : [];
                 return elems.map((e, idx) => ({
-                    tile_id: `android_${Math.round(Number(e.lat||0)*10000)}_${Math.round(Number(e.lon||0)*10000)}`,
+                    tile_id: 'android_' + Math.round(Number(e.lat || 0) * 10000) + '_' + Math.round(Number(e.lon || 0) * 10000),
                     dimension: 'local-osm',
                     count: 1,
                     bearing: Number(e?.tags?.direction || 0) || 0,
                     fov: 70,
-                    id: `osm-cam-${e.id || idx}`,
+                    id: 'osm-cam-' + (e.id || idx),
                 })).filter(c => c.tile_id.includes('android_'));
             } catch (e) {
                 console.log('Local camera discovery failed:', e.message);
