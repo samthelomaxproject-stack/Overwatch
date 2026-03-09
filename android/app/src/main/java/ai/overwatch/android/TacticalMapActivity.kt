@@ -321,6 +321,7 @@ class TacticalMapActivity : AppCompatActivity() {
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <script>
         // Configuration
@@ -352,7 +353,10 @@ class TacticalMapActivity : AppCompatActivity() {
         
         // Layer markers storage
         let heatMarkers = {};
+        let rfHeatLayer = null;
+        let wifiHeatLayer = null;
         let camMarkers = {};
+        let camCones = {};
         let satMarkers = {};
         let adsbMarkers = {};
         
@@ -507,15 +511,23 @@ class TacticalMapActivity : AppCompatActivity() {
                 }
             });
             
-            Object.values(heatMarkers).forEach(m => {
+            [rfHeatLayer, wifiHeatLayer].forEach(layer => {
+                if (!layer) return;
                 if (layerVisibility.heat) {
+                    if (!map.hasLayer(layer)) layer.addTo(map);
+                } else {
+                    if (map.hasLayer(layer)) map.removeLayer(layer);
+                }
+            });
+            
+            Object.values(camMarkers).forEach(m => {
+                if (layerVisibility.cams) {
                     if (!map.hasLayer(m)) m.addTo(map);
                 } else {
                     if (map.hasLayer(m)) map.removeLayer(m);
                 }
             });
-            
-            Object.values(camMarkers).forEach(m => {
+            Object.values(camCones).forEach(m => {
                 if (layerVisibility.cams) {
                     if (!map.hasLayer(m)) m.addTo(map);
                 } else {
@@ -754,103 +766,150 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
         
+        function conePolygon(lat, lon, bearing=0, fov=70, range=0.0022) {
+            const pts = [[lat, lon]];
+            const half = fov / 2;
+            for (let a = bearing - half; a <= bearing + half; a += 10) {
+                const r = a * Math.PI / 180;
+                const dy = Math.cos(r) * range;
+                const dx = Math.sin(r) * range;
+                pts.push([lat + dy, lon + dx]);
+            }
+            pts.push([lat, lon]);
+            return pts;
+        }
+
         function renderCameras(cameras) {
             const nextCams = {};
-            
+
             cameras.forEach(cam => {
                 if (!cam.tile_id) return;
                 const pos = parseTileToLatLon(cam.tile_id);
                 if (!pos) return;
-                
+
                 const key = cam.tile_id + ':' + (cam.dimension || 'default');
                 const count = cam.count || 0;
-                
+
                 let marker = camMarkers[key];
                 const icon = L.divIcon({
-                    className: '',
-                    html: '<div style="width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #22c55e;background:rgba(34,197,94,0.7);"></div>',
-                    iconSize: [14, 14],
-                    iconAnchor: [7, 7]
+                    className: 'cctv-marker',
+                    html: '<div style="width:16px;height:16px;border-radius:50%;background:#60a5fa;border:2px solid white;box-shadow:0 0 0 1px rgba(255,255,255,0.35),0 0 8px rgba(0,0,0,0.55);"></div>',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
                 });
-                
+
                 if (!marker) {
-                    marker = L.marker([pos.lat, pos.lon], { icon });
+                    marker = L.marker([pos.lat, pos.lon], { icon, zIndexOffset: 1000 });
                     camMarkers[key] = marker;
                 } else {
                     marker.setLatLng([pos.lat, pos.lon]);
                 }
-                
+
                 marker.bindPopup('Camera<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
-                
-                if (layerVisibility.cams && !map.hasLayer(marker)) {
-                    marker.addTo(map);
+
+                // CCTV cone (desktop-style)
+                const bearing = Number(cam.bearing ?? 0);
+                const fov = Number(cam.fov ?? 70);
+                const cone = conePolygon(pos.lat, pos.lon, bearing, fov, 0.0022);
+                if (!camCones[key]) {
+                    camCones[key] = L.polygon(cone, {
+                        color: '#60a5fa',
+                        weight: 1,
+                        opacity: 0.8,
+                        fillColor: '#60a5fa',
+                        fillOpacity: 0.18
+                    });
+                } else {
+                    camCones[key].setLatLngs(cone);
                 }
-                
+
+                if (layerVisibility.cams) {
+                    if (!map.hasLayer(camCones[key])) camCones[key].addTo(map);
+                    if (!map.hasLayer(marker)) marker.addTo(map);
+                    if (camCones[key].bringToBack) camCones[key].bringToBack();
+                }
+
                 nextCams[key] = true;
             });
-            
-            // Remove stale cameras
+
             Object.keys(camMarkers).forEach(key => {
                 if (!nextCams[key]) {
                     if (map.hasLayer(camMarkers[key])) map.removeLayer(camMarkers[key]);
+                    if (camCones[key] && map.hasLayer(camCones[key])) map.removeLayer(camCones[key]);
                     delete camMarkers[key];
+                    delete camCones[key];
                 }
             });
         }
-        
+
         function renderHeat(heatData) {
-            const nextHeat = {};
-            
+            if (!map || !window.L || !L.heatLayer) return;
+
+            const rfPoints = [];
+            const wifiPoints = [];
+
             heatData.forEach(h => {
                 if (!h.tile_id) return;
                 const pos = parseTileToLatLon(h.tile_id);
                 if (!pos) return;
-                
-                const key = h.tile_id + ':' + (h.sensor_type || 'unknown') + ':' + (h.dimension || 'default');
-                const maxVal = h.max || 0;
-                const meanVal = h.mean || 0;
-                const intensity = Math.min(1, maxVal / 100);
-                const radius = 15 + (intensity * 25);
-                
-                const color = h.sensor_type === 'wifi' ? '#22d3ee' : '#f97316';
-                
-                let marker = heatMarkers[key];
-                
-                if (!marker) {
-                    marker = L.circleMarker([pos.lat, pos.lon], {
-                        radius: radius,
-                        color: color,
-                        weight: 1,
-                        fillColor: color,
-                        fillOpacity: 0.3 + (intensity * 0.3)
-                    });
-                    heatMarkers[key] = marker;
+
+                const sensor = String(h.sensor_type || '').toLowerCase();
+                const maxVal = Number(h.max || 0);
+                const meanVal = Number(h.mean || 0);
+
+                if (sensor === 'rf') {
+                    const signalIntensity = Math.max(0, Math.min(1, (meanVal + 100) / 60));
+                    const finalIntensity = Math.max(0.05, signalIntensity);
+                    rfPoints.push([pos.lat, pos.lon, finalIntensity]);
                 } else {
-                    marker.setLatLng([pos.lat, pos.lon]);
-                    marker.setStyle({
-                        radius: radius,
-                        fillOpacity: 0.3 + (intensity * 0.3)
-                    });
-                }
-                
-                marker.bindPopup('Heat ' + (h.sensor_type || 'unknown') + '<br>Max: ' + maxVal + '<br>Mean: ' + meanVal);
-                
-                if (layerVisibility.heat && !map.hasLayer(marker)) {
-                    marker.addTo(map);
-                }
-                
-                nextHeat[key] = true;
-            });
-            
-            // Remove stale heat
-            Object.keys(heatMarkers).forEach(key => {
-                if (!nextHeat[key]) {
-                    if (map.hasLayer(heatMarkers[key])) map.removeLayer(heatMarkers[key]);
-                    delete heatMarkers[key];
+                    // wifi + unknown -> wifi heat style
+                    const rssiIntensity = Math.max(0, Math.min(1, (meanVal + 100) / 70));
+                    const countBoost = Math.min(1, maxVal / 8);
+                    const finalIntensity = Math.max(0.05, (rssiIntensity * 0.7 + countBoost * 0.3));
+                    wifiPoints.push([pos.lat, pos.lon, finalIntensity]);
                 }
             });
+
+            const rfOpts = {
+                radius: 40,
+                blur: 30,
+                maxZoom: 18,
+                max: 1.0,
+                minOpacity: 0.25,
+                gradient: {
+                    0.0: 'rgba(0,0,180,0.6)',
+                    0.3: 'rgba(0,200,200,0.65)',
+                    0.55: 'rgba(0,220,0,0.7)',
+                    0.75: 'rgba(255,200,0,0.75)',
+                    1.0: 'rgba(255,40,0,0.8)'
+                }
+            };
+            const wifiOpts = {
+                radius: 40,
+                blur: 30,
+                maxZoom: 18,
+                max: 1.0,
+                minOpacity: 0.25,
+                gradient: {
+                    0.0: 'rgba(0,50,200,0.6)',
+                    0.4: 'rgba(0,180,255,0.65)',
+                    0.65: 'rgba(255,140,0,0.7)',
+                    1.0: 'rgba(255,60,0,0.8)'
+                }
+            };
+
+            if (rfHeatLayer) { rfHeatLayer.setLatLngs(rfPoints); }
+            else { rfHeatLayer = L.heatLayer(rfPoints, rfOpts); }
+
+            if (wifiHeatLayer) { wifiHeatLayer.setLatLngs(wifiPoints); }
+            else { wifiHeatLayer = L.heatLayer(wifiPoints, wifiOpts); }
+
+            if (layerVisibility.heat) {
+                if (rfHeatLayer && !map.hasLayer(rfHeatLayer)) rfHeatLayer.addTo(map);
+                if (wifiHeatLayer && !map.hasLayer(wifiHeatLayer)) wifiHeatLayer.addTo(map);
+            }
         }
-        
+
         function renderSatellites(sats) {
             const nextSats = {};
             
