@@ -359,6 +359,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let camCones = {};
         let satMarkers = {};
         let adsbMarkers = {};
+        let deltaCamCache = {};
+        let deltaSatCache = {};
         
         // Track if we've centered the map on user's position
         let hasCenteredOnUser = false;
@@ -690,7 +692,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderSatellites(data.satellites);
                 }
                 
-                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount + ' cache:' + Object.keys(deltaHeatCache).length;
+                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount + ' cache:' + Object.keys(deltaHeatCache).length + ' camsΔ:' + Object.keys(deltaCamCache).length + ' satΔ:' + Object.keys(deltaSatCache).length;
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
             }
@@ -706,6 +708,8 @@ class TacticalMapActivity : AppCompatActivity() {
 
                 const nowMs = Date.now();
                 const derivedHeat = [];
+                const derivedCams = [];
+                const derivedSats = [];
                 const updates = Array.isArray(data.tiles) ? data.tiles : [];
                 updates.forEach(update => {
                     const tiles = Array.isArray(update.tiles) ? update.tiles : [];
@@ -714,7 +718,7 @@ class TacticalMapActivity : AppCompatActivity() {
                         if (!pos) return;
 
                         const dev = t.device_id || update.device_id;
-                        const src = t.source_type || update.source_type || 'entity';
+                        const src = String(t.source_type || update.source_type || 'entity').toLowerCase();
                         if (dev && src !== 'hub_local' && String(dev).toLowerCase() !== 'hub') {
                             ingestPLI({
                                 uid: dev,
@@ -725,6 +729,13 @@ class TacticalMapActivity : AppCompatActivity() {
                                 lon: pos.lon,
                                 timestamp: Date.now()
                             });
+                        }
+
+                        if (src === 'cctv' || src === 'camera') {
+                            derivedCams.push({ tile_id: t.tile_id, dimension: 'delta', count: 1, bearing: 0, fov: 70 });
+                        }
+                        if (src === 'sat' || src === 'satellite' || src === 'satcom') {
+                            derivedSats.push({ tile_id: t.tile_id, dimension: 'delta', count: 1 });
                         }
 
                         if (t.rf && Array.isArray(t.rf.channel_occupancy) && t.rf.channel_occupancy.length > 0) {
@@ -758,6 +769,16 @@ class TacticalMapActivity : AppCompatActivity() {
                     max: h.max,
                     mean: h.mean,
                 }));
+
+
+                derivedCams.forEach(c => { const k = c.tile_id + ':' + (c.dimension || 'delta'); deltaCamCache[k] = { ...c, _ts: nowMs }; });
+                derivedSats.forEach(c => { const k = c.tile_id + ':' + (c.dimension || 'delta'); deltaSatCache[k] = { ...c, _ts: nowMs }; });
+                Object.keys(deltaCamCache).forEach(k => { if ((nowMs - (deltaCamCache[k]._ts || 0)) > DELTA_HEAT_TTL_MS) delete deltaCamCache[k]; });
+                Object.keys(deltaSatCache).forEach(k => { if ((nowMs - (deltaSatCache[k]._ts || 0)) > DELTA_HEAT_TTL_MS) delete deltaSatCache[k]; });
+                const cachedCams = Object.values(deltaCamCache).map(c => ({ tile_id: c.tile_id, dimension: c.dimension, count: c.count, bearing: c.bearing, fov: c.fov }));
+                const cachedSats = Object.values(deltaSatCache).map(c => ({ tile_id: c.tile_id, dimension: c.dimension, count: c.count }));
+                if (cachedCams.length > 0) renderCameras(cachedCams);
+                if (cachedSats.length > 0) renderSatellites(cachedSats);
 
                 lastDeltaHeatCount = derivedHeat.length;
                 if (cachedHeat.length > 0) renderHeat(cachedHeat);
