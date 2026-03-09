@@ -339,6 +339,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let entityMarkers = {};
         let copCursor = 0;
         let lastDeltaHeatCount = 0;
+        let deltaHeatCache = {};
+        const DELTA_HEAT_TTL_MS = 180000;
         let ownPosition = { lat: $initLatJs, lon: $initLonJs };
         let layerVisibility = {
             entities: true,
@@ -676,7 +678,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderSatellites(data.satellites);
                 }
                 
-                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount;
+                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount + ' cache:' + Object.keys(deltaHeatCache).length;
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
             }
@@ -690,6 +692,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 const data = await resp.json();
                 copCursor = Math.max(copCursor, Number(data.cursor || 0));
 
+                const nowMs = Date.now();
                 const derivedHeat = [];
                 const updates = Array.isArray(data.tiles) ? data.tiles : [];
                 updates.forEach(update => {
@@ -727,8 +730,25 @@ class TacticalMapActivity : AppCompatActivity() {
                     });
                 });
 
+                // Merge into cache so overlays persist across delta gaps
+                derivedHeat.forEach(h => {
+                    const k = h.tile_id + ':' + (h.sensor_type || 'unknown') + ':' + (h.dimension || 'delta');
+                    deltaHeatCache[k] = { ...h, _ts: nowMs };
+                });
+                Object.keys(deltaHeatCache).forEach(k => {
+                    if ((nowMs - (deltaHeatCache[k]._ts || 0)) > DELTA_HEAT_TTL_MS) delete deltaHeatCache[k];
+                });
+
+                const cachedHeat = Object.values(deltaHeatCache).map(h => ({
+                    tile_id: h.tile_id,
+                    sensor_type: h.sensor_type,
+                    dimension: h.dimension,
+                    max: h.max,
+                    mean: h.mean,
+                }));
+
                 lastDeltaHeatCount = derivedHeat.length;
-                if (derivedHeat.length > 0) renderHeat(derivedHeat);
+                if (cachedHeat.length > 0) renderHeat(cachedHeat);
             } catch (e) {
                 console.log('Delta poll error:', e.message);
             }
