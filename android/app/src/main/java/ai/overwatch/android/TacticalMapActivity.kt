@@ -365,6 +365,10 @@ class TacticalMapActivity : AppCompatActivity() {
         let lastDeltaHeatCount = 0;
         let deltaHeatCache = {};
         const DELTA_HEAT_TTL_MS = 180000;
+        const ENTITY_STALE_MS = 180000;
+        const GPS_JITTER_METERS = 10;
+        const GPS_SMOOTH_ALPHA = 0.25;
+        let lastRawOwnPosition = null;
         let ownPosition = { lat: $initLatJs, lon: $initLonJs };
         let layerVisibility = {
             entities: true,
@@ -515,28 +519,63 @@ class TacticalMapActivity : AppCompatActivity() {
         
         function ingestPLI(pli) {
             // pli = { uid, callsign, type, affiliation, lat, lon, timestamp }
-            const existing = trackedEntities.findIndex(e => e.uid === pli.uid);
+            const dedupeKey = String((pli.callsign || pli.uid || '')).trim().toUpperCase();
+            const existing = trackedEntities.findIndex(e =>
+                e.uid === pli.uid || String((e.callsign || e.uid || '')).trim().toUpperCase() === dedupeKey
+            );
             const now = Date.now();
-            
+
             if (existing >= 0) {
-                trackedEntities[existing] = { 
-                    ...trackedEntities[existing], 
-                    ...pli, 
-                    lastSeen: now 
+                const prevUid = trackedEntities[existing].uid;
+                trackedEntities[existing] = {
+                    ...trackedEntities[existing],
+                    ...pli,
+                    lastSeen: now
                 };
+                const newUid = trackedEntities[existing].uid;
+                if (prevUid && newUid && prevUid !== newUid && entityMarkers[prevUid] && !entityMarkers[newUid]) {
+                    entityMarkers[newUid] = entityMarkers[prevUid];
+                    delete entityMarkers[prevUid];
+                }
             } else {
-                trackedEntities.push({ 
-                    ...pli, 
+                trackedEntities.push({
+                    ...pli,
                     lastSeen: now,
                     affiliation: pli.affiliation || 'friendly'
                 });
             }
-            
-            updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
+
+            pruneAndDedupeEntities();
+            const target = trackedEntities.find(e => e.uid === pli.uid) || trackedEntities.find(e => String((e.callsign||'')).toUpperCase() === dedupeKey);
+            if (target) updateEntityOnMap(target);
             renderEntityList();
             updateStatus();
         }
         
+        function pruneAndDedupeEntities() {
+            const now = Date.now();
+            const newestByKey = {};
+
+            trackedEntities.forEach(e => {
+                const key = String((e.callsign || e.uid || '')).trim().toUpperCase();
+                if (!key) return;
+                const stale = (now - (e.lastSeen || 0)) > ENTITY_STALE_MS;
+                if (stale && e.uid !== OWN_CALLSIGN) return;
+                const prev = newestByKey[key];
+                if (!prev || (e.lastSeen || 0) > (prev.lastSeen || 0)) newestByKey[key] = e;
+            });
+
+            const keepUids = new Set(Object.values(newestByKey).map(e => e.uid));
+            Object.keys(entityMarkers).forEach(uid => {
+                if (!keepUids.has(uid)) {
+                    if (map.hasLayer(entityMarkers[uid])) map.removeLayer(entityMarkers[uid]);
+                    delete entityMarkers[uid];
+                }
+            });
+
+            trackedEntities = Object.values(newestByKey);
+        }
+
         function updateEntityOnMap(entity) {
             if (!entity || !entity.lat || !entity.lon) return;
             if (Math.abs(entity.lat) < 0.2 && Math.abs(entity.lon) < 0.2) return;
@@ -614,7 +653,7 @@ class TacticalMapActivity : AppCompatActivity() {
             list.innerHTML = trackedEntities.map(e => {
                 const age = Math.floor((now - e.lastSeen) / 1000);
                 const ageStr = age < 60 ? age + 's' : Math.floor(age / 60) + 'm';
-                const stale = age > 120;
+                const stale = age > Math.floor(ENTITY_STALE_MS / 1000);
                 const affilClass = 'tac-' + (e.affiliation || 'unknown');
                 const symbolChar = e.affiliation === 'friendly' ? '◈' : 
                                   e.affiliation === 'hostile' ? '◉' : 
@@ -687,14 +726,39 @@ class TacticalMapActivity : AppCompatActivity() {
         }
         
         // ===== LOCATION HANDLING =====
+
+        function distanceMeters(aLat, aLon, bLat, bLon) {
+            const R = 6371000;
+            const toRad = x => x * Math.PI / 180;
+            const dLat = toRad(bLat - aLat);
+            const dLon = toRad(bLon - aLon);
+            const q = Math.sin(dLat/2) * Math.sin(dLat/2)
+                + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            return 2 * R * Math.atan2(Math.sqrt(q), Math.sqrt(1-q));
+        }
         
         function updateOwnPosition(lat, lon) {
-            ownPosition = { lat, lon };
-            document.getElementById('position').textContent = lat.toFixed(5) + ', ' + lon.toFixed(5);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+            if (lastRawOwnPosition) {
+                const rawJump = distanceMeters(lastRawOwnPosition.lat, lastRawOwnPosition.lon, lat, lon);
+                if (rawJump < GPS_JITTER_METERS) return; // ignore tiny jitter
+            }
+            lastRawOwnPosition = { lat, lon };
+
+            if (ownPosition) {
+                const smoothedLat = ownPosition.lat + (lat - ownPosition.lat) * GPS_SMOOTH_ALPHA;
+                const smoothedLon = ownPosition.lon + (lon - ownPosition.lon) * GPS_SMOOTH_ALPHA;
+                ownPosition = { lat: smoothedLat, lon: smoothedLon };
+            } else {
+                ownPosition = { lat, lon };
+            }
+
+            document.getElementById('position').textContent = ownPosition.lat.toFixed(5) + ', ' + ownPosition.lon.toFixed(5);
             
             // Center map on user position on first GPS fix
             if (!hasCenteredOnUser && map) {
-                map.setView([lat, lon], 16);
+                map.setView([ownPosition.lat, ownPosition.lon], 16);
                 hasCenteredOnUser = true;
             }
             
@@ -704,8 +768,8 @@ class TacticalMapActivity : AppCompatActivity() {
                 callsign: OWN_CALLSIGN,
                 type: 'EUD',
                 affiliation: 'friendly',
-                lat: lat,
-                lon: lon,
+                lat: ownPosition.lat,
+                lon: ownPosition.lon,
                 timestamp: Date.now()
             });
         }
@@ -1349,6 +1413,13 @@ class TacticalMapActivity : AppCompatActivity() {
         // Fallback to native location bridge
         setInterval(refreshNativeLocation, 3000);
         refreshNativeLocation();
+
+        // Prune stale entities + dedupe duplicate callsigns
+        setInterval(() => {
+            pruneAndDedupeEntities();
+            renderEntityList();
+            updateStatus();
+        }, 10000);
         
         // Poll COP + ADS-B continuously (LOCAL keeps local primary but still syncs/pulls)
         setInterval(pollCOP, 5000);
