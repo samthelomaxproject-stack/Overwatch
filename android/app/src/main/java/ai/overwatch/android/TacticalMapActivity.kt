@@ -338,6 +338,7 @@ class TacticalMapActivity : AppCompatActivity() {
         let trackedEntities = [];
         let entityMarkers = {};
         let copCursor = 0;
+        let lastDeltaHeatCount = 0;
         let ownPosition = { lat: $initLatJs, lon: $initLonJs };
         let layerVisibility = {
             entities: true,
@@ -674,7 +675,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderSatellites(data.satellites);
                 }
                 
-                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat';
+                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount;
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
             }
@@ -725,6 +726,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     });
                 });
 
+                lastDeltaHeatCount = derivedHeat.length;
                 if (derivedHeat.length > 0) renderHeat(derivedHeat);
             } catch (e) {
                 console.log('Delta poll error:', e.message);
@@ -919,12 +921,17 @@ class TacticalMapActivity : AppCompatActivity() {
         
         function parseTileToLatLon(tileId) {
             if (!tileId) return null;
-            
-            // Try H3 first
+
+            // Try H3 first (support both window.h3 and window.h3js exports)
             try {
-                if (window.h3 && /^[0-9a-f]{15}$/i.test(tileId)) {
-                    const [lat, lon] = window.h3.cellToLatLng(tileId);
-                    return { lat, lon };
+                const h3lib = (window.h3 && typeof window.h3.cellToLatLng === 'function')
+                    ? window.h3
+                    : ((window.h3js && typeof window.h3js.cellToLatLng === 'function') ? window.h3js : null);
+                if (h3lib && /^[0-9a-f]{15,16}$/i.test(tileId)) {
+                    const ll = h3lib.cellToLatLng(tileId);
+                    if (Array.isArray(ll) && Number.isFinite(ll[0]) && Number.isFinite(ll[1])) {
+                        return { lat: ll[0], lon: ll[1] };
+                    }
                 }
             } catch (e) {}
             
