@@ -375,7 +375,66 @@ class TacticalMapActivity : AppCompatActivity() {
             subdomains: 'abcd',
             maxZoom: 19
         }).addTo(map);
-        
+
+        // Viewport-based camera fetch (hub-style)
+        const CCTV_MAX_BBOX_DEG2 = 0.08; // guardrail for large viewports
+        let cctvFetchInFlight = false;
+        function getViewportBbox() {
+            if (!map) return null;
+            const b = map.getBounds();
+            if (!b) return null;
+            const s = b.getSouth();
+            const n = b.getNorth();
+            const w = b.getWest();
+            const e = b.getEast();
+            const areaDeg2 = Math.abs((n - s) * (e - w));
+            if (areaDeg2 > CCTV_MAX_BBOX_DEG2) return null; // Too large, skip
+            return { s, n, w, e };
+        }
+        let lastCctvBboxKey = '';
+        async function fetchViewportCameras(force = false) {
+            if (cctvFetchInFlight) return;
+            const bbox = getViewportBbox();
+            if (!bbox) return;
+            const key = [bbox.s.toFixed(5), bbox.n.toFixed(5), bbox.w.toFixed(5), bbox.e.toFixed(5)].join(',');
+            if (!force && key === lastCctvBboxKey) return; // already fetched this bbox
+            lastCctvBboxKey = key;
+            cctvFetchInFlight = true;
+            try {
+                const q = '[out:json][timeout:20];(node["man_made"="surveillance"](' + bbox.s.toFixed(6) + ',' + bbox.w.toFixed(6) + ',' + bbox.n.toFixed(6) + ',' + bbox.e.toFixed(6) + ');node["surveillance:type"](' + bbox.s.toFixed(6) + ',' + bbox.w.toFixed(6) + ',' + bbox.n.toFixed(6) + ',' + bbox.e.toFixed(6) + '););out body 120;';
+                const resp = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: q,
+                });
+                if (!resp.ok) { cctvFetchInFlight = false; return; }
+                const js = await resp.json();
+                const elems = Array.isArray(js?.elements) ? js.elements : [];
+                const cams = elems.map((e, idx) => ({
+                    tile_id: 'android_' + Math.round(Number(e.lat || 0) * 10000) + '_' + Math.round(Number(e.lon || 0) * 10000),
+                    dimension: 'viewport-osm',
+                    count: 1,
+                    bearing: Number(e?.tags?.direction || 0) || 0,
+                    fov: 70,
+                    id: 'osm-cam-' + (e.id || idx),
+                })).filter(c => c.tile_id.includes('android_'));
+                if (cams.length > 0) {
+                    // Merge with any existing COP-derived cameras
+                    renderCameras(cams);
+                }
+            } catch (e) {
+                console.log('Viewport camera fetch failed:', e.message);
+            } finally {
+                cctvFetchInFlight = false;
+            }
+        }
+        // Fetch cameras on map move/zoom
+        map.on('moveend zoomend', () => {
+            if (map.getZoom() >= 12) { // sensible zoom threshold like desktop
+                fetchViewportCameras(false);
+            }
+        });
+
         // Update PLI mode selector
         document.getElementById('pliModeSel').value = PLI_MODE;
         
