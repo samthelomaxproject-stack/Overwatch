@@ -2,8 +2,10 @@ package ai.overwatch.android
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.net.Uri
 import android.location.LocationManager
 import android.os.Bundle
 import android.webkit.GeolocationPermissions
@@ -38,6 +40,15 @@ class TacticalMapActivity : AppCompatActivity() {
             val cs = newCallsign.trim().ifEmpty { "ANDROID-EUD" }
             ConfigStore.setCallsign(this@TacticalMapActivity, cs)
             return cs
+        }
+
+        @JavascriptInterface
+        fun openExternalUrl(url: String) {
+            runCatching {
+                val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+            }
         }
     }
 
@@ -280,10 +291,13 @@ class TacticalMapActivity : AppCompatActivity() {
             color: var(--text-primary);
         }
         .leaflet-popup-tip { background: var(--bg-panel); }
+        #cesiumContainer { display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:500; }
     </style>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
 </head>
 <body>
     <div id="map"></div>
+    <div id="cesiumContainer"></div>
     
     <div class="hud">
         <div class="hud-title">● EUD Tactical Map • $callsign</div>
@@ -318,6 +332,7 @@ class TacticalMapActivity : AppCompatActivity() {
         <div class="sb-section">
             <button class="sb-btn" onclick="applySettings()">Apply Settings</button>
             <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
+            <button class="sb-btn" onclick="toggle3D()">Toggle 3D SAT</button>
             <button class="sb-btn" onclick="reconnectHub()">Reconnect</button>
         </div>
         
@@ -329,6 +344,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
     <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <script>
         // Configuration
@@ -366,6 +382,9 @@ class TacticalMapActivity : AppCompatActivity() {
         let camCones = {};
         let satMarkers = {};
         let adsbMarkers = {};
+        let is3DMode = false;
+        let cesiumViewer = null;
+        let cesiumSatEntities = {};
         let deltaCamCache = {};
         let deltaSatCache = {};
         
@@ -417,14 +436,21 @@ class TacticalMapActivity : AppCompatActivity() {
                 if (!resp.ok) { cctvFetchInFlight = false; return; }
                 const js = await resp.json();
                 const elems = Array.isArray(js?.elements) ? js.elements : [];
-                const cams = elems.map((e, idx) => ({
-                    tile_id: 'android_' + Math.round(Number(e.lat || 0) * 10000) + '_' + Math.round(Number(e.lon || 0) * 10000),
-                    dimension: 'viewport-osm',
-                    count: 1,
-                    bearing: Number(e?.tags?.direction || 0) || 0,
-                    fov: 70,
-                    id: 'osm-cam-' + (e.id || idx),
-                })).filter(c => c.tile_id.includes('android_'));
+                const cams = elems.map((e, idx) => {
+                    const tags = e?.tags || {};
+                    const feedUrl = tags['contact:webcam'] || tags['camera:url'] || tags['surveillance:feed'] || tags['image'] || tags['url'] || tags['website'] || null;
+                    return {
+                        tile_id: 'android_' + Math.round(Number(e.lat || 0) * 10000) + '_' + Math.round(Number(e.lon || 0) * 10000),
+                        dimension: 'viewport-osm',
+                        count: 1,
+                        bearing: Number(tags.direction || 0) || 0,
+                        fov: 70,
+                        id: 'osm-cam-' + (e.id || idx),
+                        name: tags.name || ('OSM Camera ' + (e.id || idx)),
+                        snapshotUrl: feedUrl,
+                        sourceType: feedUrl ? 'PUBLIC' : 'OSM'
+                    };
+                }).filter(c => c.tile_id.includes('android_'));
                 if (cams.length > 0) {
                     // Merge with any existing COP-derived cameras
                     renderCameras(cams);
@@ -444,6 +470,46 @@ class TacticalMapActivity : AppCompatActivity() {
 
         // Update PLI mode selector
         document.getElementById('pliModeSel').value = PLI_MODE;
+
+        function ensureCesiumViewer() {
+            if (cesiumViewer || !window.Cesium) return;
+            cesiumViewer = new Cesium.Viewer('cesiumContainer', {
+                terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+                animation: false,
+                timeline: false,
+                sceneModePicker: false,
+                baseLayerPicker: false,
+                geocoder: false,
+                homeButton: false,
+                navigationHelpButton: false,
+                infoBox: false,
+                selectionIndicator: false,
+            });
+        }
+
+        function toggle3D() {
+            const c = document.getElementById('cesiumContainer');
+            if (!is3DMode) {
+                ensureCesiumViewer();
+                c.style.display = 'block';
+                is3DMode = true;
+                if (cesiumViewer && ownPosition) {
+                    cesiumViewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(ownPosition.lon, ownPosition.lat, 2000000) });
+                }
+            } else {
+                c.style.display = 'none';
+                is3DMode = false;
+            }
+        }
+
+        function openCameraFeed(url) {
+            if (!url) return;
+            if (window.AndroidBridge && typeof window.AndroidBridge.openExternalUrl === 'function') {
+                window.AndroidBridge.openExternalUrl(url);
+            } else {
+                window.open(url, '_blank');
+            }
+        }
         
         // ===== ENTITY MANAGEMENT =====
         
@@ -877,14 +943,21 @@ class TacticalMapActivity : AppCompatActivity() {
                 if (!resp.ok) return [];
                 const js = await resp.json();
                 const elems = Array.isArray(js?.elements) ? js.elements : [];
-                return elems.map((e, idx) => ({
-                    tile_id: 'android_' + Math.round(Number(e.lat || 0) * 10000) + '_' + Math.round(Number(e.lon || 0) * 10000),
-                    dimension: 'local-osm',
-                    count: 1,
-                    bearing: Number(e?.tags?.direction || 0) || 0,
-                    fov: 70,
-                    id: 'osm-cam-' + (e.id || idx),
-                })).filter(c => c.tile_id.includes('android_'));
+                return elems.map((e, idx) => {
+                    const tags = e?.tags || {};
+                    const feedUrl = tags['contact:webcam'] || tags['camera:url'] || tags['surveillance:feed'] || tags['image'] || tags['url'] || tags['website'] || null;
+                    return {
+                        tile_id: 'android_' + Math.round(Number(e.lat || 0) * 10000) + '_' + Math.round(Number(e.lon || 0) * 10000),
+                        dimension: 'local-osm',
+                        count: 1,
+                        bearing: Number(tags.direction || 0) || 0,
+                        fov: 70,
+                        id: 'osm-cam-' + (e.id || idx),
+                        name: tags.name || ('OSM Camera ' + (e.id || idx)),
+                        snapshotUrl: feedUrl,
+                        sourceType: feedUrl ? 'PUBLIC' : 'OSM'
+                    };
+                }).filter(c => c.tile_id.includes('android_'));
             } catch (e) {
                 console.log('Local camera discovery failed:', e.message);
                 return [];
@@ -908,17 +981,23 @@ class TacticalMapActivity : AppCompatActivity() {
             const nextCams = {};
 
             cameras.forEach(cam => {
-                if (!cam.tile_id) return;
-                const pos = parseTileToLatLon(cam.tile_id);
+                let pos = null;
+                if (cam.tile_id) pos = parseTileToLatLon(cam.tile_id);
+                if (!pos && Number.isFinite(Number(cam.lat)) && Number.isFinite(Number(cam.lon))) {
+                    pos = { lat: Number(cam.lat), lon: Number(cam.lon) };
+                }
                 if (!pos) return;
 
-                const key = cam.tile_id + ':' + (cam.dimension || 'default');
+                const key = (cam.id || cam.tile_id || (pos.lat.toFixed(5)+','+pos.lon.toFixed(5))) + ':' + (cam.dimension || 'default');
                 const count = cam.count || 0;
+                const hasFeed = !!(cam.snapshotUrl || cam.url || cam.feed_url || cam.feedUrl);
+                const feedUrl = cam.snapshotUrl || cam.url || cam.feed_url || cam.feedUrl || '';
+                const markerColor = hasFeed ? '#60a5fa' : '#f59e0b'; // blue with URL, orange without
 
                 let marker = camMarkers[key];
                 const icon = L.divIcon({
                     className: 'cctv-marker',
-                    html: '<div style="width:16px;height:16px;border-radius:50%;background:#60a5fa;border:2px solid white;box-shadow:0 0 0 1px rgba(255,255,255,0.35),0 0 8px rgba(0,0,0,0.55);"></div>',
+                    html: '<div style="width:16px;height:16px;border-radius:50%;background:' + markerColor + ';border:2px solid white;box-shadow:0 0 0 1px rgba(255,255,255,0.35),0 0 8px rgba(0,0,0,0.55);"></div>',
                     iconSize: [16, 16],
                     iconAnchor: [8, 8]
                 });
@@ -930,7 +1009,15 @@ class TacticalMapActivity : AppCompatActivity() {
                     marker.setLatLng([pos.lat, pos.lon]);
                 }
 
-                marker.bindPopup('Camera<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
+                const camName = cam.name || 'Camera';
+                const popupHtml = '<div style="min-width:220px;">'
+                    + '<b>' + camName + '</b><br>'
+                    + 'Count: ' + count + '<br>'
+                    + 'Feed: ' + (hasFeed ? 'Available' : 'No URL') + '<br>'
+                    + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5)
+                    + (hasFeed ? ('<br><button style="margin-top:6px;padding:4px 8px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;" onclick="openCameraFeed(\'' + String(feedUrl).replace(/'/g, "\\'") + '\')">Open Feed</button>') : '')
+                    + '</div>';
+                marker.bindPopup(popupHtml);
 
                 // CCTV cone (desktop-style)
                 const bearing = Number(cam.bearing ?? 0);
@@ -938,14 +1025,15 @@ class TacticalMapActivity : AppCompatActivity() {
                 const cone = conePolygon(pos.lat, pos.lon, bearing, fov, 0.0022);
                 if (!camCones[key]) {
                     camCones[key] = L.polygon(cone, {
-                        color: '#60a5fa',
+                        color: markerColor,
                         weight: 1,
                         opacity: 0.8,
-                        fillColor: '#60a5fa',
+                        fillColor: markerColor,
                         fillOpacity: 0.18
                     });
                 } else {
                     camCones[key].setLatLngs(cone);
+                    camCones[key].setStyle({ color: markerColor, fillColor: markerColor });
                 }
 
                 if (layerVisibility.cams) {
@@ -1066,6 +1154,19 @@ class TacticalMapActivity : AppCompatActivity() {
                 if (layerVisibility.sat && !map.hasLayer(marker)) {
                     marker.addTo(map);
                 }
+
+                if (cesiumViewer) {
+                    if (!cesiumSatEntities[key]) {
+                        cesiumSatEntities[key] = cesiumViewer.entities.add({
+                            id: 'sat-' + key,
+                            position: Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000),
+                            point: { pixelSize: 8, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
+                            label: { text: 'SAT', font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
+                        });
+                    } else {
+                        cesiumSatEntities[key].position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000);
+                    }
+                }
                 
                 nextSats[key] = true;
             });
@@ -1075,6 +1176,10 @@ class TacticalMapActivity : AppCompatActivity() {
                 if (!nextSats[key]) {
                     if (map.hasLayer(satMarkers[key])) map.removeLayer(satMarkers[key]);
                     delete satMarkers[key];
+                    if (cesiumViewer && cesiumSatEntities[key]) {
+                        cesiumViewer.entities.remove(cesiumSatEntities[key]);
+                        delete cesiumSatEntities[key];
+                    }
                 }
             });
         }
