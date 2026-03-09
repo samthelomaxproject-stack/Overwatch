@@ -626,6 +626,7 @@ class TacticalMapActivity : AppCompatActivity() {
             try {
                 // Push local position first
                 await pushLocalPliToHub();
+                await pollDeltaLayers();
                 
                 const resp = await fetch(currentHub + 'api/cop_snapshot?max_age_secs=7200');
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -676,6 +677,57 @@ class TacticalMapActivity : AppCompatActivity() {
                 document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat';
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
+            }
+        }
+
+        async function pollDeltaLayers() {
+            try {
+                const url = currentHub + 'api/delta?device_id=' + encodeURIComponent(OWN_CALLSIGN) + '&cursor=' + copCursor;
+                const resp = await fetch(url);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                copCursor = Math.max(copCursor, Number(data.cursor || 0));
+
+                const derivedHeat = [];
+                const updates = Array.isArray(data.tiles) ? data.tiles : [];
+                updates.forEach(update => {
+                    const tiles = Array.isArray(update.tiles) ? update.tiles : [];
+                    tiles.forEach(t => {
+                        const pos = parseTileToLatLon(t.tile_id);
+                        if (!pos) return;
+
+                        const dev = t.device_id || update.device_id;
+                        const src = t.source_type || update.source_type || 'entity';
+                        if (dev && src !== 'hub_local' && String(dev).toLowerCase() !== 'hub') {
+                            ingestPLI({
+                                uid: dev,
+                                callsign: dev,
+                                type: src,
+                                affiliation: 'friendly',
+                                lat: pos.lat,
+                                lon: pos.lon,
+                                timestamp: Date.now()
+                            });
+                        }
+
+                        if (t.rf && Array.isArray(t.rf.channel_occupancy) && t.rf.channel_occupancy.length > 0) {
+                            const vals = t.rf.channel_occupancy.map(c => Number(c.utilization_pct || 0)).filter(v => Number.isFinite(v));
+                            const max = vals.length ? Math.max(...vals) : 0;
+                            const mean = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
+                            derivedHeat.push({ tile_id: t.tile_id, sensor_type: 'rf', dimension: 'delta', max, mean });
+                        }
+                        if (t.wifi && Array.isArray(t.wifi.channel_hotness) && t.wifi.channel_hotness.length > 0) {
+                            const vals = t.wifi.channel_hotness.map(c => Number(c.count || 0)).filter(v => Number.isFinite(v));
+                            const max = vals.length ? Math.max(...vals) : 0;
+                            const mean = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
+                            derivedHeat.push({ tile_id: t.tile_id, sensor_type: 'wifi', dimension: 'delta', max, mean });
+                        }
+                    });
+                });
+
+                if (derivedHeat.length > 0) renderHeat(derivedHeat);
+            } catch (e) {
+                console.log('Delta poll error:', e.message);
             }
         }
         
