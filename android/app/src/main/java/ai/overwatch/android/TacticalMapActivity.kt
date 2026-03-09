@@ -665,8 +665,9 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderCameras(data.cameras);
                 }
                 
-                // Process heat
-                if (data.heat && Array.isArray(data.heat)) {
+                // Process heat from COP only when non-empty.
+                // (Avoid clearing delta-derived heat overlays when COP snapshot has [] )
+                if (Array.isArray(data.heat) && data.heat.length > 0) {
                     renderHeat(data.heat);
                 }
                 
