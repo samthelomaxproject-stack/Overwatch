@@ -495,8 +495,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let satSelectedGroups = (() => {
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
-                return Array.isArray(saved) && saved.length ? saved : ['stations', 'weather', 'starlink'];
-            } catch (_) { return ['stations', 'weather', 'starlink']; }
+                return Array.isArray(saved) && saved.length ? saved : ['stations','weather','starlink'];
+            } catch (_) { return ['stations','weather','starlink']; }
         })();
         let deltaCamCache = {};
         let deltaSatCache = {};
