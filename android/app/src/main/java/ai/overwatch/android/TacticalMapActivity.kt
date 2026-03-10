@@ -419,6 +419,8 @@ class TacticalMapActivity : AppCompatActivity() {
                 <label><input type="checkbox" data-sat-group value="starlink" checked onchange="applySatGroups()" /> Starlink</label>
                 <label><input type="checkbox" data-sat-group value="military" onchange="applySatGroups()" /> Military</label>
                 <label><input type="checkbox" data-sat-group value="active" onchange="applySatGroups()" /> Active</label>
+                <button class="sb-btn" style="margin-top:8px;" onclick="testCelestrakConnection()">Test CelesTrak</button>
+                <div id="satDiag" style="font-size:11px;color:#94a3b8;margin-top:6px;">SAT link: unknown</div>
             </div>
         </div>
         
@@ -498,6 +500,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 return Array.isArray(saved) && saved.length ? saved : ['stations','weather','starlink'];
             } catch (_) { return ['stations','weather','starlink']; }
         })();
+        let satLastDiag = { ok: false, group: '-', count: 0, at: 0, err: '' };
         let deltaCamCache = {};
         let deltaSatCache = {};
         
@@ -1513,7 +1516,34 @@ class TacticalMapActivity : AppCompatActivity() {
             const txt = await resp.text();
             const items = parseTleText(txt, group);
             localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+            satLastDiag = { ok: true, group, count: items.length, at: Date.now(), err: '' };
             return items;
+        }
+
+        function updateSatDiag() {
+            const el = document.getElementById('satDiag');
+            if (!el) return;
+            if (!satLastDiag.at) {
+                el.textContent = 'SAT link: unknown';
+                return;
+            }
+            const t = new Date(satLastDiag.at).toLocaleTimeString();
+            el.textContent = satLastDiag.ok
+                ? ('SAT link: OK • ' + satLastDiag.group + ' • ' + satLastDiag.count + ' TLE • ' + t)
+                : ('SAT link: FAIL • ' + (satLastDiag.err || 'unknown error'));
+        }
+
+        async function testCelestrakConnection() {
+            const group = satSelectedGroups[0] || 'stations';
+            try {
+                await fetchSatGroup(group, true);
+                updateSatDiag();
+                document.getElementById('status').textContent = 'CelesTrak OK: ' + group;
+            } catch (e) {
+                satLastDiag = { ok: false, group, count: 0, at: Date.now(), err: e.message || String(e) };
+                updateSatDiag();
+                document.getElementById('status').textContent = 'CelesTrak FAIL: ' + satLastDiag.err;
+            }
         }
 
         function satSubpointFromTle(s) {
@@ -1561,7 +1591,10 @@ class TacticalMapActivity : AppCompatActivity() {
                     out.push({ id: s.id, name: s.name, norad: s.norad, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
                 });
                 renderSatellites(out);
+                updateSatDiag();
             } catch (e) {
+                satLastDiag = { ok: false, group: satSelectedGroups[0] || '-', count: 0, at: Date.now(), err: e.message || String(e) };
+                updateSatDiag();
                 console.log('Local satcom poll error:', e.message);
             }
         }
@@ -1856,6 +1889,7 @@ class TacticalMapActivity : AppCompatActivity() {
         pollCOP();
         pollAdsb();
         pollLocalSatcom();
+        updateSatDiag();
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
         updateStatus();
