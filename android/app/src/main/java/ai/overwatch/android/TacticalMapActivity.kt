@@ -239,6 +239,25 @@ class TacticalMapActivity : AppCompatActivity() {
             cursor: pointer;
             backdrop-filter: blur(8px);
         }
+        .messenger-panel {
+            position: fixed;
+            right: 12px;
+            bottom: 178px;
+            width: 320px;
+            max-height: 52vh;
+            z-index: 10001;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 8px;
+            font: 12px monospace;
+            display: none;
+        }
+        .messenger-panel.open { display: block; }
+        .msg-list { max-height: 110px; overflow-y: auto; border:1px solid #334155; border-radius:6px; padding:6px; margin-bottom:6px; }
+        .msg-input { width:100%; box-sizing:border-box; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:6px; }
+        .msg-row { display:flex; gap:6px; }
+        .msg-chip { padding:3px 6px; border:1px solid #334155; border-radius:999px; cursor:pointer; margin:2px; display:inline-block; }
         
         /* Sidebar */
         .sidebar {
@@ -338,7 +357,22 @@ class TacticalMapActivity : AppCompatActivity() {
     <div id="map"></div>
     <div id="cesiumContainer"></div>
     
-    <button id="messengerFab" class="messenger-fab" onclick="toggleSidebar(false)">💬</button>
+    <button id="messengerFab" class="messenger-fab" onclick="toggleMessenger()">💬</button>
+    <div id="messengerPanel" class="messenger-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <b>Messenger</b><button class="sb-btn" style="width:auto;padding:2px 8px;margin:0;" onclick="toggleMessenger(false)">✕</button>
+        </div>
+        <div><span class="sb-label">Entities</span><div id="msgEntities" class="msg-list"></div></div>
+        <div><span class="sb-label">Groups</span><div id="msgGroups" class="msg-list"></div></div>
+        <div class="msg-row">
+            <input id="msgGroupName" class="msg-input" placeholder="New group name" />
+            <button class="sb-btn" style="width:auto;margin:0;" onclick="addGroup()">Add</button>
+            <button class="sb-btn" style="width:auto;margin:0;" onclick="deleteGroup()">Del</button>
+        </div>
+        <div style="margin-top:6px;" class="sb-label">To: <span id="msgTarget">(none)</span></div>
+        <div id="msgHistory" class="msg-list" style="max-height:90px;"></div>
+        <input id="msgText" class="msg-input" placeholder="Type message and press Enter" onkeydown="if(event.key==='Enter'){ sendMessage(); event.preventDefault(); }" />
+    </div>
     <div class="hud">
         <div class="hud-title">● EUD Tactical Map • $callsign</div>
         <div class="hud-row"><span class="hud-label">Status:</span> <span id="status">Initializing...</span></div>
@@ -430,6 +464,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let is3DMode = false;
         let cesiumViewer = null;
         let cesiumSatEntities = {};
+        let cesiumEntityEntities = {};
+        let cesiumAdsbEntities = {};
         let deltaCamCache = {};
         let deltaSatCache = {};
         
@@ -557,6 +593,59 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
 
+        let msgGroups = JSON.parse(localStorage.getItem('eud:msg_groups') || '[]');
+        let msgTarget = null;
+        let msgStore = JSON.parse(localStorage.getItem('eud:msg_store') || '{}');
+
+        function toggleMessenger(forceOpen = null) {
+            const p = document.getElementById('messengerPanel');
+            const open = forceOpen === null ? !p.classList.contains('open') : !!forceOpen;
+            p.classList.toggle('open', open);
+            if (open) renderMessenger();
+        }
+        function selectMsgTarget(t) { msgTarget = t; renderMessenger(); }
+        function addGroup() {
+            const n = (document.getElementById('msgGroupName').value || '').trim();
+            if (!n) return;
+            if (!msgGroups.includes(n)) msgGroups.push(n);
+            localStorage.setItem('eud:msg_groups', JSON.stringify(msgGroups));
+            document.getElementById('msgGroupName').value = '';
+            renderMessenger();
+        }
+        function deleteGroup() {
+            if (!msgTarget || !msgTarget.startsWith('group:')) return;
+            const g = msgTarget.replace('group:', '');
+            msgGroups = msgGroups.filter(x => x !== g);
+            delete msgStore[msgTarget];
+            localStorage.setItem('eud:msg_groups', JSON.stringify(msgGroups));
+            localStorage.setItem('eud:msg_store', JSON.stringify(msgStore));
+            msgTarget = null;
+            renderMessenger();
+        }
+        function sendMessage() {
+            const inp = document.getElementById('msgText');
+            const txt = (inp.value || '').trim();
+            if (!txt || !msgTarget) return;
+            const arr = msgStore[msgTarget] || [];
+            arr.push({ at: Date.now(), from: OWN_CALLSIGN, text: txt });
+            msgStore[msgTarget] = arr.slice(-50);
+            localStorage.setItem('eud:msg_store', JSON.stringify(msgStore));
+            inp.value = ''; // clear on Enter/send
+            renderMessenger();
+        }
+        function renderMessenger() {
+            const ents = trackedEntities
+                .filter(e => e.uid !== OWN_CALLSIGN && hasAssignedCallsign(e.callsign || e.uid))
+                .map(e => `<span class="msg-chip" onclick="selectMsgTarget('entity:${e.uid}')">${e.callsign || e.uid}</span>`)
+                .join('') || '<span style="color:#94a3b8;">No entities</span>';
+            const grps = msgGroups.map(g => `<span class="msg-chip" onclick="selectMsgTarget('group:${g}')"># ${g}</span>`).join('') || '<span style="color:#94a3b8;">No groups</span>';
+            document.getElementById('msgEntities').innerHTML = ents;
+            document.getElementById('msgGroups').innerHTML = grps;
+            document.getElementById('msgTarget').textContent = msgTarget || '(none)';
+            const hist = (msgTarget && msgStore[msgTarget]) ? msgStore[msgTarget] : [];
+            document.getElementById('msgHistory').innerHTML = hist.map(m => `<div><b>${m.from}</b>: ${m.text}</div>`).join('') || '<span style="color:#94a3b8;">No messages</span>';
+        }
+
         function toggleSidebar(forceState = null) {
             const sb = document.getElementById('sidebar');
             const btn = document.getElementById('sidebarToggle');
@@ -637,6 +726,10 @@ class TacticalMapActivity : AppCompatActivity() {
                 if (!keepUids.has(uid)) {
                     if (map.hasLayer(entityMarkers[uid])) map.removeLayer(entityMarkers[uid]);
                     delete entityMarkers[uid];
+                    if (cesiumViewer && cesiumEntityEntities[uid]) {
+                        cesiumViewer.entities.remove(cesiumEntityEntities[uid]);
+                        delete cesiumEntityEntities[uid];
+                    }
                 }
             });
 
@@ -707,6 +800,22 @@ class TacticalMapActivity : AppCompatActivity() {
             if (!map.hasLayer(entityMarkers[entity.uid])) {
                 entityMarkers[entity.uid].addTo(map);
             }
+
+            if (cesiumViewer) {
+                const key = entity.uid;
+                const color = isOwn ? Cesium.Color.CYAN : Cesium.Color.LIME;
+                if (!cesiumEntityEntities[key]) {
+                    cesiumEntityEntities[key] = cesiumViewer.entities.add({
+                        id: 'ent-' + key,
+                        position: Cesium.Cartesian3.fromDegrees(entity.lon, entity.lat, 20),
+                        point: { pixelSize: isOwn ? 10 : 8, color, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
+                        label: { text: entity.callsign || key, font: '12px sans-serif', fillColor: color, pixelOffset: new Cesium.Cartesian2(0, -14) }
+                    });
+                } else {
+                    cesiumEntityEntities[key].position = Cesium.Cartesian3.fromDegrees(entity.lon, entity.lat, 20);
+                    cesiumEntityEntities[key].label.text = entity.callsign || key;
+                }
+            }
         }
         
         function renderEntityList() {
@@ -725,15 +834,18 @@ class TacticalMapActivity : AppCompatActivity() {
                 const symbolChar = e.affiliation === 'friendly' ? '◈' : 
                                   e.affiliation === 'hostile' ? '◉' : 
                                   e.affiliation === 'neutral' ? '◐' : '◆';
+                const label = (e.callsign || e.uid);
                 
-                return '<div class="entity-item" style="opacity:' + (stale ? 0.5 : 1) + '" onclick="focusEntity(\'' + e.uid + '\')">' +
+                return '<div class="entity-item" style="opacity:' + (stale ? 0.5 : 1) + '" onclick="focusEntity(\'' + e.uid + '\')" onmouseenter="selectMsgTarget(\'entity:' + e.uid + '\')">' +
                        '<div class="tac-symbol ' + affilClass + '" style="width:20px;height:20px;font-size:10px;">' + symbolChar + '</div>' +
                        '<div style="flex:1;">' +
-                       '<div style="font-weight:bold;">' + (e.callsign || e.uid) + '</div>' +
+                       '<div style="font-weight:bold;">' + label + '</div>' +
                        '<div style="font-size:10px;color:#94a3b8;">' + ageStr + (stale ? ' STALE' : '') + '</div>' +
                        '</div>' +
+                       '<button class="sb-btn" style="width:auto;padding:2px 6px;margin:0;" onclick="event.stopPropagation();selectMsgTarget(\'entity:' + e.uid + '\');toggleMessenger(true)">💬</button>' +
                        '</div>';
             }).join('');
+            renderMessenger();
         }
         
         function applyLayerVisibility() {
@@ -1347,6 +1459,19 @@ class TacticalMapActivity : AppCompatActivity() {
 
                     marker.bindPopup('ADS-B ' + id + '<br>' + lat.toFixed(5) + ', ' + lon.toFixed(5));
                     if (layerVisibility.adsb && !map.hasLayer(marker)) marker.addTo(map);
+
+                    if (cesiumViewer) {
+                        if (!cesiumAdsbEntities[id]) {
+                            cesiumAdsbEntities[id] = cesiumViewer.entities.add({
+                                id: 'adsb-' + id,
+                                position: Cesium.Cartesian3.fromDegrees(lon, lat, 11000),
+                                point: { pixelSize: 7, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
+                                label: { text: id, font: '11px sans-serif', fillColor: Cesium.Color.ORANGE, pixelOffset: new Cesium.Cartesian2(0, -12) }
+                            });
+                        } else {
+                            cesiumAdsbEntities[id].position = Cesium.Cartesian3.fromDegrees(lon, lat, 11000);
+                        }
+                    }
                     next[id] = true;
                 });
 
@@ -1354,6 +1479,10 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (!next[id]) {
                         if (map.hasLayer(adsbMarkers[id])) map.removeLayer(adsbMarkers[id]);
                         delete adsbMarkers[id];
+                        if (cesiumViewer && cesiumAdsbEntities[id]) {
+                            cesiumViewer.entities.remove(cesiumAdsbEntities[id]);
+                            delete cesiumAdsbEntities[id];
+                        }
                     }
                 });
             } catch (e) {
@@ -1497,6 +1626,7 @@ class TacticalMapActivity : AppCompatActivity() {
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
         updateStatus();
+        renderMessenger();
         
     </script>
 </body>
