@@ -209,8 +209,8 @@ class TacticalMapActivity : AppCompatActivity() {
         /* HUD */
         .hud {
             position: fixed;
-            top: 8px;
-            left: 8px;
+            right: 8px;
+            bottom: 8px;
             z-index: 9999;
             background: var(--bg-panel);
             border: 1px solid var(--border-subtle);
@@ -229,7 +229,7 @@ class TacticalMapActivity : AppCompatActivity() {
         .sidebar {
             position: fixed;
             top: 8px;
-            right: 8px;
+            left: 8px;
             z-index: 9999;
             width: 260px;
             max-height: calc(100vh - 16px);
@@ -241,7 +241,31 @@ class TacticalMapActivity : AppCompatActivity() {
             color: var(--text-primary);
             font: 12px monospace;
             backdrop-filter: blur(8px);
+            transition: transform 0.2s ease, opacity 0.2s ease;
+            transform: translateX(0);
+            opacity: 1;
         }
+        .sidebar.collapsed {
+            transform: translateX(-120%);
+            opacity: 0;
+            pointer-events: none;
+        }
+        .sidebar-toggle {
+            position: fixed;
+            top: 8px;
+            left: 8px;
+            z-index: 10000;
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+        }
+        .sidebar-toggle.shifted { left: 276px; }
         .sb-section { margin-bottom: 12px; }
         .sb-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; }
         .sb-input {
@@ -306,7 +330,8 @@ class TacticalMapActivity : AppCompatActivity() {
         <div class="hud-row"><span class="hud-label">Position:</span> <span id="position">--</span></div>
     </div>
     
-    <div class="sidebar">
+    <button id="sidebarToggle" class="sidebar-toggle shifted" onclick="toggleSidebar()">☰</button>
+    <div id="sidebar" class="sidebar">
         <div class="sb-section">
             <div class="sb-label">Settings</div>
             <input id="cfgCallsign" class="sb-input" value="$callsign" placeholder="Callsign" />
@@ -474,6 +499,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
         // Update PLI mode selector
         document.getElementById('pliModeSel').value = PLI_MODE;
+        toggleSidebar(localStorage.getItem('eud:sidebar_collapsed') === '1');
 
         function ensureCesiumViewer() {
             if (cesiumViewer || !window.Cesium) return;
@@ -513,6 +539,17 @@ class TacticalMapActivity : AppCompatActivity() {
             } else {
                 window.open(url, '_blank');
             }
+        }
+
+        function toggleSidebar(forceState = null) {
+            const sb = document.getElementById('sidebar');
+            const btn = document.getElementById('sidebarToggle');
+            if (!sb || !btn) return;
+            const collapse = forceState === null ? !sb.classList.contains('collapsed') : !!forceState;
+            sb.classList.toggle('collapsed', collapse);
+            btn.classList.toggle('shifted', !collapse);
+            btn.textContent = collapse ? '☰' : '✕';
+            localStorage.setItem('eud:sidebar_collapsed', collapse ? '1' : '0');
         }
         
         // ===== ENTITY MANAGEMENT =====
