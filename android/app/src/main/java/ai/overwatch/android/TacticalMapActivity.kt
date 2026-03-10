@@ -1450,6 +1450,30 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
 
+        const SAT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+        async function ensureSatelliteJs() {
+            if (window.satellite && typeof window.satellite.twoline2satrec === 'function') return true;
+            const urls = [
+                'https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js',
+                'https://cdn.jsdelivr.net/npm/satellite.js@5.0.0/dist/satellite.min.js'
+            ];
+            for (const u of urls) {
+                try {
+                    await new Promise((resolve, reject) => {
+                        const sc = document.createElement('script');
+                        sc.src = u;
+                        sc.async = true;
+                        sc.onload = resolve;
+                        sc.onerror = reject;
+                        document.head.appendChild(sc);
+                    });
+                    if (window.satellite && typeof window.satellite.twoline2satrec === 'function') return true;
+                } catch (_) {}
+            }
+            return false;
+        }
+
         function satGroupUrl(group) {
             const m = {
                 stations: 'stations',
@@ -1463,16 +1487,34 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         function parseTleText(text, group) {
-            const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const lines = String(text || '').split(/?
+/).map(l => l.trim()).filter(Boolean);
             const out = [];
             for (let i = 0; i + 2 < lines.length; i += 3) {
                 const name = lines[i];
                 const l1 = lines[i + 1];
                 const l2 = lines[i + 2];
                 if (!l1.startsWith('1 ') || !l2.startsWith('2 ')) continue;
-                out.push({ id: group + '-' + ((l1.slice(2, 7) || i).trim()), name, line1: l1, line2: l2, group });
+                const norad = (l1.slice(2, 7) || '').trim();
+                out.push({ id: group + '-' + (norad || i), norad, name, line1: l1, line2: l2, group });
             }
             return out;
+        }
+
+        async function fetchSatGroup(group, force=false) {
+            const key = 'sat:tles:' + group;
+            if (!force) {
+                try {
+                    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+                    if (cached && (Date.now() - cached.ts) < SAT_CACHE_TTL_MS) return cached.items || [];
+                } catch (_) {}
+            }
+            const resp = await fetch(satGroupUrl(group));
+            if (!resp.ok) throw new Error('TLE fetch ' + group + ' ' + resp.status);
+            const txt = await resp.text();
+            const items = parseTleText(txt, group);
+            localStorage.setItem(key, JSON.stringify({ ts: Date.now(), items }));
+            return items;
         }
 
         function satSubpointFromTle(s) {
@@ -1492,25 +1534,34 @@ class TacticalMapActivity : AppCompatActivity() {
             } catch (_) { return null; }
         }
 
-        async function pollLocalSatcom() {
+        async function pollLocalSatcom(force=false) {
             try {
                 if (!layerVisibility.sat) return;
-                let localSats = [];
+                const ok = await ensureSatelliteJs();
+                if (!ok) {
+                    document.getElementById('status').textContent = 'SAT error: satellite.js unavailable';
+                    return;
+                }
+                let all = [];
                 for (const g of satSelectedGroups) {
                     try {
-                        const resp = await fetch(satGroupUrl(g));
-                        if (!resp.ok) continue;
-                        const txt = await resp.text();
-                        localSats = localSats.concat(parseTleText(txt, g));
-                    } catch (_) {}
+                        const items = await fetchSatGroup(g, force);
+                        all = all.concat(items);
+                    } catch (e) {
+                        console.log('SAT fetch failed', g, e.message);
+                    }
                 }
+                const dedup = new Map();
+                all.forEach(s => dedup.set(s.norad || s.id, s));
+                const localSats = Array.from(dedup.values());
+
                 const out = [];
                 localSats.slice(0, 180).forEach(s => {
                     const p = satSubpointFromTle(s);
                     if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
-                    out.push({ id: s.id, name: s.name, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
+                    out.push({ id: s.id, name: s.name, norad: s.norad, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
                 });
-                if (out.length > 0) renderSatellites(out);
+                renderSatellites(out);
             } catch (e) {
                 console.log('Local satcom poll error:', e.message);
             }
@@ -1519,14 +1570,17 @@ class TacticalMapActivity : AppCompatActivity() {
         function applySatGroups() {
             satSelectedGroups = Array.from(document.querySelectorAll('input[data-sat-group]'))
                 .filter(x => x.checked).map(x => x.value);
-            if (satSelectedGroups.length === 0) satSelectedGroups = ['stations'];
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
-            pollLocalSatcom();
+            if (satSelectedGroups.length === 0) {
+                renderSatellites([]);
+                return;
+            }
+            pollLocalSatcom(true);
         }
 
         function renderSatellites(sats) {
             const nextSats = {};
-            
+
             sats.forEach(sat => {
                 let pos = null;
                 if (sat.tile_id) pos = parseTileToLatLon(sat.tile_id);
@@ -1534,27 +1588,29 @@ class TacticalMapActivity : AppCompatActivity() {
                     pos = { lat: Number(sat.lat), lon: Number(sat.lon) };
                 }
                 if (!pos) return;
-                
+
                 const key = (sat.id || sat.tile_id || (pos.lat.toFixed(4)+','+pos.lon.toFixed(4))) + ':' + (sat.dimension || 'default');
                 const count = sat.count || 1;
-                
+
                 let marker = satMarkers[key];
+                const satName = String(sat.name || sat.norad || sat.id || key);
+                const satAbbr = satName.replace(/\s+/g, ' ').trim().slice(0, 8).toUpperCase();
                 const icon = L.divIcon({
                     className: '',
                     html: '<div style="width:16px;height:16px;transform:rotate(45deg);border:2px solid #ffea00;background:rgba(255,234,0,0.6);box-shadow:0 0 10px #ffea00;"></div>',
                     iconSize: [16, 16],
                     iconAnchor: [8, 8]
                 });
-                
+
                 if (!marker) {
                     marker = L.marker([pos.lat, pos.lon], { icon });
                     satMarkers[key] = marker;
                 } else {
                     marker.setLatLng([pos.lat, pos.lon]);
                 }
-                
-                marker.bindPopup('Satellite<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
-                
+
+                marker.bindPopup('Satellite: ' + satAbbr + '<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
+
                 if (layerVisibility.sat && !map.hasLayer(marker)) {
                     marker.addTo(map);
                 }
@@ -1565,17 +1621,17 @@ class TacticalMapActivity : AppCompatActivity() {
                             id: 'sat-' + key,
                             position: Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000),
                             point: { pixelSize: 8, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
-                            label: { text: 'SAT', font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
+                            label: { text: satAbbr, font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
                         });
                     } else {
                         cesiumSatEntities[key].position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000);
+                        if (cesiumSatEntities[key].label) cesiumSatEntities[key].label.text = satAbbr;
                     }
                 }
-                
+
                 nextSats[key] = true;
             });
-            
-            // Remove stale satellites
+
             Object.keys(satMarkers).forEach(key => {
                 if (!nextSats[key]) {
                     if (map.hasLayer(satMarkers[key])) map.removeLayer(satMarkers[key]);
