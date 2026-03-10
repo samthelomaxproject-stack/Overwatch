@@ -408,6 +408,7 @@ class TacticalMapActivity : AppCompatActivity() {
             <button class="sb-btn" onclick="applySettings()">Apply Settings</button>
             <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
             <button class="sb-btn" onclick="toggle3D()">Toggle 3D SAT</button>
+            <button id="northLockBtn" class="sb-btn" onclick="toggleNorthLock()">North Lock: OFF</button>
             <button class="sb-btn" onclick="reconnectHub()">Reconnect</button>
         </div>
         
@@ -463,6 +464,7 @@ class TacticalMapActivity : AppCompatActivity() {
         let adsbMarkers = {};
         let is3DMode = false;
         let cesiumViewer = null;
+        let cesiumNorthLock = false;
         let cesiumSatEntities = {};
         let cesiumEntityEntities = {};
         let cesiumAdsbEntities = {};
@@ -567,6 +569,19 @@ class TacticalMapActivity : AppCompatActivity() {
                 infoBox: true,
                 selectionIndicator: true,
             });
+
+            cesiumViewer.scene.preRender.addEventListener(() => {
+                if (!cesiumNorthLock) return;
+                const cam = cesiumViewer.camera;
+                cam.setView({
+                    destination: cam.position,
+                    orientation: {
+                        heading: 0.0,
+                        pitch: cam.pitch,
+                        roll: 0.0,
+                    }
+                });
+            });
         }
 
         function toggle3D() {
@@ -582,6 +597,12 @@ class TacticalMapActivity : AppCompatActivity() {
                 c.style.display = 'none';
                 is3DMode = false;
             }
+        }
+
+        function toggleNorthLock() {
+            cesiumNorthLock = !cesiumNorthLock;
+            const b = document.getElementById('northLockBtn');
+            if (b) b.textContent = 'North Lock: ' + (cesiumNorthLock ? 'ON' : 'OFF');
         }
 
         function openCameraFeed(url) {
