@@ -251,13 +251,14 @@ class TacticalMapActivity : AppCompatActivity() {
             border-radius: 8px;
             padding: 8px;
             font: 12px monospace;
+            color: var(--text-primary);
             display: none;
         }
         .messenger-panel.open { display: block; }
         .msg-list { max-height: 110px; overflow-y: auto; border:1px solid #334155; border-radius:6px; padding:6px; margin-bottom:6px; }
         .msg-input { width:100%; box-sizing:border-box; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:6px; }
         .msg-row { display:flex; gap:6px; }
-        .msg-chip { padding:3px 6px; border:1px solid #334155; border-radius:999px; cursor:pointer; margin:2px; display:inline-block; }
+        .msg-chip { padding:3px 6px; border:1px solid #334155; border-radius:999px; cursor:pointer; margin:2px; display:inline-block; color:#e2e8f0; }
         
         /* Sidebar */
         .sidebar {
@@ -387,6 +388,13 @@ class TacticalMapActivity : AppCompatActivity() {
         <div class="sb-section">
             <div class="sb-label">Settings</div>
             <input id="cfgCallsign" class="sb-input" value="$callsign" placeholder="Callsign" />
+            <select id="cfgUnitType" class="sb-input" style="margin-top:6px;">
+                <option>Individual Soldier</option>
+                <option>HMMWV</option>
+                <option>JLTV</option>
+                <option>Stryker</option>
+                <option>Mechanized</option>
+            </select>
             <input id="cfgHub" class="sb-input" value="$hubBase" placeholder="Hub URL" style="margin-top:6px;" />
             <select id="pliModeSel" class="sb-input" style="margin-top:6px;">
                 <option value="LOCAL" ${if (pliMode == "LOCAL") "selected" else ""}>LOCAL</option>
@@ -425,6 +433,7 @@ class TacticalMapActivity : AppCompatActivity() {
         <div class="sb-section">
             <div class="sb-label">Tracked Entities</div>
             <div id="entityList" class="entity-list">No entities tracked</div>
+            <div id="entityDetail" class="sub-menu" style="margin-top:8px;">Select an entity for details.</div>
         </div>
     </div>
 
@@ -444,6 +453,7 @@ class TacticalMapActivity : AppCompatActivity() {
         
         // State
         let PLI_MODE = localStorage.getItem('eud:pli_mode') || INITIAL_PLI_MODE;
+        let UNIT_TYPE = localStorage.getItem('eud:unit_type') || 'Individual Soldier';
         let currentHub = localStorage.getItem('eud:hub') || document.getElementById('cfgHub').value;
         if (currentHub && !currentHub.endsWith('/')) currentHub += '/';
         let trackedEntities = [];
@@ -452,6 +462,7 @@ class TacticalMapActivity : AppCompatActivity() {
         let lastDeltaHeatCount = 0;
         let deltaHeatCache = {};
         let camCache = {};
+        let lastLocalCamFetchAt = 0;
         const DELTA_HEAT_TTL_MS = 180000;
         const CAM_TTL_MS = 300000;
         const ENTITY_STALE_MS = 180000;
@@ -484,7 +495,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let satSelectedGroups = (() => {
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
-                return Array.isArray(saved) && saved.length ? saved : ['stations','weather','starlink'];
+                if (Array.isArray(saved)) return saved;
+                return ['stations','weather','starlink'];
             } catch (_) { return ['stations','weather','starlink']; }
         })();
         let deltaCamCache = {};
@@ -572,6 +584,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
         // Update PLI mode selector
         document.getElementById('pliModeSel').value = PLI_MODE;
+        document.getElementById('cfgUnitType').value = UNIT_TYPE;
         toggleSidebar(localStorage.getItem('eud:sidebar_collapsed') === '1');
         document.querySelectorAll('input[data-sat-group]').forEach(chk => {
             chk.checked = satSelectedGroups.includes(chk.value);
@@ -1008,7 +1021,7 @@ class TacticalMapActivity : AppCompatActivity() {
             ingestPLI({
                 uid: OWN_CALLSIGN,
                 callsign: OWN_CALLSIGN,
-                type: 'EUD',
+                type: UNIT_TYPE || 'EUD',
                 affiliation: 'friendly',
                 lat: ownPosition.lat,
                 lon: ownPosition.lon,
@@ -1058,6 +1071,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     schema_version: 1,
                     device_id: OWN_CALLSIGN,
                     source_type: 'entity',
+                    unit_type: UNIT_TYPE || 'Individual Soldier',
                     timestamp_utc: nowSec,
                     tiles: [{ 
                         tile_id: tileId, 
@@ -1114,12 +1128,16 @@ class TacticalMapActivity : AppCompatActivity() {
                 let heatCount = (data.heat && Array.isArray(data.heat)) ? data.heat.length : 0;
                 let satCount = (data.satellites && Array.isArray(data.satellites)) ? data.satellites.length : 0;
                 
-                // Process cameras (COP first, local discovery fallback), keep merged cache stable
+                // Process cameras (COP + LOCAL in MERGED mode), keep merged cache stable
                 if (data.cameras && Array.isArray(data.cameras) && data.cameras.length > 0) {
                     upsertCameraBatch(data.cameras, 'cop');
-                } else {
+                }
+                const nowMs = Date.now();
+                const shouldPullLocal = (PLI_MODE === 'LOCAL' || PLI_MODE === 'MERGED' || !(data.cameras && data.cameras.length > 0));
+                if (shouldPullLocal && (nowMs - lastLocalCamFetchAt > 15000)) {
                     const localCams = await fetchLocalCameras();
                     if (localCams.length > 0) upsertCameraBatch(localCams, 'local');
+                    lastLocalCamFetchAt = nowMs;
                 }
                 const camSnap = getCameraSnapshot();
                 camCount = camSnap.length;
@@ -1502,8 +1520,11 @@ class TacticalMapActivity : AppCompatActivity() {
         function applySatGroups() {
             satSelectedGroups = Array.from(document.querySelectorAll('input[data-sat-group]'))
                 .filter(x => x.checked).map(x => x.value);
-            if (satSelectedGroups.length === 0) satSelectedGroups = ['stations'];
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
+            if (satSelectedGroups.length === 0) {
+                renderSatellites([]);
+                return;
+            }
             pollLocalSatcom();
         }
 
@@ -1522,6 +1543,8 @@ class TacticalMapActivity : AppCompatActivity() {
                 const count = sat.count || 1;
                 
                 let marker = satMarkers[key];
+                const satName = String(sat.name || sat.id || key);
+                const satAbbr = satName.replace(/\s+/g, ' ').trim().slice(0, 8).toUpperCase();
                 const icon = L.divIcon({
                     className: '',
                     html: '<div style="width:16px;height:16px;transform:rotate(45deg);border:2px solid #ffea00;background:rgba(255,234,0,0.6);box-shadow:0 0 10px #ffea00;"></div>',
@@ -1536,7 +1559,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     marker.setLatLng([pos.lat, pos.lon]);
                 }
                 
-                marker.bindPopup('Satellite<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
+                marker.bindPopup('Satellite: ' + satAbbr + '<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
                 
                 if (layerVisibility.sat && !map.hasLayer(marker)) {
                     marker.addTo(map);
@@ -1548,7 +1571,7 @@ class TacticalMapActivity : AppCompatActivity() {
                             id: 'sat-' + key,
                             position: Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000),
                             point: { pixelSize: 8, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
-                            label: { text: 'SAT', font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
+                            label: { text: satAbbr, font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
                         });
                     } else {
                         cesiumSatEntities[key].position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000);
@@ -1668,6 +1691,7 @@ class TacticalMapActivity : AppCompatActivity() {
         
         function applySettings() {
             const cs = document.getElementById('cfgCallsign').value.trim();
+            const unitType = document.getElementById('cfgUnitType').value;
             const hub = document.getElementById('cfgHub').value.trim();
             const mode = document.getElementById('pliModeSel').value;
             
@@ -1700,6 +1724,8 @@ class TacticalMapActivity : AppCompatActivity() {
                 localStorage.setItem('eud:hub', currentHub);
                 document.getElementById('cfgHub').value = currentHub;
             }
+            UNIT_TYPE = unitType || 'Individual Soldier';
+            localStorage.setItem('eud:unit_type', UNIT_TYPE);
             PLI_MODE = mode;
             localStorage.setItem('eud:pli_mode', PLI_MODE);
             
@@ -1716,9 +1742,22 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
         
+        function showEntityDetail(uid) {
+            const e = trackedEntities.find(x => x.uid === uid);
+            const box = document.getElementById('entityDetail');
+            if (!box) return;
+            if (!e) { box.textContent = 'Select an entity for details.'; return; }
+            box.innerHTML = '<div><b>' + (e.callsign || e.uid) + '</b></div>'
+                + '<div>Type: ' + (e.type || 'Unknown') + '</div>'
+                + '<div>UID: ' + (e.uid || '-') + '</div>'
+                + '<div>Lat/Lon: ' + Number(e.lat || 0).toFixed(5) + ', ' + Number(e.lon || 0).toFixed(5) + '</div>'
+                + '<div>Affiliation: ' + (e.affiliation || 'unknown') + '</div>';
+        }
+
         function focusEntity(uid) {
             const m = entityMarkers[uid];
             if (m) map.setView(m.getLatLng(), 16);
+            showEntityDetail(uid);
         }
         
         function reconnectHub() {
