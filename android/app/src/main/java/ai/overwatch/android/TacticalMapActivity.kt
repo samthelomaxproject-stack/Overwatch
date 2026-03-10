@@ -440,7 +440,9 @@ class TacticalMapActivity : AppCompatActivity() {
         let copCursor = 0;
         let lastDeltaHeatCount = 0;
         let deltaHeatCache = {};
+        let camCache = {};
         const DELTA_HEAT_TTL_MS = 180000;
+        const CAM_TTL_MS = 300000;
         const ENTITY_STALE_MS = 180000;
         const GPS_JITTER_METERS = 10;
         const GPS_SMOOTH_ALPHA = 0.25;
@@ -535,8 +537,8 @@ class TacticalMapActivity : AppCompatActivity() {
                     };
                 }).filter(c => c.tile_id.includes('android_'));
                 if (cams.length > 0) {
-                    // Merge with any existing COP-derived cameras
-                    renderCameras(cams);
+                    upsertCameraBatch(cams, 'viewport');
+                    renderCameras(getCameraSnapshot());
                 }
             } catch (e) {
                 console.log('Viewport camera fetch failed:', e.message);
@@ -612,6 +614,26 @@ class TacticalMapActivity : AppCompatActivity() {
             } else {
                 window.open(url, '_blank');
             }
+        }
+
+        function upsertCameraBatch(cams, source='unknown') {
+            const now = Date.now();
+            (cams || []).forEach(cam => {
+                const k = String(cam.id || cam.tile_id || ((cam.lat || 0) + ',' + (cam.lon || 0)));
+                if (!k) return;
+                camCache[k] = { ...camCache[k], ...cam, _ts: now, _source: source };
+            });
+            Object.keys(camCache).forEach(k => {
+                if ((now - (camCache[k]._ts || 0)) > CAM_TTL_MS) delete camCache[k];
+            });
+        }
+
+        function getCameraSnapshot() {
+            const now = Date.now();
+            Object.keys(camCache).forEach(k => {
+                if ((now - (camCache[k]._ts || 0)) > CAM_TTL_MS) delete camCache[k];
+            });
+            return Object.values(camCache).map(c => ({ ...c }));
         }
 
         let msgGroups = JSON.parse(localStorage.getItem('eud:msg_groups') || '[]');
@@ -1072,16 +1094,16 @@ class TacticalMapActivity : AppCompatActivity() {
                 let heatCount = (data.heat && Array.isArray(data.heat)) ? data.heat.length : 0;
                 let satCount = (data.satellites && Array.isArray(data.satellites)) ? data.satellites.length : 0;
                 
-                // Process cameras (COP first, local discovery fallback)
+                // Process cameras (COP first, local discovery fallback), keep merged cache stable
                 if (data.cameras && Array.isArray(data.cameras) && data.cameras.length > 0) {
-                    renderCameras(data.cameras);
+                    upsertCameraBatch(data.cameras, 'cop');
                 } else {
                     const localCams = await fetchLocalCameras();
-                    if (localCams.length > 0) {
-                        camCount = localCams.length;
-                        renderCameras(localCams);
-                    }
+                    if (localCams.length > 0) upsertCameraBatch(localCams, 'local');
                 }
+                const camSnap = getCameraSnapshot();
+                camCount = camSnap.length;
+                if (camSnap.length > 0) renderCameras(camSnap);
                 
                 // Process heat from COP only when non-empty.
                 // (Avoid clearing delta-derived heat overlays when COP snapshot has [] )
@@ -1180,7 +1202,10 @@ class TacticalMapActivity : AppCompatActivity() {
                 Object.keys(deltaSatCache).forEach(k => { if ((nowMs - (deltaSatCache[k]._ts || 0)) > DELTA_HEAT_TTL_MS) delete deltaSatCache[k]; });
                 const cachedCams = Object.values(deltaCamCache).map(c => ({ tile_id: c.tile_id, dimension: c.dimension, count: c.count, bearing: c.bearing, fov: c.fov }));
                 const cachedSats = Object.values(deltaSatCache).map(c => ({ tile_id: c.tile_id, dimension: c.dimension, count: c.count }));
-                if (cachedCams.length > 0) renderCameras(cachedCams);
+                if (cachedCams.length > 0) {
+                    upsertCameraBatch(cachedCams, 'delta');
+                    renderCameras(getCameraSnapshot());
+                }
                 if (cachedSats.length > 0) renderSatellites(cachedSats);
 
                 lastDeltaHeatCount = derivedHeat.length;
