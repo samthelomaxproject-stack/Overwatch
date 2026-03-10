@@ -224,6 +224,21 @@ class TacticalMapActivity : AppCompatActivity() {
         .hud-title { font-weight: bold; margin-bottom: 6px; color: var(--tac-neutral); }
         .hud-row { margin: 4px 0; }
         .hud-label { color: var(--text-secondary); }
+        .messenger-fab {
+            position: fixed;
+            right: 12px;
+            bottom: 130px;
+            z-index: 10000;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+        }
         
         /* Sidebar */
         .sidebar {
@@ -323,6 +338,7 @@ class TacticalMapActivity : AppCompatActivity() {
     <div id="map"></div>
     <div id="cesiumContainer"></div>
     
+    <button id="messengerFab" class="messenger-fab" onclick="toggleSidebar(false)">💬</button>
     <div class="hud">
         <div class="hud-title">● EUD Tactical Map • $callsign</div>
         <div class="hud-row"><span class="hud-label">Status:</span> <span id="status">Initializing...</span></div>
@@ -507,13 +523,13 @@ class TacticalMapActivity : AppCompatActivity() {
                 terrainProvider: new Cesium.EllipsoidTerrainProvider(),
                 animation: false,
                 timeline: false,
-                sceneModePicker: false,
-                baseLayerPicker: false,
+                sceneModePicker: true,
+                baseLayerPicker: true,
                 geocoder: false,
-                homeButton: false,
-                navigationHelpButton: false,
-                infoBox: false,
-                selectionIndicator: false,
+                homeButton: true,
+                navigationHelpButton: true,
+                infoBox: true,
+                selectionIndicator: true,
             });
         }
 
@@ -553,10 +569,24 @@ class TacticalMapActivity : AppCompatActivity() {
         }
         
         // ===== ENTITY MANAGEMENT =====
+
+        function hasAssignedCallsign(v) {
+            const s = String(v || '').trim();
+            if (!s) return false;
+            const l = s.toLowerCase();
+            if (l === 'unknown' || l === 'entity' || l === 'device') return false;
+            if (/^android_\d+_\d+$/i.test(s)) return false;
+            const compact = s.replace(/[-_:]/g, '');
+            if (/^[0-9a-f]{12,}$/i.test(compact)) return false; // hashes/mac-like ids
+            if (!/[a-z]/i.test(s)) return false; // require at least one letter
+            return true;
+        }
         
         function ingestPLI(pli) {
             // pli = { uid, callsign, type, affiliation, lat, lon, timestamp }
-            const dedupeKey = String((pli.callsign || pli.uid || '')).trim().toUpperCase();
+            const displayName = (pli.callsign || pli.uid || '').trim();
+            if (pli.uid !== OWN_CALLSIGN && !hasAssignedCallsign(displayName)) return;
+            const dedupeKey = String(displayName).toUpperCase();
             const existing = trackedEntities.findIndex(e =>
                 e.uid === pli.uid || String((e.callsign || e.uid || '')).trim().toUpperCase() === dedupeKey
             );
@@ -958,7 +988,8 @@ class TacticalMapActivity : AppCompatActivity() {
 
                         const dev = t.device_id || update.device_id;
                         const src = String(t.source_type || update.source_type || 'entity').toLowerCase();
-                        if (dev && src !== 'hub_local' && String(dev).toLowerCase() !== 'hub') {
+                        const pliSrc = (src === 'entity' || src === 'handheld' || src === 'eud' || src === 'user');
+                        if (pliSrc && dev && src !== 'hub_local' && String(dev).toLowerCase() !== 'hub') {
                             ingestPLI({
                                 uid: dev,
                                 callsign: dev,
