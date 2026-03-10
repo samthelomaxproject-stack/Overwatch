@@ -1487,8 +1487,7 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         function parseTleText(text, group) {
-            const lines = String(text || '').split(/?
-/).map(l => l.trim()).filter(Boolean);
+            const lines = String(text || '').split('\\n').map(l => l.trim()).filter(Boolean);
             const out = [];
             for (let i = 0; i + 2 < lines.length; i += 3) {
                 const name = lines[i];
