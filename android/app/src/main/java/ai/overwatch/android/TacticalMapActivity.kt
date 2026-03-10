@@ -495,9 +495,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let satSelectedGroups = (() => {
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
-                if (Array.isArray(saved) && saved.length > 0) return saved;
-                return ['stations','weather','starlink'];
-            } catch (_) { return ['stations','weather','starlink']; }
+                return Array.isArray(saved) && saved.length ? saved : ['stations', 'weather', 'starlink'];
+            } catch (_) { return ['stations', 'weather', 'starlink']; }
         })();
         let deltaCamCache = {};
         let deltaSatCache = {};
@@ -1511,7 +1510,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
                     out.push({ id: s.id, name: s.name, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
                 });
-                renderSatellites(out);
+                if (out.length > 0) renderSatellites(out);
             } catch (e) {
                 console.log('Local satcom poll error:', e.message);
             }
@@ -1520,11 +1519,8 @@ class TacticalMapActivity : AppCompatActivity() {
         function applySatGroups() {
             satSelectedGroups = Array.from(document.querySelectorAll('input[data-sat-group]'))
                 .filter(x => x.checked).map(x => x.value);
+            if (satSelectedGroups.length === 0) satSelectedGroups = ['stations'];
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
-            if (satSelectedGroups.length === 0) {
-                renderSatellites([]);
-                return;
-            }
             pollLocalSatcom();
         }
 
@@ -1543,8 +1539,6 @@ class TacticalMapActivity : AppCompatActivity() {
                 const count = sat.count || 1;
                 
                 let marker = satMarkers[key];
-                const satName = String(sat.name || sat.id || key);
-                const satAbbr = satName.replace(/\s+/g, ' ').trim().slice(0, 8).toUpperCase();
                 const icon = L.divIcon({
                     className: '',
                     html: '<div style="width:16px;height:16px;transform:rotate(45deg);border:2px solid #ffea00;background:rgba(255,234,0,0.6);box-shadow:0 0 10px #ffea00;"></div>',
@@ -1559,7 +1553,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     marker.setLatLng([pos.lat, pos.lon]);
                 }
                 
-                marker.bindPopup('Satellite: ' + satAbbr + '<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
+                marker.bindPopup('Satellite<br>Count: ' + count + '<br>' + pos.lat.toFixed(5) + ', ' + pos.lon.toFixed(5));
                 
                 if (layerVisibility.sat && !map.hasLayer(marker)) {
                     marker.addTo(map);
@@ -1571,7 +1565,7 @@ class TacticalMapActivity : AppCompatActivity() {
                             id: 'sat-' + key,
                             position: Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000),
                             point: { pixelSize: 8, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
-                            label: { text: satAbbr, font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
+                            label: { text: 'SAT', font: '12px sans-serif', fillColor: Cesium.Color.YELLOW, pixelOffset: new Cesium.Cartesian2(0, -14) }
                         });
                     } else {
                         cesiumSatEntities[key].position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 550000);
