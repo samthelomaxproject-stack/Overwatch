@@ -495,7 +495,7 @@ class TacticalMapActivity : AppCompatActivity() {
         let satSelectedGroups = (() => {
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
-                if (Array.isArray(saved)) return saved;
+                if (Array.isArray(saved) && saved.length > 0) return saved;
                 return ['stations','weather','starlink'];
             } catch (_) { return ['stations','weather','starlink']; }
         })();
@@ -1518,13 +1518,18 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         function applySatGroups() {
-            satSelectedGroups = Array.from(document.querySelectorAll('input[data-sat-group]'))
+            const next = Array.from(document.querySelectorAll('input[data-sat-group]'))
                 .filter(x => x.checked).map(x => x.value);
-            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
-            if (satSelectedGroups.length === 0) {
-                renderSatellites([]);
+            if (next.length === 0) {
+                // keep prior valid selection so SAT layer doesn't go dead
+                document.querySelectorAll('input[data-sat-group]').forEach(chk => {
+                    chk.checked = satSelectedGroups.includes(chk.value);
+                });
+                document.getElementById('status').textContent = 'SAT: select at least one group';
                 return;
             }
+            satSelectedGroups = next;
+            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
             pollLocalSatcom();
         }
 
