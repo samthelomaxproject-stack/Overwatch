@@ -325,6 +325,8 @@ class TacticalMapActivity : AppCompatActivity() {
         .sb-btn:hover { background: rgba(51, 65, 85, 0.9); border-color: var(--tac-neutral); }
         .layer-group { display: flex; flex-wrap: wrap; gap: 8px; }
         .layer-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+        .sub-menu { margin-top:6px; padding:6px; border:1px solid #334155; border-radius:6px; }
+        .sub-menu label { font-size:11px; margin-right:8px; }
         
         /* Entity List */
         .entity-list { max-height: 200px; overflow-y: auto; margin-top: 8px; }
@@ -402,6 +404,14 @@ class TacticalMapActivity : AppCompatActivity() {
                 <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> SAT</label>
                 <label><input id="layerAdsb" type="checkbox" checked onchange="applyLayerVisibility()" /> ADS-B</label>
             </div>
+            <div class="sub-menu">
+                <div class="sb-label">SAT Groups</div>
+                <label><input type="checkbox" data-sat-group value="stations" checked onchange="applySatGroups()" /> Stations</label>
+                <label><input type="checkbox" data-sat-group value="weather" checked onchange="applySatGroups()" /> Weather</label>
+                <label><input type="checkbox" data-sat-group value="starlink" checked onchange="applySatGroups()" /> Starlink</label>
+                <label><input type="checkbox" data-sat-group value="military" onchange="applySatGroups()" /> Military</label>
+                <label><input type="checkbox" data-sat-group value="active" onchange="applySatGroups()" /> Active</label>
+            </div>
         </div>
         
         <div class="sb-section">
@@ -421,6 +431,7 @@ class TacticalMapActivity : AppCompatActivity() {
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+    <script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
     <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <script>
         // Configuration
@@ -470,6 +481,12 @@ class TacticalMapActivity : AppCompatActivity() {
         let cesiumSatEntities = {};
         let cesiumEntityEntities = {};
         let cesiumAdsbEntities = {};
+        let satSelectedGroups = (() => {
+            try {
+                const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
+                return Array.isArray(saved) && saved.length ? saved : ['stations','weather','starlink'];
+            } catch (_) { return ['stations','weather','starlink']; }
+        })();
         let deltaCamCache = {};
         let deltaSatCache = {};
         
@@ -556,6 +573,9 @@ class TacticalMapActivity : AppCompatActivity() {
         // Update PLI mode selector
         document.getElementById('pliModeSel').value = PLI_MODE;
         toggleSidebar(localStorage.getItem('eud:sidebar_collapsed') === '1');
+        document.querySelectorAll('input[data-sat-group]').forEach(chk => {
+            chk.checked = satSelectedGroups.includes(chk.value);
+        });
 
         function ensureCesiumViewer() {
             if (cesiumViewer || !window.Cesium) return;
@@ -1111,8 +1131,8 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderHeat(data.heat);
                 }
                 
-                // Process satellites
-                if (data.satellites && Array.isArray(data.satellites)) {
+                // Process satellites (do not wipe local satcom on empty COP arrays)
+                if (Array.isArray(data.satellites) && data.satellites.length > 0) {
                     renderSatellites(data.satellites);
                 }
                 
@@ -1413,16 +1433,93 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
 
+        function satGroupUrl(group) {
+            const m = {
+                stations: 'stations',
+                weather: 'weather',
+                starlink: 'starlink',
+                military: 'military',
+                active: 'active'
+            };
+            const g = m[group] || 'stations';
+            return 'https://celestrak.org/NORAD/elements/gp.php?GROUP=' + encodeURIComponent(g) + '&FORMAT=TLE';
+        }
+
+        function parseTleText(text, group) {
+            const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const out = [];
+            for (let i = 0; i + 2 < lines.length; i += 3) {
+                const name = lines[i];
+                const l1 = lines[i + 1];
+                const l2 = lines[i + 2];
+                if (!l1.startsWith('1 ') || !l2.startsWith('2 ')) continue;
+                out.push({ id: group + '-' + ((l1.slice(2, 7) || i).trim()), name, line1: l1, line2: l2, group });
+            }
+            return out;
+        }
+
+        function satSubpointFromTle(s) {
+            try {
+                if (!window.satellite) return null;
+                const satrec = window.satellite.twoline2satrec(s.line1, s.line2);
+                const now = new Date();
+                const gmst = window.satellite.gstime(now);
+                const pv = window.satellite.propagate(satrec, now);
+                if (!pv || !pv.position) return null;
+                const gd = window.satellite.eciToGeodetic(pv.position, gmst);
+                return {
+                    lat: window.satellite.degreesLat(gd.latitude),
+                    lon: window.satellite.degreesLong(gd.longitude),
+                    altKm: gd.height
+                };
+            } catch (_) { return null; }
+        }
+
+        async function pollLocalSatcom() {
+            try {
+                if (!layerVisibility.sat) return;
+                let localSats = [];
+                for (const g of satSelectedGroups) {
+                    try {
+                        const resp = await fetch(satGroupUrl(g));
+                        if (!resp.ok) continue;
+                        const txt = await resp.text();
+                        localSats = localSats.concat(parseTleText(txt, g));
+                    } catch (_) {}
+                }
+                const out = [];
+                localSats.slice(0, 180).forEach(s => {
+                    const p = satSubpointFromTle(s);
+                    if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
+                    out.push({ id: s.id, name: s.name, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
+                });
+                if (out.length > 0) renderSatellites(out);
+            } catch (e) {
+                console.log('Local satcom poll error:', e.message);
+            }
+        }
+
+        function applySatGroups() {
+            satSelectedGroups = Array.from(document.querySelectorAll('input[data-sat-group]'))
+                .filter(x => x.checked).map(x => x.value);
+            if (satSelectedGroups.length === 0) satSelectedGroups = ['stations'];
+            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
+            pollLocalSatcom();
+        }
+
         function renderSatellites(sats) {
             const nextSats = {};
             
             sats.forEach(sat => {
-                if (!sat.tile_id) return;
-                const pos = parseTileToLatLon(sat.tile_id);
+                let pos = null;
+                if (sat.tile_id) pos = parseTileToLatLon(sat.tile_id);
+                if (!pos && Number.isFinite(Number(sat.lat)) && Number.isFinite(Number(sat.lon))) {
+                    pos = { lat: Number(sat.lat), lon: Number(sat.lon) };
+                }
                 if (!pos) return;
                 
-                const key = sat.tile_id + ':' + (sat.dimension || 'default');
-                const count = sat.count || 0;
+                const key = (sat.id || sat.tile_id || (pos.lat.toFixed(4)+','+pos.lon.toFixed(4))) + ':' + (sat.dimension || 'default');
+                const count = sat.count || 1;
                 
                 let marker = satMarkers[key];
                 const icon = L.divIcon({
@@ -1667,8 +1764,10 @@ class TacticalMapActivity : AppCompatActivity() {
         // Poll COP + ADS-B continuously (LOCAL keeps local primary but still syncs/pulls)
         setInterval(pollCOP, 5000);
         setInterval(pollAdsb, 5000);
+        setInterval(pollLocalSatcom, 15000);
         pollCOP();
         pollAdsb();
+        pollLocalSatcom();
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
         updateStatus();
