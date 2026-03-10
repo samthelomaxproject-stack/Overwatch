@@ -1511,25 +1511,20 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
                     out.push({ id: s.id, name: s.name, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
                 });
-                if (out.length > 0) renderSatellites(out);
+                renderSatellites(out);
             } catch (e) {
                 console.log('Local satcom poll error:', e.message);
             }
         }
 
         function applySatGroups() {
-            const next = Array.from(document.querySelectorAll('input[data-sat-group]'))
+            satSelectedGroups = Array.from(document.querySelectorAll('input[data-sat-group]'))
                 .filter(x => x.checked).map(x => x.value);
-            if (next.length === 0) {
-                // keep prior valid selection so SAT layer doesn't go dead
-                document.querySelectorAll('input[data-sat-group]').forEach(chk => {
-                    chk.checked = satSelectedGroups.includes(chk.value);
-                });
-                document.getElementById('status').textContent = 'SAT: select at least one group';
+            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
+            if (satSelectedGroups.length === 0) {
+                renderSatellites([]);
                 return;
             }
-            satSelectedGroups = next;
-            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
             pollLocalSatcom();
         }
 
