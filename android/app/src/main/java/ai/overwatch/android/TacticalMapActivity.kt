@@ -636,14 +636,14 @@ class TacticalMapActivity : AppCompatActivity() {
         function renderMessenger() {
             const ents = trackedEntities
                 .filter(e => e.uid !== OWN_CALLSIGN && hasAssignedCallsign(e.callsign || e.uid))
-                .map(e => `<span class="msg-chip" onclick="selectMsgTarget('entity:${e.uid}')">${e.callsign || e.uid}</span>`)
+                .map(e => '<span class="msg-chip" onclick="selectMsgTarget(\'entity:' + e.uid + '\')">' + (e.callsign || e.uid) + '</span>')
                 .join('') || '<span style="color:#94a3b8;">No entities</span>';
-            const grps = msgGroups.map(g => `<span class="msg-chip" onclick="selectMsgTarget('group:${g}')"># ${g}</span>`).join('') || '<span style="color:#94a3b8;">No groups</span>';
+            const grps = msgGroups.map(g => '<span class="msg-chip" onclick="selectMsgTarget(\'group:' + g + '\')"># ' + g + '</span>').join('') || '<span style="color:#94a3b8;">No groups</span>';
             document.getElementById('msgEntities').innerHTML = ents;
             document.getElementById('msgGroups').innerHTML = grps;
             document.getElementById('msgTarget').textContent = msgTarget || '(none)';
             const hist = (msgTarget && msgStore[msgTarget]) ? msgStore[msgTarget] : [];
-            document.getElementById('msgHistory').innerHTML = hist.map(m => `<div><b>${m.from}</b>: ${m.text}</div>`).join('') || '<span style="color:#94a3b8;">No messages</span>';
+            document.getElementById('msgHistory').innerHTML = hist.map(m => '<div><b>' + m.from + '</b>: ' + m.text + '</div>').join('') || '<span style="color:#94a3b8;">No messages</span>';
         }
 
         function toggleSidebar(forceState = null) {
