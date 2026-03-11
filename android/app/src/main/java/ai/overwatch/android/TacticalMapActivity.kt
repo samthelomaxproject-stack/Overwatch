@@ -30,17 +30,27 @@ import com.meta.wearable.dat.camera.types.VideoFrame
 import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
+import com.meta.wearable.dat.core.types.Permission
+import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.core.types.RegistrationState
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 class TacticalMapActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private val wearablesPermissionLauncher = registerForActivityResult(Wearables.RequestPermissionContract()) { result ->
+        val status = result.getOrDefault(PermissionStatus.Denied)
+        metaCameraPermissionStatus = status.name
+    }
     private var metaStreamSession: StreamSession? = null
     private var metaStreamJob: Job? = null
     @Volatile private var metaLatestFrameBase64: String = ""
     @Volatile private var metaBoundEntityUid: String = ""
+    @Volatile private var metaRegistrationStatus: String = "UNKNOWN"
+    @Volatile private var metaCameraPermissionStatus: String = "UNKNOWN"
 
     inner class Bridge {
         @JavascriptInterface
@@ -79,6 +89,26 @@ class TacticalMapActivity : AppCompatActivity() {
         fun getMetaFrameBase64(entityUid: String): String {
             if (entityUid != metaBoundEntityUid) return ""
             return metaLatestFrameBase64
+        }
+
+        @JavascriptInterface
+        fun activateGlasses() {
+            runCatching {
+                Wearables.startRegistration(this@TacticalMapActivity)
+            }
+        }
+
+        @JavascriptInterface
+        fun requestGlassesCameraPermission() {
+            runCatching {
+                wearablesPermissionLauncher.launch(Permission.CAMERA)
+            }
+        }
+
+        @JavascriptInterface
+        fun getGlassesStatusJson(): String {
+            val streaming = if (metaStreamSession != null) "STREAMING" else "IDLE"
+            return "{\"registration\":\"$metaRegistrationStatus\",\"camera_permission\":\"$metaCameraPermissionStatus\",\"stream\":\"$streaming\"}"
         }
     }
 
@@ -121,6 +151,21 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
         webView.addJavascriptInterface(Bridge(), "AndroidBridge")
+
+        runCatching { Wearables.initialize(this) }
+        lifecycleScope.launch {
+            runCatching {
+                Wearables.registrationState.collect { st ->
+                    metaRegistrationStatus = when (st) {
+                        is RegistrationState.Registered -> "REGISTERED"
+                        is RegistrationState.Registering -> "REGISTERING"
+                        is RegistrationState.Unregistered -> "UNREGISTERED"
+                        is RegistrationState.Unregistering -> "UNREGISTERING"
+                        else -> st::class.java.simpleName
+                    }
+                }
+            }
+        }
 
         val html = tacticalHtml(callsign, baseUrl, pliMode, pullEntities, pullHeat, pullCams, pullSat, initLat, initLon)
         runCatching { webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
@@ -551,6 +596,9 @@ class TacticalMapActivity : AppCompatActivity() {
             <button class="sb-btn" onclick="focusOwn()">Focus EUD</button>
             <button class="sb-btn" onclick="toggle3D()">Toggle 3D SAT</button>
             <button id="northLockBtn" class="sb-btn" onclick="toggleNorthLock()">North Lock: OFF</button>
+            <button class="sb-btn" onclick="activateGlasses()">Activate Glasses</button>
+            <button class="sb-btn" onclick="grantGlassesCamera()">Grant Glasses Camera</button>
+            <div id="glassesStatus" style="font-size:11px;color:#94a3b8;margin-top:4px;">Glasses: unknown</div>
             <button class="sb-btn" onclick="reconnectHub()">Reconnect</button>
         </div>
         
@@ -835,6 +883,34 @@ class TacticalMapActivity : AppCompatActivity() {
             } else {
                 window.open(currentFeedUrl, '_blank');
             }
+        }
+
+        function activateGlasses() {
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.activateGlasses === 'function') {
+                    window.AndroidBridge.activateGlasses();
+                    document.getElementById('status').textContent = 'Starting glasses activation...';
+                }
+            } catch (_) {}
+        }
+
+        function grantGlassesCamera() {
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.requestGlassesCameraPermission === 'function') {
+                    window.AndroidBridge.requestGlassesCameraPermission();
+                    document.getElementById('status').textContent = 'Requesting glasses camera permission...';
+                }
+            } catch (_) {}
+        }
+
+        function refreshGlassesStatus() {
+            try {
+                if (!window.AndroidBridge || typeof window.AndroidBridge.getGlassesStatusJson !== 'function') return;
+                const js = window.AndroidBridge.getGlassesStatusJson();
+                const st = JSON.parse(js || '{}');
+                const el = document.getElementById('glassesStatus');
+                if (el) el.textContent = 'Glasses: ' + (st.registration || 'UNKNOWN') + ' • Cam:' + (st.camera_permission || 'UNKNOWN') + ' • ' + (st.stream || 'IDLE');
+            } catch (_) {}
         }
 
         function upsertCameraBatch(cams, source='unknown') {
@@ -2183,10 +2259,12 @@ class TacticalMapActivity : AppCompatActivity() {
         setInterval(pollAdsb, 5000);
         setInterval(pollLocalSatcom, 15000);
         setInterval(syncEntityFeedsFromHub, 10000);
+        setInterval(refreshGlassesStatus, 1500);
         pollCOP();
         pollAdsb();
         pollLocalSatcom();
         syncEntityFeedsFromHub();
+        refreshGlassesStatus();
         updateSatDiag();
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
