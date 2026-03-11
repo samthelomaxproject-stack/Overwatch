@@ -478,11 +478,10 @@ class TacticalMapActivity : AppCompatActivity() {
             <div id="entityList" class="entity-list">No entities tracked</div>
             <div id="entityDetail" class="sub-menu" style="margin-top:8px;">Select an entity for details.</div>
             <div class="sub-menu" style="margin-top:8px;">
-                <div class="sb-label">Entity Live Feed URL</div>
-                <input id="entityFeedUrl" class="sb-input" placeholder="https://..." />
+                <div class="sb-label">Entity Live Feed</div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <button class="sb-btn" onclick="saveEntityFeed()">Save Feed</button>
                     <button class="sb-btn" onclick="bindLocalGlasses()">Bind Local Glasses</button>
+                    <button class="sb-btn" onclick="watchEntityFeed()">Watch Live</button>
                     <button class="sb-btn" onclick="clearEntityFeed()">Clear Feed</button>
                 </div>
             </div>
@@ -1961,16 +1960,6 @@ class TacticalMapActivity : AppCompatActivity() {
             showEntityDetail(e.uid);
         }
 
-        async function saveEntityFeed() {
-            if (!selectedEntityUid) return;
-            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
-            if (!e) return;
-            const url = (document.getElementById('entityFeedUrl').value || '').trim();
-            if (!url) return;
-            await upsertEntityFeed(e, url);
-            document.getElementById('status').textContent = 'Saved live feed for ' + (e.callsign || e.uid);
-        }
-
         async function bindLocalGlasses() {
             if (!selectedEntityUid) return;
             const e = trackedEntities.find(x => x.uid === selectedEntityUid);
@@ -1978,9 +1967,20 @@ class TacticalMapActivity : AppCompatActivity() {
             // local same-device default stream endpoint (Meta dev-mode binding target)
             const localUrl = 'http://127.0.0.1:8789/api/meta/stream/' + encodeURIComponent(e.uid);
             await upsertEntityFeed(e, localUrl);
-            const input = document.getElementById('entityFeedUrl');
-            if (input) input.value = localUrl;
             document.getElementById('status').textContent = 'Bound local glasses stream to ' + (e.callsign || e.uid);
+            openCameraFeed(localUrl);
+        }
+
+        function watchEntityFeed() {
+            if (!selectedEntityUid) return;
+            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
+            if (!e) return;
+            const feed = getEntityFeedUrl(e);
+            if (!feed) {
+                document.getElementById('status').textContent = 'No live feed linked for ' + (e.callsign || e.uid);
+                return;
+            }
+            openCameraFeed(feed);
         }
 
         async function clearEntityFeed() {
@@ -2014,8 +2014,6 @@ class TacticalMapActivity : AppCompatActivity() {
                 + '<div>Affiliation: ' + (e.affiliation || 'unknown') + '</div>'
                 + '<div>Live Feed: ' + (feed ? 'Linked' : 'Not linked') + '</div>'
                 + (feed ? ('<button class="sb-btn" onclick="openCameraFeed(\'' + String(feed).replace(/'/g, "\\'") + '\')">Watch Live</button>') : '');
-            const input = document.getElementById('entityFeedUrl');
-            if (input) input.value = feed || '';
         }
 
         function focusEntity(uid) {
