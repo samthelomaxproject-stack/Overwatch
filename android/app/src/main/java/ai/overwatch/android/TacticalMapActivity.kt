@@ -419,6 +419,12 @@ class TacticalMapActivity : AppCompatActivity() {
                 <label><input type="checkbox" data-sat-group value="starlink" checked onchange="applySatGroups()" /> Starlink</label>
                 <label><input type="checkbox" data-sat-group value="military" onchange="applySatGroups()" /> Military</label>
                 <label><input type="checkbox" data-sat-group value="active" onchange="applySatGroups()" /> Active</label>
+                <div style="margin-top:6px;display:flex;gap:6px;align-items:center;">
+                    <span style="font-size:11px;color:#94a3b8;">Max</span>
+                    <input id="satMaxInput" class="sb-input" type="number" min="20" max="500" step="10" style="max-width:96px;" />
+                    <button class="sb-btn" style="width:auto;margin:0;" onclick="applySatMax()">Apply</button>
+                </div>
+                <button class="sb-btn" style="margin-top:8px;" onclick="pollLocalSatcom(true)">Refresh SAT</button>
                 <button class="sb-btn" style="margin-top:8px;" onclick="testCelestrakConnection()">Test CelesTrak</button>
                 <div id="satDiag" style="font-size:11px;color:#94a3b8;margin-top:6px;">SAT link: unknown</div>
             </div>
@@ -501,6 +507,10 @@ class TacticalMapActivity : AppCompatActivity() {
             } catch (_) { return ['stations','weather','starlink']; }
         })();
         let satLastDiag = { ok: false, group: '-', count: 0, at: 0, err: '' };
+        let satMaxMarkers = (() => {
+            const n = parseInt(localStorage.getItem('sat:maxMarkers') || '180', 10);
+            return Number.isFinite(n) ? Math.max(20, Math.min(500, n)) : 180;
+        })();
         let deltaCamCache = {};
         let deltaSatCache = {};
         
@@ -591,6 +601,8 @@ class TacticalMapActivity : AppCompatActivity() {
         document.querySelectorAll('input[data-sat-group]').forEach(chk => {
             chk.checked = satSelectedGroups.includes(chk.value);
         });
+        const satMaxInput = document.getElementById('satMaxInput');
+        if (satMaxInput) satMaxInput.value = String(satMaxMarkers);
 
         function ensureCesiumViewer() {
             if (cesiumViewer || !window.Cesium) return;
@@ -1585,7 +1597,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 const localSats = Array.from(dedup.values());
 
                 const out = [];
-                localSats.slice(0, 180).forEach(s => {
+                localSats.slice(0, satMaxMarkers).forEach(s => {
                     const p = satSubpointFromTle(s);
                     if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
                     out.push({ id: s.id, name: s.name, norad: s.norad, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
@@ -1607,6 +1619,14 @@ class TacticalMapActivity : AppCompatActivity() {
                 renderSatellites([]);
                 return;
             }
+            pollLocalSatcom(true);
+        }
+
+        function applySatMax() {
+            const el = document.getElementById('satMaxInput');
+            const n = parseInt(el?.value || '180', 10);
+            satMaxMarkers = Number.isFinite(n) ? Math.max(20, Math.min(500, n)) : 180;
+            localStorage.setItem('sat:maxMarkers', String(satMaxMarkers));
             pollLocalSatcom(true);
         }
 
