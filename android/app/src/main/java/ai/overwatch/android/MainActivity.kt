@@ -25,7 +25,9 @@ class MainActivity : AppCompatActivity() {
     private fun requestPermissionsIfNeededAndLaunch() {
         val needed = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.BLUETOOTH_CONNECT
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             needed += Manifest.permission.NEARBY_WIFI_DEVICES

@@ -8,6 +8,10 @@ import android.location.Location
 import android.net.Uri
 import android.location.LocationManager
 import android.os.Bundle
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.util.Base64
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -15,13 +19,28 @@ import android.webkit.WebView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.meta.wearable.dat.camera.StreamSession
+import com.meta.wearable.dat.camera.startStreamSession
+import com.meta.wearable.dat.camera.types.StreamConfiguration
+import com.meta.wearable.dat.camera.types.VideoFrame
+import com.meta.wearable.dat.camera.types.VideoQuality
+import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 class TacticalMapActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private var metaStreamSession: StreamSession? = null
+    private var metaStreamJob: Job? = null
+    @Volatile private var metaLatestFrameBase64: String = ""
+    @Volatile private var metaBoundEntityUid: String = ""
 
     inner class Bridge {
         @JavascriptInterface
@@ -49,6 +68,17 @@ class TacticalMapActivity : AppCompatActivity() {
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(i)
             }
+        }
+
+        @JavascriptInterface
+        fun bindLocalGlasses(entityUid: String): Boolean {
+            return startMetaLocalStream(entityUid)
+        }
+
+        @JavascriptInterface
+        fun getMetaFrameBase64(entityUid: String): String {
+            if (entityUid != metaBoundEntityUid) return ""
+            return metaLatestFrameBase64
         }
     }
 
@@ -95,6 +125,56 @@ class TacticalMapActivity : AppCompatActivity() {
         val html = tacticalHtml(callsign, baseUrl, pliMode, pullEntities, pullHeat, pullCams, pullSat, initLat, initLon)
         runCatching { webView.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null) }
             .onFailure { Toast.makeText(this, "Failed to open tactical map: ${it.message}", Toast.LENGTH_LONG).show() }
+    }
+
+    private fun startMetaLocalStream(entityUid: String): Boolean {
+        return runCatching {
+            metaBoundEntityUid = entityUid
+            if (metaStreamSession != null) return true
+
+            Wearables.initialize(this)
+            val selector = AutoDeviceSelector()
+            val session = Wearables.startStreamSession(
+                applicationContext,
+                selector,
+                StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = 24),
+            )
+            metaStreamSession = session
+            metaStreamJob?.cancel()
+            metaStreamJob = lifecycleScope.launch {
+                session.videoStream.collect { frame ->
+                    metaLatestFrameBase64 = encodeVideoFrameToJpegBase64(frame)
+                }
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun encodeVideoFrameToJpegBase64(videoFrame: VideoFrame): String {
+        val buffer = videoFrame.buffer
+        val dataSize = buffer.remaining()
+        val byteArray = ByteArray(dataSize)
+        val originalPosition = buffer.position()
+        buffer.get(byteArray)
+        buffer.position(originalPosition)
+
+        val nv21 = convertI420toNV21(byteArray, videoFrame.width, videoFrame.height)
+        val image = YuvImage(nv21, ImageFormat.NV21, videoFrame.width, videoFrame.height, null)
+        val out = ByteArrayOutputStream()
+        image.compressToJpeg(Rect(0, 0, videoFrame.width, videoFrame.height), 65, out)
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }
+
+    private fun convertI420toNV21(input: ByteArray, width: Int, height: Int): ByteArray {
+        val output = ByteArray(input.size)
+        val size = width * height
+        val quarter = size / 4
+        input.copyInto(output, 0, 0, size)
+        for (n in 0 until quarter) {
+            output[size + n * 2] = input[size + quarter + n]
+            output[size + n * 2 + 1] = input[size + n]
+        }
+        return output
     }
 
     private fun normalizeHubBase(hubUrl: String): String {
@@ -409,6 +489,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 </div>
             </div>
             <iframe id="feedFrame" class="feed-frame" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>
+            <img id="metaFeedImage" class="feed-frame" style="display:none;object-fit:contain;" />
         </div>
     </div>
     <div class="hud">
@@ -703,26 +784,52 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         let currentFeedUrl = '';
+        let metaFeedTimer = null;
         function openCameraFeed(url) {
             if (!url) return;
             currentFeedUrl = url;
             const modal = document.getElementById('feedModal');
             const frame = document.getElementById('feedFrame');
+            const img = document.getElementById('metaFeedImage');
             const title = document.getElementById('feedTitle');
             if (title) title.textContent = 'Camera Feed • ' + url;
-            if (frame) frame.src = url;
+
+            if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
+
+            if (String(url).startsWith('meta://')) {
+                const uid = String(url).replace('meta://', '');
+                if (frame) { frame.style.display = 'none'; frame.src = 'about:blank'; }
+                if (img) img.style.display = 'block';
+                metaFeedTimer = setInterval(() => {
+                    try {
+                        if (!window.AndroidBridge || typeof window.AndroidBridge.getMetaFrameBase64 !== 'function') return;
+                        const b64 = window.AndroidBridge.getMetaFrameBase64(uid);
+                        if (b64 && img) img.src = 'data:image/jpeg;base64,' + b64;
+                    } catch (_) {}
+                }, 180);
+            } else {
+                if (img) { img.style.display = 'none'; img.src = ''; }
+                if (frame) { frame.style.display = 'block'; frame.src = url; }
+            }
             if (modal) modal.classList.add('open');
         }
 
         function closeCameraFeed() {
             const modal = document.getElementById('feedModal');
             const frame = document.getElementById('feedFrame');
+            const img = document.getElementById('metaFeedImage');
+            if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
             if (frame) frame.src = 'about:blank';
+            if (img) img.src = '';
             if (modal) modal.classList.remove('open');
         }
 
         function openCameraFeedExternal() {
             if (!currentFeedUrl) return;
+            if (String(currentFeedUrl).startsWith('meta://')) {
+                document.getElementById('status').textContent = 'Local Meta feed is in-app only';
+                return;
+            }
             if (window.AndroidBridge && typeof window.AndroidBridge.openExternalUrl === 'function') {
                 window.AndroidBridge.openExternalUrl(currentFeedUrl);
             } else {
@@ -1964,8 +2071,17 @@ class TacticalMapActivity : AppCompatActivity() {
             if (!selectedEntityUid) return;
             const e = trackedEntities.find(x => x.uid === selectedEntityUid);
             if (!e) return;
-            // local same-device default stream endpoint (Meta dev-mode binding target)
-            const localUrl = 'http://127.0.0.1:8789/api/meta/stream/' + encodeURIComponent(e.uid);
+            const localUrl = 'meta://' + e.uid;
+            let ok = true;
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.bindLocalGlasses === 'function') {
+                    ok = !!window.AndroidBridge.bindLocalGlasses(e.uid);
+                }
+            } catch (_) { ok = false; }
+            if (!ok) {
+                document.getElementById('status').textContent = 'Meta glasses bind failed';
+                return;
+            }
             await upsertEntityFeed(e, localUrl);
             document.getElementById('status').textContent = 'Bound local glasses stream to ' + (e.callsign || e.uid);
             openCameraFeed(localUrl);
@@ -2081,6 +2197,14 @@ class TacticalMapActivity : AppCompatActivity() {
 </body>
 </html>
 """.trimIndent()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        metaStreamJob?.cancel()
+        metaStreamJob = null
+        metaStreamSession?.close()
+        metaStreamSession = null
     }
 
     private fun enableImmersiveMode() {
