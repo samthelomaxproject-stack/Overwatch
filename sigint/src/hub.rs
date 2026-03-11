@@ -30,6 +30,7 @@
 /// ```
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -783,6 +784,30 @@ pub struct MsgAckReq {
     pub id: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityFeed {
+    pub uid: String,
+    pub callsign: Option<String>,
+    pub feed_url: String,
+    pub updated_by: Option<String>,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityFeedUpsertReq {
+    pub uid: String,
+    pub callsign: Option<String>,
+    pub feed_url: String,
+    pub updated_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EntityFeedDeleteReq {
+    pub uid: String,
+    pub callsign: Option<String>,
+    pub updated_by: Option<String>,
+}
+
 /// Query node statuses from hub DB for debug/monitoring.
 pub fn get_node_statuses(db_path: &str, stale_after_secs: u64) -> Result<Vec<NodeStatus>, Error> {
     let conn = Connection::open(db_path)?;
@@ -839,13 +864,14 @@ impl Default for HubConfig {
 /// Shared hub state across request handler threads.
 struct HubState {
     db: HubDb,
+    entity_feeds: HashMap<String, EntityFeed>,
 }
 
 /// Start the hub API server (blocking).
 /// Spawns one thread per connection.
 pub fn run_hub(config: HubConfig) -> Result<(), Error> {
     let db = HubDb::open(&config.db_path)?;
-    let state = Arc::new(Mutex::new(HubState { db }));
+    let state = Arc::new(Mutex::new(HubState { db, entity_feeds: HashMap::new() }));
 
     let listener = TcpListener::bind(&config.bind_addr)
         .map_err(|e| Error::Other(format!("Failed to bind {}: {e}", config.bind_addr)))?;
@@ -962,6 +988,64 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             match s.db.get_pli_points(max_age) {
                 Ok(points) => (200, serde_json::to_string(&points).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
+        }
+
+        ("GET", "/api/entity_feeds") => {
+            let s = state.lock().unwrap();
+            let feeds: Vec<EntityFeed> = s.entity_feeds.values().cloned().collect();
+            (200, serde_json::json!({"feeds": feeds}).to_string())
+        }
+
+        ("POST", "/api/entity_feeds/upsert") => {
+            let mut buf = vec![0u8; content_length.min(256_000)];
+            use std::io::Read;
+            if let Err(e) = reader.read_exact(&mut buf) {
+                (400, format!(r#"{{"error":"bad body: {e}"}}"#))
+            } else {
+                match serde_json::from_slice::<EntityFeedUpsertReq>(&buf) {
+                    Ok(req) => {
+                        if req.uid.trim().is_empty() || req.feed_url.trim().is_empty() {
+                            (400, r#"{"error":"uid and feed_url required"}"#.to_string())
+                        } else {
+                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                            let feed = EntityFeed {
+                                uid: req.uid.trim().to_string(),
+                                callsign: req.callsign.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                                feed_url: req.feed_url.trim().to_string(),
+                                updated_by: req.updated_by.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                                updated_at: now,
+                            };
+                            let mut s = state.lock().unwrap();
+                            s.entity_feeds.insert(feed.uid.clone(), feed.clone());
+                            if let Some(cs) = &feed.callsign {
+                                s.entity_feeds.insert(cs.clone(), feed.clone());
+                            }
+                            (200, serde_json::json!({"ok": true}).to_string())
+                        }
+                    }
+                    Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
+                }
+            }
+        }
+
+        ("POST", "/api/entity_feeds/delete") => {
+            let mut buf = vec![0u8; content_length.min(128_000)];
+            use std::io::Read;
+            if let Err(e) = reader.read_exact(&mut buf) {
+                (400, format!(r#"{{"error":"bad body: {e}"}}"#))
+            } else {
+                match serde_json::from_slice::<EntityFeedDeleteReq>(&buf) {
+                    Ok(req) => {
+                        let mut s = state.lock().unwrap();
+                        s.entity_feeds.remove(req.uid.trim());
+                        if let Some(cs) = req.callsign.as_ref() {
+                            s.entity_feeds.remove(cs.trim());
+                        }
+                        (200, serde_json::json!({"ok": true}).to_string())
+                    }
+                    Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
+                }
             }
         }
 
