@@ -1927,7 +1927,25 @@ class TacticalMapActivity : AppCompatActivity() {
             return entityFeedMap[entity.uid] || entityFeedMap[entity.callsign] || '';
         }
 
-        function saveEntityFeed() {
+        async function syncEntityFeedsFromHub() {
+            try {
+                const resp = await fetch(currentHub + 'api/entity_feeds');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                const rows = Array.isArray(data?.feeds) ? data.feeds : (Array.isArray(data) ? data : []);
+                rows.forEach(r => {
+                    const u = String(r.uid || '').trim();
+                    const c = String(r.callsign || '').trim();
+                    const f = String(r.feed_url || r.url || '').trim();
+                    if (!f) return;
+                    if (u) entityFeedMap[u] = f;
+                    if (c) entityFeedMap[c] = f;
+                });
+                localStorage.setItem('eud:entity_feeds', JSON.stringify(entityFeedMap));
+            } catch (_) {}
+        }
+
+        async function saveEntityFeed() {
             if (!selectedEntityUid) return;
             const e = trackedEntities.find(x => x.uid === selectedEntityUid);
             if (!e) return;
@@ -1936,17 +1954,31 @@ class TacticalMapActivity : AppCompatActivity() {
             entityFeedMap[e.uid] = url;
             entityFeedMap[e.callsign] = url;
             localStorage.setItem('eud:entity_feeds', JSON.stringify(entityFeedMap));
+            try {
+                await fetch(currentHub + 'api/entity_feeds/upsert', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid: e.uid, callsign: e.callsign, feed_url: url, updated_by: OWN_CALLSIGN })
+                });
+            } catch (_) {}
             showEntityDetail(e.uid);
             document.getElementById('status').textContent = 'Saved live feed for ' + (e.callsign || e.uid);
         }
 
-        function clearEntityFeed() {
+        async function clearEntityFeed() {
             if (!selectedEntityUid) return;
             const e = trackedEntities.find(x => x.uid === selectedEntityUid);
             if (!e) return;
             delete entityFeedMap[e.uid];
             delete entityFeedMap[e.callsign];
             localStorage.setItem('eud:entity_feeds', JSON.stringify(entityFeedMap));
+            try {
+                await fetch(currentHub + 'api/entity_feeds/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uid: e.uid, callsign: e.callsign, updated_by: OWN_CALLSIGN })
+                });
+            } catch (_) {}
             showEntityDetail(e.uid);
         }
 
@@ -2018,9 +2050,11 @@ class TacticalMapActivity : AppCompatActivity() {
         setInterval(pollCOP, 5000);
         setInterval(pollAdsb, 5000);
         setInterval(pollLocalSatcom, 15000);
+        setInterval(syncEntityFeedsFromHub, 10000);
         pollCOP();
         pollAdsb();
         pollLocalSatcom();
+        syncEntityFeedsFromHub();
         updateSatDiag();
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
