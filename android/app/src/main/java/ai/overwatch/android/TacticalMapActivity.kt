@@ -477,6 +477,14 @@ class TacticalMapActivity : AppCompatActivity() {
             <div class="sb-label">Tracked Entities</div>
             <div id="entityList" class="entity-list">No entities tracked</div>
             <div id="entityDetail" class="sub-menu" style="margin-top:8px;">Select an entity for details.</div>
+            <div class="sub-menu" style="margin-top:8px;">
+                <div class="sb-label">Entity Live Feed URL</div>
+                <input id="entityFeedUrl" class="sb-input" placeholder="https://..." />
+                <div style="display:flex;gap:6px;">
+                    <button class="sb-btn" onclick="saveEntityFeed()">Save Feed</button>
+                    <button class="sb-btn" onclick="clearEntityFeed()">Clear Feed</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -545,6 +553,11 @@ class TacticalMapActivity : AppCompatActivity() {
         let satMaxMarkers = (() => {
             const n = parseInt(localStorage.getItem('sat:maxMarkers') || '180', 10);
             return Number.isFinite(n) ? Math.max(20, Math.min(500, n)) : 180;
+        })();
+        let selectedEntityUid = null;
+        let entityFeedMap = (() => {
+            try { return JSON.parse(localStorage.getItem('eud:entity_feeds') || '{}') || {}; }
+            catch (_) { return {}; }
         })();
         let deltaCamCache = {};
         let deltaSatCache = {};
@@ -930,15 +943,25 @@ class TacticalMapActivity : AppCompatActivity() {
                 entityMarkers[entity.uid] = L.marker([entity.lat, entity.lon], { icon }).addTo(map);
             }
             
+            const entityFeed = getEntityFeedUrl(entity);
+            const popupHtml = '<b>' + (entity.callsign || entity.uid) + '</b><br>'
+                + (entity.type || 'Unknown') + '<br>'
+                + entity.lat.toFixed(5) + ', ' + entity.lon.toFixed(5)
+                + (entityFeed ? ('<br><button class="sb-btn" style="width:auto;padding:4px 8px;" onclick="openCameraFeed(\'' + String(entityFeed).replace(/'/g, "\\'") + '\')">Live Video</button>') : '');
+
             entityMarkers[entity.uid]
-                .bindPopup('<b>' + (entity.callsign || entity.uid) + '</b><br>' + 
-                          (entity.type || 'Unknown') + '<br>' + 
-                          entity.lat.toFixed(5) + ', ' + entity.lon.toFixed(5))
+                .bindPopup(popupHtml)
                 .bindTooltip(entity.callsign || entity.uid, { 
                     permanent: true, 
                     direction: 'top', 
                     offset: [0, -16] 
                 });
+
+            entityMarkers[entity.uid].off('mouseover');
+            entityMarkers[entity.uid].on('mouseover', () => {
+                const f = getEntityFeedUrl(entity);
+                if (f) openCameraFeed(f);
+            });
             
             // Force marker visible
             if (!map.hasLayer(entityMarkers[entity.uid])) {
@@ -1899,16 +1922,50 @@ class TacticalMapActivity : AppCompatActivity() {
             }
         }
         
+        function getEntityFeedUrl(entity) {
+            if (!entity) return '';
+            return entityFeedMap[entity.uid] || entityFeedMap[entity.callsign] || '';
+        }
+
+        function saveEntityFeed() {
+            if (!selectedEntityUid) return;
+            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
+            if (!e) return;
+            const url = (document.getElementById('entityFeedUrl').value || '').trim();
+            if (!url) return;
+            entityFeedMap[e.uid] = url;
+            entityFeedMap[e.callsign] = url;
+            localStorage.setItem('eud:entity_feeds', JSON.stringify(entityFeedMap));
+            showEntityDetail(e.uid);
+            document.getElementById('status').textContent = 'Saved live feed for ' + (e.callsign || e.uid);
+        }
+
+        function clearEntityFeed() {
+            if (!selectedEntityUid) return;
+            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
+            if (!e) return;
+            delete entityFeedMap[e.uid];
+            delete entityFeedMap[e.callsign];
+            localStorage.setItem('eud:entity_feeds', JSON.stringify(entityFeedMap));
+            showEntityDetail(e.uid);
+        }
+
         function showEntityDetail(uid) {
+            selectedEntityUid = uid;
             const e = trackedEntities.find(x => x.uid === uid);
             const box = document.getElementById('entityDetail');
             if (!box) return;
             if (!e) { box.textContent = 'Select an entity for details.'; return; }
+            const feed = getEntityFeedUrl(e);
             box.innerHTML = '<div><b>' + (e.callsign || e.uid) + '</b></div>'
                 + '<div>Type: ' + (e.type || 'Unknown') + '</div>'
                 + '<div>UID: ' + (e.uid || '-') + '</div>'
                 + '<div>Lat/Lon: ' + Number(e.lat || 0).toFixed(5) + ', ' + Number(e.lon || 0).toFixed(5) + '</div>'
-                + '<div>Affiliation: ' + (e.affiliation || 'unknown') + '</div>';
+                + '<div>Affiliation: ' + (e.affiliation || 'unknown') + '</div>'
+                + '<div>Live Feed: ' + (feed ? 'Linked' : 'Not linked') + '</div>'
+                + (feed ? ('<button class="sb-btn" onclick="openCameraFeed(\'' + String(feed).replace(/'/g, "\\'") + '\')">Watch Live</button>') : '');
+            const input = document.getElementById('entityFeedUrl');
+            if (input) input.value = feed || '';
         }
 
         function focusEntity(uid) {
