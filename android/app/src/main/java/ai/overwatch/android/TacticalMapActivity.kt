@@ -480,8 +480,9 @@ class TacticalMapActivity : AppCompatActivity() {
             <div class="sub-menu" style="margin-top:8px;">
                 <div class="sb-label">Entity Live Feed URL</div>
                 <input id="entityFeedUrl" class="sb-input" placeholder="https://..." />
-                <div style="display:flex;gap:6px;">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
                     <button class="sb-btn" onclick="saveEntityFeed()">Save Feed</button>
+                    <button class="sb-btn" onclick="bindLocalGlasses()">Bind Local Glasses</button>
                     <button class="sb-btn" onclick="clearEntityFeed()">Clear Feed</button>
                 </div>
             </div>
@@ -1945,12 +1946,8 @@ class TacticalMapActivity : AppCompatActivity() {
             } catch (_) {}
         }
 
-        async function saveEntityFeed() {
-            if (!selectedEntityUid) return;
-            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
-            if (!e) return;
-            const url = (document.getElementById('entityFeedUrl').value || '').trim();
-            if (!url) return;
+        async function upsertEntityFeed(e, url) {
+            if (!e || !url) return;
             entityFeedMap[e.uid] = url;
             entityFeedMap[e.callsign] = url;
             localStorage.setItem('eud:entity_feeds', JSON.stringify(entityFeedMap));
@@ -1962,7 +1959,28 @@ class TacticalMapActivity : AppCompatActivity() {
                 });
             } catch (_) {}
             showEntityDetail(e.uid);
+        }
+
+        async function saveEntityFeed() {
+            if (!selectedEntityUid) return;
+            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
+            if (!e) return;
+            const url = (document.getElementById('entityFeedUrl').value || '').trim();
+            if (!url) return;
+            await upsertEntityFeed(e, url);
             document.getElementById('status').textContent = 'Saved live feed for ' + (e.callsign || e.uid);
+        }
+
+        async function bindLocalGlasses() {
+            if (!selectedEntityUid) return;
+            const e = trackedEntities.find(x => x.uid === selectedEntityUid);
+            if (!e) return;
+            // local same-device default stream endpoint (Meta dev-mode binding target)
+            const localUrl = 'http://127.0.0.1:8789/api/meta/stream/' + encodeURIComponent(e.uid);
+            await upsertEntityFeed(e, localUrl);
+            const input = document.getElementById('entityFeedUrl');
+            if (input) input.value = localUrl;
+            document.getElementById('status').textContent = 'Bound local glasses stream to ' + (e.callsign || e.uid);
         }
 
         async function clearEntityFeed() {
