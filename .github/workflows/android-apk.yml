@@ -26,8 +26,25 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Prepare DAT credentials
+        working-directory: android
+        env:
+          META_PACKAGES_TOKEN: ${{ secrets.META_PACKAGES_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+        run: |
+          if [ -z "$META_PACKAGES_TOKEN" ]; then
+            echo "Missing repo secret: META_PACKAGES_TOKEN (PAT with read:packages)" >&2
+            exit 1
+          fi
+          cat > local.properties <<EOF
+          github_token=$META_PACKAGES_TOKEN
+          meta_app_id=$META_APP_ID
+          EOF
+      
       - name: Build debug APK
         working-directory: android
+        env:
+          GITHUB_TOKEN: ${{ secrets.META_PACKAGES_TOKEN }}
         run: gradle :app:assembleDebug
 
       - name: Upload APK artifact
