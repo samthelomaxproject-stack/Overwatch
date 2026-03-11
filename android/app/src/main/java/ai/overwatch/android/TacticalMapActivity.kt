@@ -259,6 +259,29 @@ class TacticalMapActivity : AppCompatActivity() {
         .msg-input { width:100%; box-sizing:border-box; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:6px; }
         .msg-row { display:flex; gap:6px; }
         .msg-chip { padding:3px 6px; border:1px solid #334155; border-radius:999px; cursor:pointer; margin:2px; display:inline-block; color:#e2e8f0; }
+        .feed-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(2,6,23,0.86);
+            z-index: 10020;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+        }
+        .feed-modal.open { display: flex; }
+        .feed-card {
+            width: min(96vw, 1200px);
+            height: min(86vh, 800px);
+            background: #020617;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .feed-header { display:flex; justify-content:space-between; align-items:center; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; }
+        .feed-frame { width:100%; height:100%; border:0; background:#000; }
         
         /* Sidebar */
         .sidebar {
@@ -375,6 +398,18 @@ class TacticalMapActivity : AppCompatActivity() {
         <div style="margin-top:6px;" class="sb-label">To: <span id="msgTarget">(none)</span></div>
         <div id="msgHistory" class="msg-list" style="max-height:90px;"></div>
         <input id="msgText" class="msg-input" placeholder="Type message and press Enter" onkeydown="if(event.key==='Enter'){ sendMessage(); event.preventDefault(); }" />
+    </div>
+    <div id="feedModal" class="feed-modal" onclick="if(event.target.id==='feedModal') closeCameraFeed()">
+        <div class="feed-card">
+            <div class="feed-header">
+                <span id="feedTitle">Camera Feed</span>
+                <div style="display:flex;gap:6px;">
+                    <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="openCameraFeedExternal()">Open External</button>
+                    <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="closeCameraFeed()">Close</button>
+                </div>
+            </div>
+            <iframe id="feedFrame" class="feed-frame" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>
+        </div>
     </div>
     <div class="hud">
         <div class="hud-title">● EUD Tactical Map • $callsign</div>
@@ -654,12 +689,31 @@ class TacticalMapActivity : AppCompatActivity() {
             if (b) b.textContent = 'North Lock: ' + (cesiumNorthLock ? 'ON' : 'OFF');
         }
 
+        let currentFeedUrl = '';
         function openCameraFeed(url) {
             if (!url) return;
+            currentFeedUrl = url;
+            const modal = document.getElementById('feedModal');
+            const frame = document.getElementById('feedFrame');
+            const title = document.getElementById('feedTitle');
+            if (title) title.textContent = 'Camera Feed • ' + url;
+            if (frame) frame.src = url;
+            if (modal) modal.classList.add('open');
+        }
+
+        function closeCameraFeed() {
+            const modal = document.getElementById('feedModal');
+            const frame = document.getElementById('feedFrame');
+            if (frame) frame.src = 'about:blank';
+            if (modal) modal.classList.remove('open');
+        }
+
+        function openCameraFeedExternal() {
+            if (!currentFeedUrl) return;
             if (window.AndroidBridge && typeof window.AndroidBridge.openExternalUrl === 'function') {
-                window.AndroidBridge.openExternalUrl(url);
+                window.AndroidBridge.openExternalUrl(currentFeedUrl);
             } else {
-                window.open(url, '_blank');
+                window.open(currentFeedUrl, '_blank');
             }
         }
 
