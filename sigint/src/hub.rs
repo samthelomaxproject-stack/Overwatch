@@ -28,9 +28,9 @@
 ///     device_id TEXT PRIMARY KEY, cursor_ts INTEGER DEFAULT 0
 /// );
 /// ```
+use std::collections::HashMap;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -96,6 +96,15 @@ CREATE TABLE IF NOT EXISTS messages (
     delivered_at       INTEGER,
     read_at            INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS entity_feeds (
+    uid         TEXT PRIMARY KEY,
+    callsign    TEXT,
+    feed_url    TEXT NOT NULL,
+    updated_by  TEXT,
+    updated_at  INTEGER NOT NULL
+);
+
 "#;
 
 // ── Hub DB ────────────────────────────────────────────────────────────────────
@@ -364,8 +373,7 @@ impl HubDb {
         // Build TileUpdate with time-decayed values
         use crate::wire::{TileData, RfAggregate, WifiData, ChannelHotness};
         use crate::sanitize::{decay_factor, RF_DECAY_HALF_LIFE_SECS, WIFI_DECAY_HALF_LIFE_SECS};
-        use std::collections::HashMap;
-
+        
         let mut tile_map: HashMap<(String, u64), TileData> = HashMap::new();
 
         for row in &rows {
@@ -808,6 +816,60 @@ pub struct EntityFeedDeleteReq {
     pub updated_by: Option<String>,
 }
 
+
+impl HubDb {
+    pub fn upsert_entity_feed(&mut self, req: &EntityFeedUpsertReq, now: u64) -> Result<(), Error> {
+        let uid = req.uid.trim();
+        let feed_url = req.feed_url.trim();
+        if uid.is_empty() || feed_url.is_empty() {
+            return Err(Error::Other("uid and feed_url required".into()));
+        }
+        let callsign = req.callsign.clone().unwrap_or_default().trim().to_string();
+        let updated_by = req.updated_by.clone().unwrap_or_default().trim().to_string();
+        self.conn.execute(
+            "INSERT INTO entity_feeds (uid,callsign,feed_url,updated_by,updated_at) VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(uid) DO UPDATE SET callsign=excluded.callsign, feed_url=excluded.feed_url, updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+            params![uid, callsign, feed_url, updated_by, now as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_entity_feed(&mut self, req: &EntityFeedDeleteReq) -> Result<(), Error> {
+        let uid = req.uid.trim();
+        if !uid.is_empty() {
+            self.conn.execute("DELETE FROM entity_feeds WHERE uid=?1", params![uid])?;
+        }
+        if let Some(cs) = req.callsign.as_ref() {
+            let cs = cs.trim();
+            if !cs.is_empty() {
+                self.conn.execute("DELETE FROM entity_feeds WHERE callsign=?1", params![cs])?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn list_entity_feeds(&self) -> Result<Vec<EntityFeed>, Error> {
+        let mut stmt = self.conn.prepare("SELECT uid, COALESCE(callsign,''), feed_url, COALESCE(updated_by,''), updated_at FROM entity_feeds ORDER BY updated_at DESC")?;
+        let rows = stmt.query_map([], |r| {
+            let uid: String = r.get(0)?;
+            let callsign: String = r.get(1)?;
+            let feed_url: String = r.get(2)?;
+            let updated_by: String = r.get(3)?;
+            let updated_at_i: i64 = r.get(4)?;
+            Ok(EntityFeed {
+                uid,
+                callsign: if callsign.trim().is_empty() { None } else { Some(callsign) },
+                feed_url,
+                updated_by: if updated_by.trim().is_empty() { None } else { Some(updated_by) },
+                updated_at: if updated_at_i < 0 { 0 } else { updated_at_i as u64 },
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows { out.push(row?); }
+        Ok(out)
+    }
+}
+
 /// Query node statuses from hub DB for debug/monitoring.
 pub fn get_node_statuses(db_path: &str, stale_after_secs: u64) -> Result<Vec<NodeStatus>, Error> {
     let conn = Connection::open(db_path)?;
@@ -864,14 +926,13 @@ impl Default for HubConfig {
 /// Shared hub state across request handler threads.
 struct HubState {
     db: HubDb,
-    entity_feeds: HashMap<String, EntityFeed>,
 }
 
 /// Start the hub API server (blocking).
 /// Spawns one thread per connection.
 pub fn run_hub(config: HubConfig) -> Result<(), Error> {
     let db = HubDb::open(&config.db_path)?;
-    let state = Arc::new(Mutex::new(HubState { db, entity_feeds: HashMap::new() }));
+    let state = Arc::new(Mutex::new(HubState { db }));
 
     let listener = TcpListener::bind(&config.bind_addr)
         .map_err(|e| Error::Other(format!("Failed to bind {}: {e}", config.bind_addr)))?;
@@ -993,8 +1054,10 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
 
         ("GET", "/api/entity_feeds") => {
             let s = state.lock().unwrap();
-            let feeds: Vec<EntityFeed> = s.entity_feeds.values().cloned().collect();
-            (200, serde_json::json!({"feeds": feeds}).to_string())
+            match s.db.list_entity_feeds() {
+                Ok(feeds) => (200, serde_json::json!({"feeds": feeds}).to_string()),
+                Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
         }
 
         ("POST", "/api/entity_feeds/upsert") => {
@@ -1005,23 +1068,11 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             } else {
                 match serde_json::from_slice::<EntityFeedUpsertReq>(&buf) {
                     Ok(req) => {
-                        if req.uid.trim().is_empty() || req.feed_url.trim().is_empty() {
-                            (400, r#"{"error":"uid and feed_url required"}"#.to_string())
-                        } else {
-                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                            let feed = EntityFeed {
-                                uid: req.uid.trim().to_string(),
-                                callsign: req.callsign.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
-                                feed_url: req.feed_url.trim().to_string(),
-                                updated_by: req.updated_by.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
-                                updated_at: now,
-                            };
-                            let mut s = state.lock().unwrap();
-                            s.entity_feeds.insert(feed.uid.clone(), feed.clone());
-                            if let Some(cs) = &feed.callsign {
-                                s.entity_feeds.insert(cs.clone(), feed.clone());
-                            }
-                            (200, serde_json::json!({"ok": true}).to_string())
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                        let mut s = state.lock().unwrap();
+                        match s.db.upsert_entity_feed(&req, now) {
+                            Ok(_) => (200, serde_json::json!({"ok": true}).to_string()),
+                            Err(e) => (400, format!(r#"{{"error":"{e}"}}"#)),
                         }
                     }
                     Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
@@ -1038,11 +1089,10 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
                 match serde_json::from_slice::<EntityFeedDeleteReq>(&buf) {
                     Ok(req) => {
                         let mut s = state.lock().unwrap();
-                        s.entity_feeds.remove(req.uid.trim());
-                        if let Some(cs) = req.callsign.as_ref() {
-                            s.entity_feeds.remove(cs.trim());
+                        match s.db.delete_entity_feed(&req) {
+                            Ok(_) => (200, serde_json::json!({"ok": true}).to_string()),
+                            Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
                         }
-                        (200, serde_json::json!({"ok": true}).to_string())
                     }
                     Err(e) => (400, format!(r#"{{"error":"bad json: {e}"}}"#)),
                 }
