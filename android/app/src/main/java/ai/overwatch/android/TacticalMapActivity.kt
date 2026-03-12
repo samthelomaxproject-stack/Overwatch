@@ -183,7 +183,14 @@ class TacticalMapActivity : AppCompatActivity() {
     private fun startMetaLocalStream(entityUid: String): Boolean {
         return runCatching {
             metaBoundEntityUid = entityUid
-            if (metaStreamSession != null) return true
+
+            // If a prior stream exists but never produced frames, force a fresh session.
+            if (metaStreamSession != null && metaLatestFrameBase64.isNotEmpty()) return true
+
+            metaStreamJob?.cancel()
+            metaStreamJob = null
+            metaStreamSession = null
+            metaLatestFrameBase64 = ""
 
             Wearables.initialize(this)
             val selector = AutoDeviceSelector()
@@ -193,10 +200,11 @@ class TacticalMapActivity : AppCompatActivity() {
                 StreamConfiguration(videoQuality = VideoQuality.MEDIUM, frameRate = 24),
             )
             metaStreamSession = session
-            metaStreamJob?.cancel()
             metaStreamJob = lifecycleScope.launch {
                 session.videoStream.collect { frame ->
-                    metaLatestFrameBase64 = encodeVideoFrameToJpegBase64(frame)
+                    runCatching {
+                        metaLatestFrameBase64 = encodeVideoFrameToJpegBase64(frame)
+                    }
                 }
             }
             true
