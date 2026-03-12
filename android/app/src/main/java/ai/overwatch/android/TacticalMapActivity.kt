@@ -52,6 +52,7 @@ class TacticalMapActivity : AppCompatActivity() {
     private var metaStreamSession: StreamSession? = null
     private var metaStreamJob: Job? = null
     @Volatile private var metaLatestFrameBase64: String = ""
+    @Volatile private var metaLastFrameTsMs: Long = 0L
     @Volatile private var metaBoundEntityUid: String = ""
     @Volatile private var metaRegistrationStatus: String = "UNKNOWN"
     @Volatile private var metaCameraPermissionStatus: String = "UNKNOWN"
@@ -119,10 +120,17 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun reconnectLocalGlasses(entityUid: String): Boolean {
+            stopMetaLocalStream()
+            return startMetaLocalStream(entityUid)
+        }
+
+        @JavascriptInterface
         fun getGlassesStatusJson(): String {
             val streaming = if (metaStreamSession != null) "STREAMING" else "IDLE"
             val frameReady = if (metaLatestFrameBase64.isNotEmpty()) "YES" else "NO"
-            return "{\"registration\":\"$metaRegistrationStatus\",\"camera_permission\":\"$metaCameraPermissionStatus\",\"stream\":\"$streaming\",\"frame_ready\":\"$frameReady\",\"bound_uid\":\"$metaBoundEntityUid\"}"
+            val frameAgeMs = if (metaLastFrameTsMs > 0) (System.currentTimeMillis() - metaLastFrameTsMs).coerceAtLeast(0L) else -1L
+            return "{\"registration\":\"$metaRegistrationStatus\",\"camera_permission\":\"$metaCameraPermissionStatus\",\"stream\":\"$streaming\",\"frame_ready\":\"$frameReady\",\"frame_age_ms\":$frameAgeMs,\"bound_uid\":\"$metaBoundEntityUid\"}"
         }
     }
 
@@ -189,13 +197,12 @@ class TacticalMapActivity : AppCompatActivity() {
         return runCatching {
             metaBoundEntityUid = entityUid
 
-            // If a prior stream exists but never produced frames, force a fresh session.
-            if (metaStreamSession != null && metaLatestFrameBase64.isNotEmpty()) return true
+            val now = System.currentTimeMillis()
+            val hasRecentFrame = metaLatestFrameBase64.isNotEmpty() && (metaLastFrameTsMs > 0L) && ((now - metaLastFrameTsMs) < 3000L)
+            // Keep existing session only if it is actively producing fresh frames.
+            if (metaStreamSession != null && hasRecentFrame) return true
 
-            metaStreamJob?.cancel()
-            metaStreamJob = null
-            metaStreamSession = null
-            metaLatestFrameBase64 = ""
+            stopMetaLocalStream()
 
             Wearables.initialize(this)
             val selector = AutoDeviceSelector()
@@ -209,6 +216,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 session.videoStream.collect { frame ->
                     runCatching {
                         metaLatestFrameBase64 = encodeVideoFrameToJpegBase64(frame)
+                        metaLastFrameTsMs = System.currentTimeMillis()
                     }
                 }
             }
@@ -223,6 +231,7 @@ class TacticalMapActivity : AppCompatActivity() {
             metaStreamSession?.close()
             metaStreamSession = null
             metaLatestFrameBase64 = ""
+            metaLastFrameTsMs = 0L
             true
         }.getOrDefault(false)
     }
@@ -636,6 +645,7 @@ class TacticalMapActivity : AppCompatActivity() {
             <button id="northLockBtn" class="sb-btn" onclick="toggleNorthLock()">North Lock: OFF</button>
             <button class="sb-btn" onclick="activateGlasses()">Activate Glasses</button>
             <button class="sb-btn" onclick="grantGlassesCamera()">Grant Glasses Camera</button>
+            <button class="sb-btn" onclick="reconnectGlasses()">Reconnect Glasses</button>
             <div id="glassesStatus" style="font-size:11px;color:#94a3b8;margin-top:4px;">Glasses: unknown</div>
             <button class="sb-btn" onclick="reconnectHub()">Reconnect</button>
         </div>
@@ -886,11 +896,22 @@ class TacticalMapActivity : AppCompatActivity() {
                 const uid = String(url).replace('meta://', '');
                 if (frame) { frame.style.display = 'none'; frame.src = 'about:blank'; }
                 if (img) img.style.display = 'block';
+                let misses = 0;
+                let reconnectAttempted = false;
                 metaFeedTimer = setInterval(() => {
                     try {
                         if (!window.AndroidBridge || typeof window.AndroidBridge.getMetaFrameBase64 !== 'function') return;
                         const b64 = window.AndroidBridge.getMetaFrameBase64(uid);
-                        if (b64 && img) img.src = 'data:image/jpeg;base64,' + b64;
+                        if (b64 && img) {
+                            img.src = 'data:image/jpeg;base64,' + b64;
+                            misses = 0;
+                            return;
+                        }
+                        misses += 1;
+                        if (!reconnectAttempted && misses > 12 && window.AndroidBridge && typeof window.AndroidBridge.reconnectLocalGlasses === 'function') {
+                            reconnectAttempted = true;
+                            try { window.AndroidBridge.reconnectLocalGlasses(uid); } catch (_) {}
+                        }
                     } catch (_) {}
                 }, 180);
             } else {
@@ -952,13 +973,29 @@ class TacticalMapActivity : AppCompatActivity() {
             } catch (_) {}
         }
 
+        function reconnectGlasses() {
+            try {
+                if (!selectedEntityUid) {
+                    document.getElementById('status').textContent = 'Select an entity first for glasses reconnect';
+                    return;
+                }
+                if (window.AndroidBridge && typeof window.AndroidBridge.reconnectLocalGlasses === 'function') {
+                    const ok = !!window.AndroidBridge.reconnectLocalGlasses(selectedEntityUid);
+                    document.getElementById('status').textContent = ok ? ('Glasses reconnected to ' + selectedEntityUid) : 'Glasses reconnect failed';
+                }
+                refreshGlassesStatus();
+            } catch (_) {}
+        }
+
         function refreshGlassesStatus() {
             try {
                 if (!window.AndroidBridge || typeof window.AndroidBridge.getGlassesStatusJson !== 'function') return;
                 const js = window.AndroidBridge.getGlassesStatusJson();
                 const st = JSON.parse(js || '{}');
                 const el = document.getElementById('glassesStatus');
-                if (el) el.textContent = 'Glasses: ' + (st.registration || 'UNKNOWN') + ' • Cam:' + (st.camera_permission || 'UNKNOWN') + ' • ' + (st.stream || 'IDLE') + ' • Frame:' + (st.frame_ready || 'NO');
+                const ageMs = Number(st.frame_age_ms || -1);
+                const ageTxt = ageMs >= 0 ? (' (' + Math.round(ageMs/1000) + 's)') : '';
+                if (el) el.textContent = 'Glasses: ' + (st.registration || 'UNKNOWN') + ' • Cam:' + (st.camera_permission || 'UNKNOWN') + ' • ' + (st.stream || 'IDLE') + ' • Frame:' + (st.frame_ready || 'NO') + ageTxt;
             } catch (_) {}
         }
 

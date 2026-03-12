@@ -16,6 +16,7 @@ Built for emergency response, field operations, and off-grid communications.
 - ✅ **Android DAT compatibility updates** — `minSdk` raised to 29, Kotlin plugin upgraded to 2.1.0 for DAT 0.4.0 metadata compatibility
 - ✅ **DAT API surface fixes** — registration/permission status handling updated for current SDK sealed types
 - ✅ **Meta stream reliability fix** — force fresh DAT session when stream reports active but no frames (`Frame:NO`)
+- ✅ **Meta reconnect hardening** — added explicit **Reconnect Glasses** control + auto-reconnect attempt when Watch Live sees repeated frame misses
 - ✅ **Live feed UX update** — feed window now resizable, plus new **Stop Feed** action for camera/glasses sessions
 
 ### What's New in v0.2.2 (2026-02-24–25)
@@ -469,6 +470,19 @@ MIT
 - Forced a **fresh DAT session** when stream exists but no frame has arrived.
 - Added **Stop Feed** action and resizable live-feed window for quicker recovery/testing.
 
+#### 6) Could not reconnect after app restart or glasses power-cycle
+**Symptom:**
+- After app reopen (or glasses off/on), previous link appeared present but no new video arrived.
+
+**Root causes:**
+- Existing session could be retained despite stale frame timestamp.
+- Reconnect path was hub-only; no explicit local glasses reconnect flow.
+
+**Fixes:**
+- Added stale-frame detection (`frame_age_ms`) and only trust active sessions with fresh frames.
+- Added **Reconnect Glasses** UI action to force stop/start local DAT stream for selected entity.
+- Added automatic one-time reconnect attempt during Watch Live when repeated frame polls are empty.
+
 ### ADS-B TCP Bridge — Silent Deadlock (Fixed 2026-02-24)
 
 #### Symptom
@@ -669,6 +683,8 @@ _Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT 
 - ✅ Live feed modal is now **resizable** (camera and glasses feeds)
 - ✅ Added **Stop Feed** button to explicitly stop/clear active live sessions
 - ✅ Added frame readiness indicator in glasses status for easier field troubleshooting
+- ✅ Added `frame_age_ms` freshness telemetry + **Reconnect Glasses** control for post-restart / post-power-cycle recovery
+- ✅ Added auto one-shot reconnect when Watch Live detects repeated empty frame polls
 
 ### v0.2.2 (2026-02-24–25) — ADS-B Live + Full SIGINT Pipeline
 
