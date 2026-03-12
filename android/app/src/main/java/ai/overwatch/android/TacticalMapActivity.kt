@@ -43,7 +43,11 @@ class TacticalMapActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private val wearablesPermissionLauncher = registerForActivityResult(Wearables.RequestPermissionContract()) { result ->
         val status = result.getOrDefault(PermissionStatus.Denied)
-        metaCameraPermissionStatus = status.name
+        metaCameraPermissionStatus = when (status) {
+            is PermissionStatus.Granted -> "GRANTED"
+            is PermissionStatus.Denied -> "DENIED"
+            else -> status::class.java.simpleName ?: "UNKNOWN"
+        }
     }
     private var metaStreamSession: StreamSession? = null
     private var metaStreamJob: Job? = null
@@ -159,9 +163,8 @@ class TacticalMapActivity : AppCompatActivity() {
                     metaRegistrationStatus = when (st) {
                         is RegistrationState.Registered -> "REGISTERED"
                         is RegistrationState.Registering -> "REGISTERING"
-                        is RegistrationState.Unregistered -> "UNREGISTERED"
                         is RegistrationState.Unregistering -> "UNREGISTERING"
-                        else -> st::class.java.simpleName
+                        else -> st::class.java.simpleName ?: "UNKNOWN"
                     }
                 }
             }
