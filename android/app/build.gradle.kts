@@ -9,7 +9,12 @@ val localProperties = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) load(f.inputStream())
 }
-val metaAppId = localProperties.getProperty("meta_app_id") ?: ""
+val metaAppId = localProperties.getProperty("meta_app_id")
+    ?: System.getenv("META_APP_ID")
+    ?: "1460326209084504"
+val metaClientToken = localProperties.getProperty("meta_client_token")
+    ?: System.getenv("META_CLIENT_TOKEN")
+    ?: "AR|1460326209084504|33a314a72066f4e4253315ae722fde16"
 
 android {
     namespace = "ai.overwatch.android"
@@ -24,6 +29,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["META_APP_ID"] = metaAppId
+        manifestPlaceholders["META_CLIENT_TOKEN"] = metaClientToken
     }
 
     buildTypes {

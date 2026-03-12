@@ -23,6 +23,9 @@
         <meta-data
             android:name="com.meta.wearable.mwdat.APPLICATION_ID"
             android:value="${META_APP_ID}" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+            android:value="${META_CLIENT_TOKEN}" />
         <service
             android:name=".CollectorService"
             android:exported="false"
