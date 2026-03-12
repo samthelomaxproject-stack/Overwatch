@@ -8,8 +8,15 @@ Built for emergency response, field operations, and off-grid communications.
 
 ## Status
 
-**Version:** 0.2.2  
-**Status:** Production-ready desktop app — live ADS-B tracking, Meshtastic mesh, full SIGINT RF/Wi-Fi heatmap pipeline (Phases 5.1–5.5 complete)
+**Version:** 0.2.3  
+**Status:** Production-ready desktop app + Android EUD DAT camera streaming updates (Meta glasses local stream path stabilized)
+
+### What's New in v0.2.3 (2026-03-11)
+- ✅ **Android DAT package auth fixed** — GitHub Packages token wiring validated in CI (`META_PACKAGES_TOKEN`)
+- ✅ **Android DAT compatibility updates** — `minSdk` raised to 29, Kotlin plugin upgraded to 2.1.0 for DAT 0.4.0 metadata compatibility
+- ✅ **DAT API surface fixes** — registration/permission status handling updated for current SDK sealed types
+- ✅ **Meta stream reliability fix** — force fresh DAT session when stream reports active but no frames (`Frame:NO`)
+- ✅ **Live feed UX update** — feed window now resizable, plus new **Stop Feed** action for camera/glasses sessions
 
 ### What's New in v0.2.2 (2026-02-24–25)
 - ✅ **ADS-B live tracking** — HackRF/dump1090 integration with real-time aircraft on 2D and 3D maps
@@ -418,6 +425,50 @@ MIT
 
 ## Troubleshooting & Post-Mortems
 
+### Android DAT / Meta Glasses Build + Stream Issues (Fixed 2026-03-11)
+
+#### 1) CI failed to resolve DAT artifacts (401 Unauthorized)
+**Symptom:**
+`Could not GET https://maven.pkg.github.com/facebook/meta-wearables-dat-android/... 401 Unauthorized`
+
+**Root cause:** Missing/invalid GitHub Packages token in repo secrets.
+
+**Fix:** Added `META_PACKAGES_TOKEN` secret and wired it into Android workflow + Gradle credentials path.
+
+#### 2) Manifest merge failed (`minSdkVersion 26` vs DAT camera min 29)
+**Symptom:**
+`uses-sdk:minSdkVersion 26 cannot be smaller than version 29 declared in library com.meta.wearable:mwdat-camera:0.4.0`
+
+**Fix:** Raised Android app `minSdk` to **29**.
+
+#### 3) Kotlin metadata mismatch with DAT 0.4.0
+**Symptom:**
+`Module was compiled with an incompatible version of Kotlin. metadata is 2.1.0, expected 1.9.0`
+
+**Fix:** Upgraded Kotlin Android plugin to **2.1.0** in `android/build.gradle.kts`.
+
+#### 4) DAT API surface changes broke compile
+**Symptoms:**
+- `Unresolved reference 'name'` on `PermissionStatus`
+- `Unresolved reference 'Unregistered'` on `RegistrationState`
+
+**Fix:** Updated status mapping logic to current sealed-type surface and removed obsolete branch assumptions.
+
+#### 5) UI showed STREAMING but feed stayed black (`Frame:NO`)
+**Symptom:**
+- Sidebar: `Glasses: REGISTERED • Cam:GRANTED • STREAMING • Frame:NO`
+- Watch Live modal opened but remained black.
+
+**Root causes:**
+- Session could remain logically active without delivering frames.
+- Entity/feed mapping and stream context drift could prevent frame replay.
+
+**Fixes:**
+- Added frame-readiness telemetry (`Frame:YES/NO`) in UI status.
+- Allowed latest-frame fallback when bound UID drifts.
+- Forced a **fresh DAT session** when stream exists but no frame has arrived.
+- Added **Stop Feed** action and resizable live-feed window for quicker recovery/testing.
+
 ### ADS-B TCP Bridge — Silent Deadlock (Fixed 2026-02-24)
 
 #### Symptom
@@ -604,6 +655,20 @@ START clicked → STARTING (yellow, 3s) → BRIDGE_UP → CONNECTING (orange, 1s
 _Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT phase sync)_
 
 ## Changelog
+
+### v0.2.3 (2026-03-11) — Android DAT Stability + Live Feed Controls
+
+#### Android / DAT
+- ✅ Fixed DAT package auth path in CI (GitHub Packages token secret + Gradle resolution path)
+- ✅ Raised Android `minSdk` to 29 for `mwdat-camera:0.4.0`
+- ✅ Upgraded Kotlin Android plugin to 2.1.0 to match DAT 0.4.0 metadata
+- ✅ Updated DAT status handling for current SDK sealed types (`PermissionStatus`, `RegistrationState`)
+- ✅ Added fresh-session fallback when DAT stream is active but no frames are produced (`Frame:NO`)
+
+#### Live Feed UX
+- ✅ Live feed modal is now **resizable** (camera and glasses feeds)
+- ✅ Added **Stop Feed** button to explicitly stop/clear active live sessions
+- ✅ Added frame readiness indicator in glasses status for easier field troubleshooting
 
 ### v0.2.2 (2026-02-24–25) — ADS-B Live + Full SIGINT Pipeline
 

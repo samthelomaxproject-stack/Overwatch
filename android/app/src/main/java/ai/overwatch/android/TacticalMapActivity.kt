@@ -114,6 +114,11 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun stopLocalGlassesStream(): Boolean {
+            return stopMetaLocalStream()
+        }
+
+        @JavascriptInterface
         fun getGlassesStatusJson(): String {
             val streaming = if (metaStreamSession != null) "STREAMING" else "IDLE"
             val frameReady = if (metaLatestFrameBase64.isNotEmpty()) "YES" else "NO"
@@ -207,6 +212,17 @@ class TacticalMapActivity : AppCompatActivity() {
                     }
                 }
             }
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun stopMetaLocalStream(): Boolean {
+        return runCatching {
+            metaStreamJob?.cancel()
+            metaStreamJob = null
+            metaStreamSession?.close()
+            metaStreamSession = null
+            metaLatestFrameBase64 = ""
             true
         }.getOrDefault(false)
     }
@@ -414,15 +430,20 @@ class TacticalMapActivity : AppCompatActivity() {
         .feed-card {
             width: min(96vw, 1200px);
             height: min(86vh, 800px);
+            min-width: 360px;
+            min-height: 240px;
+            max-width: 98vw;
+            max-height: 92vh;
             background: #020617;
             border: 1px solid #334155;
             border-radius: 8px;
-            overflow: hidden;
+            overflow: auto;
+            resize: both;
             display: flex;
             flex-direction: column;
         }
-        .feed-header { display:flex; justify-content:space-between; align-items:center; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; }
-        .feed-frame { width:100%; height:100%; border:0; background:#000; }
+        .feed-header { display:flex; justify-content:space-between; align-items:center; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; cursor:move; }
+        .feed-frame { width:100%; height:100%; min-height: 180px; border:0; background:#000; }
         
         /* Sidebar */
         .sidebar {
@@ -546,6 +567,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 <span id="feedTitle">Camera Feed</span>
                 <div style="display:flex;gap:6px;">
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="openCameraFeedExternal()">Open External</button>
+                    <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="stopLiveFeed()">Stop Feed</button>
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="closeCameraFeed()">Close</button>
                 </div>
             </div>
@@ -886,6 +908,17 @@ class TacticalMapActivity : AppCompatActivity() {
             if (frame) frame.src = 'about:blank';
             if (img) img.src = '';
             if (modal) modal.classList.remove('open');
+        }
+
+        function stopLiveFeed() {
+            const isMeta = String(currentFeedUrl || '').startsWith('meta://');
+            if (isMeta && window.AndroidBridge && typeof window.AndroidBridge.stopLocalGlassesStream === 'function') {
+                try { window.AndroidBridge.stopLocalGlassesStream(); } catch (_) {}
+            }
+            closeCameraFeed();
+            currentFeedUrl = '';
+            document.getElementById('status').textContent = 'Live feed stopped';
+            refreshGlassesStatus();
         }
 
         function openCameraFeedExternal() {
