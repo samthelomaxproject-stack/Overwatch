@@ -17,7 +17,7 @@ Built for emergency response, field operations, and off-grid communications.
 - ✅ **DAT API surface fixes** — registration/permission status handling updated for current SDK sealed types
 - ✅ **Meta stream reliability fix** — force fresh DAT session when stream reports active but no frames (`Frame:NO`)
 - ✅ **Meta reconnect hardening** — added explicit **Reconnect Glasses** control + auto-reconnect attempt when Watch Live sees repeated frame misses
-- ✅ **Live feed UX update** — feed window now resizable, plus new **Stop Feed** action for camera/glasses sessions
+- ✅ **Live feed UX update** — feed window now auto-sizes to incoming video, includes **Full Screen** toggle, plus **Stop Feed** action for camera/glasses sessions
 
 ### What's New in v0.2.2 (2026-02-24–25)
 - ✅ **ADS-B live tracking** — HackRF/dump1090 integration with real-time aircraft on 2D and 3D maps
@@ -680,7 +680,8 @@ _Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT 
 - ✅ Added fresh-session fallback when DAT stream is active but no frames are produced (`Frame:NO`)
 
 #### Live Feed UX
-- ✅ Live feed modal is now **resizable** (camera and glasses feeds)
+- ✅ Live feed modal now **auto-sizes to video dimensions** (camera and glasses feeds) to reduce black space
+- ✅ Added **Full Screen** toggle in feed modal
 - ✅ Added **Stop Feed** button to explicitly stop/clear active live sessions
 - ✅ Added frame readiness indicator in glasses status for easier field troubleshooting
 - ✅ Added `frame_age_ms` freshness telemetry + **Reconnect Glasses** control for post-restart / post-power-cycle recovery

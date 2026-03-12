@@ -439,19 +439,18 @@ class TacticalMapActivity : AppCompatActivity() {
         .feed-card {
             width: min(96vw, 1200px);
             height: min(86vh, 800px);
-            min-width: 360px;
-            min-height: 240px;
+            min-width: 320px;
+            min-height: 220px;
             max-width: 98vw;
             max-height: 92vh;
             background: #020617;
             border: 1px solid #334155;
             border-radius: 8px;
-            overflow: auto;
-            resize: both;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
         }
-        .feed-header { display:flex; justify-content:space-between; align-items:center; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; cursor:move; }
+        .feed-header { display:flex; justify-content:space-between; align-items:center; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; }
         .feed-frame { width:100%; height:100%; min-height: 180px; border:0; background:#000; }
         
         /* Sidebar */
@@ -576,6 +575,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 <span id="feedTitle">Camera Feed</span>
                 <div style="display:flex;gap:6px;">
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="openCameraFeedExternal()">Open External</button>
+                    <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="toggleFeedFullscreen()">Full Screen</button>
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="stopLiveFeed()">Stop Feed</button>
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="closeCameraFeed()">Close</button>
                 </div>
@@ -881,6 +881,35 @@ class TacticalMapActivity : AppCompatActivity() {
 
         let currentFeedUrl = '';
         let metaFeedTimer = null;
+
+        function fitFeedCardToAspect(srcW, srcH) {
+            const card = document.querySelector('#feedModal .feed-card');
+            if (!card) return;
+            const w = Number(srcW || 0);
+            const h = Number(srcH || 0);
+            if (!w || !h) return;
+
+            const headerH = 42;
+            const maxW = Math.floor(window.innerWidth * 0.96);
+            const maxH = Math.floor(window.innerHeight * 0.90) - headerH;
+
+            let targetW = w;
+            let targetH = h;
+            const scale = Math.min(maxW / targetW, maxH / targetH, 1);
+            targetW = Math.max(320, Math.floor(targetW * scale));
+            targetH = Math.max(180, Math.floor(targetH * scale));
+
+            card.style.width = targetW + 'px';
+            card.style.height = (targetH + headerH) + 'px';
+        }
+
+        function resetFeedCardSize() {
+            const card = document.querySelector('#feedModal .feed-card');
+            if (!card) return;
+            card.style.width = 'min(96vw, 1200px)';
+            card.style.height = 'min(86vh, 800px)';
+        }
+
         function openCameraFeed(url) {
             if (!url) return;
             currentFeedUrl = url;
@@ -891,11 +920,15 @@ class TacticalMapActivity : AppCompatActivity() {
             if (title) title.textContent = 'Camera Feed • ' + url;
 
             if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
+            resetFeedCardSize();
 
             if (String(url).startsWith('meta://')) {
                 const uid = String(url).replace('meta://', '');
                 if (frame) { frame.style.display = 'none'; frame.src = 'about:blank'; }
-                if (img) img.style.display = 'block';
+                if (img) {
+                    img.style.display = 'block';
+                    img.onload = () => fitFeedCardToAspect(img.naturalWidth, img.naturalHeight);
+                }
                 let misses = 0;
                 let reconnectAttempted = false;
                 metaFeedTimer = setInterval(() => {
@@ -917,6 +950,7 @@ class TacticalMapActivity : AppCompatActivity() {
             } else {
                 if (img) { img.style.display = 'none'; img.src = ''; }
                 if (frame) { frame.style.display = 'block'; frame.src = url; }
+                fitFeedCardToAspect(1280, 720);
             }
             if (modal) modal.classList.add('open');
         }
@@ -928,6 +962,9 @@ class TacticalMapActivity : AppCompatActivity() {
             if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
             if (frame) frame.src = 'about:blank';
             if (img) img.src = '';
+            if (document.fullscreenElement) {
+                try { document.exitFullscreen(); } catch (_) {}
+            }
             if (modal) modal.classList.remove('open');
         }
 
@@ -940,6 +977,18 @@ class TacticalMapActivity : AppCompatActivity() {
             currentFeedUrl = '';
             document.getElementById('status').textContent = 'Live feed stopped';
             refreshGlassesStatus();
+        }
+
+        async function toggleFeedFullscreen() {
+            const card = document.querySelector('#feedModal .feed-card');
+            if (!card) return;
+            try {
+                if (!document.fullscreenElement) {
+                    await card.requestFullscreen();
+                } else {
+                    await document.exitFullscreen();
+                }
+            } catch (_) {}
         }
 
         function openCameraFeedExternal() {
