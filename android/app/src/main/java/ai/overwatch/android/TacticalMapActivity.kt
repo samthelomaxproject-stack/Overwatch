@@ -91,8 +91,12 @@ class TacticalMapActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun getMetaFrameBase64(entityUid: String): String {
-            if (entityUid != metaBoundEntityUid) return ""
-            return metaLatestFrameBase64
+            val frame = metaLatestFrameBase64
+            if (frame.isEmpty()) return ""
+            if (entityUid == metaBoundEntityUid) return frame
+            // Fallback: only one local Meta stream exists, so allow replaying latest frame
+            // even if UI/watch context UID drifts from the originally bound UID.
+            return frame
         }
 
         @JavascriptInterface
@@ -112,7 +116,8 @@ class TacticalMapActivity : AppCompatActivity() {
         @JavascriptInterface
         fun getGlassesStatusJson(): String {
             val streaming = if (metaStreamSession != null) "STREAMING" else "IDLE"
-            return "{\"registration\":\"$metaRegistrationStatus\",\"camera_permission\":\"$metaCameraPermissionStatus\",\"stream\":\"$streaming\"}"
+            val frameReady = if (metaLatestFrameBase64.isNotEmpty()) "YES" else "NO"
+            return "{\"registration\":\"$metaRegistrationStatus\",\"camera_permission\":\"$metaCameraPermissionStatus\",\"stream\":\"$streaming\",\"frame_ready\":\"$frameReady\",\"bound_uid\":\"$metaBoundEntityUid\"}"
         }
     }
 
@@ -912,7 +917,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 const js = window.AndroidBridge.getGlassesStatusJson();
                 const st = JSON.parse(js || '{}');
                 const el = document.getElementById('glassesStatus');
-                if (el) el.textContent = 'Glasses: ' + (st.registration || 'UNKNOWN') + ' • Cam:' + (st.camera_permission || 'UNKNOWN') + ' • ' + (st.stream || 'IDLE');
+                if (el) el.textContent = 'Glasses: ' + (st.registration || 'UNKNOWN') + ' • Cam:' + (st.camera_permission || 'UNKNOWN') + ' • ' + (st.stream || 'IDLE') + ' • Frame:' + (st.frame_ready || 'NO');
             } catch (_) {}
         }
 
