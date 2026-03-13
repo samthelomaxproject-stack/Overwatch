@@ -450,7 +450,9 @@ class TacticalMapActivity : AppCompatActivity() {
             display: flex;
             flex-direction: column;
         }
-        .feed-header { display:flex; justify-content:space-between; align-items:center; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; }
+        .feed-header { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; color:#e2e8f0; border-bottom:1px solid #334155; }
+        .feed-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .feed-actions { display:flex; gap:6px; flex-shrink:0; }
         .feed-frame { width:100%; height:100%; min-height: 180px; border:0; background:#000; }
         
         /* Sidebar */
@@ -572,15 +574,15 @@ class TacticalMapActivity : AppCompatActivity() {
     <div id="feedModal" class="feed-modal" onclick="if(event.target.id==='feedModal') closeCameraFeed()">
         <div class="feed-card">
             <div class="feed-header">
-                <span id="feedTitle">Camera Feed</span>
-                <div style="display:flex;gap:6px;">
+                <span id="feedTitle" class="feed-title">Camera Feed</span>
+                <div class="feed-actions">
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="openCameraFeedExternal()">Open External</button>
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="toggleFeedFullscreen()">Full Screen</button>
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="stopLiveFeed()">Stop Feed</button>
                     <button class="sb-btn" style="width:auto;margin:0;padding:4px 8px;" onclick="closeCameraFeed()">Close</button>
                 </div>
             </div>
-            <iframe id="feedFrame" class="feed-frame" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>
+            <iframe id="feedFrame" class="feed-frame" allow="autoplay; fullscreen; encrypted-media" referrerpolicy="no-referrer-when-downgrade"></iframe>
             <video id="feedVideo" class="feed-frame" style="display:none;object-fit:contain;" controls autoplay muted playsinline></video>
             <img id="metaFeedImage" class="feed-frame" style="display:none;object-fit:contain;" />
             <div id="feedHint" style="display:none;padding:8px 10px;background:rgba(15,23,42,0.92);border-top:1px solid #334155;color:#cbd5e1;font-size:11px;">If this feed is blank, the source may block embedding (X-Frame-Options/CSP). Use Open External.</div>
