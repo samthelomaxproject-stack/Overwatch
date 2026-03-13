@@ -581,6 +581,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 </div>
             </div>
             <iframe id="feedFrame" class="feed-frame" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>
+            <video id="feedVideo" class="feed-frame" style="display:none;object-fit:contain;" controls autoplay muted playsinline></video>
             <img id="metaFeedImage" class="feed-frame" style="display:none;object-fit:contain;" />
         </div>
     </div>
@@ -882,6 +883,18 @@ class TacticalMapActivity : AppCompatActivity() {
         let currentFeedUrl = '';
         let metaFeedTimer = null;
 
+        function detectFeedType(url) {
+            const u = String(url || '').toLowerCase();
+            if (!u) return 'unknown';
+            if (u.startsWith('meta://')) return 'meta';
+            if (u.startsWith('rtsp://') || u.startsWith('rtmp://')) return 'rtsp';
+            if (u.includes('.m3u8')) return 'hls';
+            if (u.match(/\.(mp4|webm|mov)(\?|$)/)) return 'video';
+            if (u.match(/\.(jpg|jpeg|png|gif|webp|mjpg|mjpeg)(\?|$)/)) return 'image';
+            if (u.includes('/view') || u.includes('/camera') || u.includes('/live') || u.includes('/webcam') || u.includes('earthcam') || u.includes('youtube.com') || u.includes('youtu.be')) return 'page';
+            return 'unknown';
+        }
+
         function fitFeedCardToAspect(srcW, srcH) {
             const card = document.querySelector('#feedModal .feed-card');
             if (!card) return;
@@ -915,6 +928,7 @@ class TacticalMapActivity : AppCompatActivity() {
             currentFeedUrl = url;
             const modal = document.getElementById('feedModal');
             const frame = document.getElementById('feedFrame');
+            const video = document.getElementById('feedVideo');
             const img = document.getElementById('metaFeedImage');
             const title = document.getElementById('feedTitle');
             if (title) title.textContent = 'Camera Feed • ' + url;
@@ -922,9 +936,19 @@ class TacticalMapActivity : AppCompatActivity() {
             if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
             resetFeedCardSize();
 
-            if (String(url).startsWith('meta://')) {
+            if (frame) { frame.style.display = 'none'; frame.src = 'about:blank'; }
+            if (video) {
+                video.style.display = 'none';
+                try { video.pause(); } catch (_) {}
+                video.src = '';
+                video.load();
+            }
+            if (img) { img.style.display = 'none'; img.src = ''; }
+
+            const feedType = detectFeedType(url);
+
+            if (feedType === 'meta') {
                 const uid = String(url).replace('meta://', '');
-                if (frame) { frame.style.display = 'none'; frame.src = 'about:blank'; }
                 if (img) {
                     img.style.display = 'block';
                     img.onload = () => fitFeedCardToAspect(img.naturalWidth, img.naturalHeight);
@@ -947,9 +971,20 @@ class TacticalMapActivity : AppCompatActivity() {
                         }
                     } catch (_) {}
                 }, 180);
+            } else if (feedType === 'video' || feedType === 'hls') {
+                if (video) {
+                    video.style.display = 'block';
+                    video.onloadedmetadata = () => fitFeedCardToAspect(video.videoWidth || 1280, video.videoHeight || 720);
+                    video.src = url;
+                    video.play().catch(() => {});
+                }
+                fitFeedCardToAspect(1280, 720);
             } else {
-                if (img) { img.style.display = 'none'; img.src = ''; }
-                if (frame) { frame.style.display = 'block'; frame.src = url; }
+                if (frame) {
+                    frame.style.display = 'block';
+                    frame.src = url;
+                }
+                // Hub-style fallback: page embeds (EarthCam etc.) may be blocked by CSP/X-Frame.
                 fitFeedCardToAspect(1280, 720);
             }
             if (modal) modal.classList.add('open');
@@ -958,9 +993,15 @@ class TacticalMapActivity : AppCompatActivity() {
         function closeCameraFeed() {
             const modal = document.getElementById('feedModal');
             const frame = document.getElementById('feedFrame');
+            const video = document.getElementById('feedVideo');
             const img = document.getElementById('metaFeedImage');
             if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
             if (frame) frame.src = 'about:blank';
+            if (video) {
+                try { video.pause(); } catch (_) {}
+                video.src = '';
+                video.load();
+            }
             if (img) img.src = '';
             if (document.fullscreenElement) {
                 try { document.exitFullscreen(); } catch (_) {}

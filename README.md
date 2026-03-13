@@ -18,6 +18,7 @@ Built for emergency response, field operations, and off-grid communications.
 - ✅ **Meta stream reliability fix** — force fresh DAT session when stream reports active but no frames (`Frame:NO`)
 - ✅ **Meta reconnect hardening** — added explicit **Reconnect Glasses** control + auto-reconnect attempt when Watch Live sees repeated frame misses
 - ✅ **Live feed UX update** — feed window now auto-sizes to incoming video, includes **Full Screen** toggle, plus **Stop Feed** action for camera/glasses sessions
+- ✅ **Hub-aligned feed rendering on Android** — direct video/HLS URLs now use `<video>` playback; page/EarthCam links stay in iframe with external fallback behavior
 
 ### What's New in v0.2.2 (2026-02-24–25)
 - ✅ **ADS-B live tracking** — HackRF/dump1090 integration with real-time aircraft on 2D and 3D maps
@@ -686,6 +687,7 @@ _Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT 
 - ✅ Added frame readiness indicator in glasses status for easier field troubleshooting
 - ✅ Added `frame_age_ms` freshness telemetry + **Reconnect Glasses** control for post-restart / post-power-cycle recovery
 - ✅ Added auto one-shot reconnect when Watch Live detects repeated empty frame polls
+- ✅ Android feed renderer now matches hub strategy: direct media (`.mp4`, `.webm`, `.mov`, `.m3u8`) uses `<video>`, while source pages (including many EarthCam links) open as embeddable pages with external-open fallback when blocked
 
 ### v0.2.2 (2026-02-24–25) — ADS-B Live + Full SIGINT Pipeline
 
