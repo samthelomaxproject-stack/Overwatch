@@ -583,6 +583,7 @@ class TacticalMapActivity : AppCompatActivity() {
             <iframe id="feedFrame" class="feed-frame" allow="autoplay; fullscreen" referrerpolicy="no-referrer"></iframe>
             <video id="feedVideo" class="feed-frame" style="display:none;object-fit:contain;" controls autoplay muted playsinline></video>
             <img id="metaFeedImage" class="feed-frame" style="display:none;object-fit:contain;" />
+            <div id="feedHint" style="display:none;padding:8px 10px;background:rgba(15,23,42,0.92);border-top:1px solid #334155;color:#cbd5e1;font-size:11px;">If this feed is blank, the source may block embedding (X-Frame-Options/CSP). Use Open External.</div>
         </div>
     </div>
     <div class="hud">
@@ -930,6 +931,7 @@ class TacticalMapActivity : AppCompatActivity() {
             const frame = document.getElementById('feedFrame');
             const video = document.getElementById('feedVideo');
             const img = document.getElementById('metaFeedImage');
+            const hint = document.getElementById('feedHint');
             const title = document.getElementById('feedTitle');
             if (title) title.textContent = 'Camera Feed • ' + url;
 
@@ -944,6 +946,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 video.load();
             }
             if (img) { img.style.display = 'none'; img.src = ''; }
+            if (hint) hint.style.display = 'none';
 
             const feedType = detectFeedType(url);
 
@@ -985,6 +988,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     frame.src = url;
                 }
                 // Hub-style fallback: page embeds (EarthCam etc.) may be blocked by CSP/X-Frame.
+                if (hint) hint.style.display = 'block';
                 fitFeedCardToAspect(1280, 720);
             }
             if (modal) modal.classList.add('open');
@@ -995,6 +999,7 @@ class TacticalMapActivity : AppCompatActivity() {
             const frame = document.getElementById('feedFrame');
             const video = document.getElementById('feedVideo');
             const img = document.getElementById('metaFeedImage');
+            const hint = document.getElementById('feedHint');
             if (metaFeedTimer) { clearInterval(metaFeedTimer); metaFeedTimer = null; }
             if (frame) frame.src = 'about:blank';
             if (video) {
@@ -1003,6 +1008,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 video.load();
             }
             if (img) img.src = '';
+            if (hint) hint.style.display = 'none';
             if (document.fullscreenElement) {
                 try { document.exitFullscreen(); } catch (_) {}
             }
