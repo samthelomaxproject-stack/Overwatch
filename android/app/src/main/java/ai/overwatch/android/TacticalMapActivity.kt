@@ -896,6 +896,53 @@ class TacticalMapActivity : AppCompatActivity() {
             return 'unknown';
         }
 
+        async function ensureHlsJs() {
+            if (window.Hls) return true;
+            return new Promise((resolve) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+                s.onload = () => resolve(!!window.Hls);
+                s.onerror = () => resolve(false);
+                document.head.appendChild(s);
+            });
+        }
+
+        function tryExtractDirectFeedFromText(html, baseUrl) {
+            if (!html) return '';
+            const candidates = [];
+            const abs = (u) => {
+                try { return new URL(u, baseUrl).toString(); } catch (_) { return u; }
+            };
+
+            const mediaRegex = /https?:\/\/[^"'\s<>]+\.(m3u8|mp4|webm|mov|mjpg|mjpeg|jpg|jpeg|png)(\?[^"'\s<>]*)?/gi;
+            for (const m of html.matchAll(mediaRegex)) candidates.push(m[0]);
+
+            const attrRegex = /(?:content|src)=["']([^"']+)["']/gi;
+            for (const m of html.matchAll(attrRegex)) {
+                const raw = m[1] || '';
+                const lc = raw.toLowerCase();
+                if (lc.includes('.m3u8') || lc.includes('.mp4') || lc.includes('.webm') || lc.includes('.mov') || lc.includes('.mjpg') || lc.includes('.mjpeg') || lc.includes('.jpg') || lc.includes('.jpeg') || lc.includes('.png')) {
+                    candidates.push(abs(raw));
+                }
+            }
+
+            const score = (u) => {
+                const lc = String(u).toLowerCase();
+                let s = 0;
+                if (lc.includes('.m3u8')) s += 120;
+                if (lc.match(/\.(mp4|webm|mov)(\?|$)/)) s += 100;
+                if (lc.includes('.mjpg') || lc.includes('.mjpeg')) s += 90;
+                if (lc.match(/\.(jpg|jpeg|png)(\?|$)/)) s += 40;
+                if (lc.includes('stream') || lc.includes('live') || lc.includes('playlist')) s += 20;
+                if (lc.includes('logo') || lc.includes('sprite') || lc.includes('thumbnail') || lc.includes('placeholder')) s -= 80;
+                if (lc.includes('earthcam') && (lc.includes('logo') || lc.includes('default'))) s -= 120;
+                return s;
+            };
+
+            candidates.sort((a,b) => score(b)-score(a));
+            return candidates[0] || '';
+        }
+
         function fitFeedCardToAspect(srcW, srcH) {
             const card = document.querySelector('#feedModal .feed-card');
             if (!card) return;
@@ -924,7 +971,7 @@ class TacticalMapActivity : AppCompatActivity() {
             card.style.height = 'min(86vh, 800px)';
         }
 
-        function openCameraFeed(url) {
+        async function openCameraFeed(url) {
             if (!url) return;
             currentFeedUrl = url;
             const modal = document.getElementById('feedModal');
@@ -948,10 +995,11 @@ class TacticalMapActivity : AppCompatActivity() {
             if (img) { img.style.display = 'none'; img.src = ''; }
             if (hint) hint.style.display = 'none';
 
-            const feedType = detectFeedType(url);
+            let resolvedUrl = url;
+            let feedType = detectFeedType(resolvedUrl);
 
             if (feedType === 'meta') {
-                const uid = String(url).replace('meta://', '');
+                const uid = String(resolvedUrl).replace('meta://', '');
                 if (img) {
                     img.style.display = 'block';
                     img.onload = () => fitFeedCardToAspect(img.naturalWidth, img.naturalHeight);
@@ -974,21 +1022,76 @@ class TacticalMapActivity : AppCompatActivity() {
                         }
                     } catch (_) {}
                 }, 180);
-            } else if (feedType === 'video' || feedType === 'hls') {
+                if (modal) modal.classList.add('open');
+                return;
+            }
+
+            // Hub parity: try resolving page/unknown URLs to direct media first.
+            if (feedType === 'page' || feedType === 'unknown') {
+                try {
+                    const resp = await fetch(resolvedUrl);
+                    if (resp.ok) {
+                        const html = await resp.text();
+                        const extracted = tryExtractDirectFeedFromText(html, resolvedUrl);
+                        if (extracted) {
+                            resolvedUrl = extracted;
+                            feedType = detectFeedType(resolvedUrl);
+                            currentFeedUrl = resolvedUrl;
+                            if (title) title.textContent = 'Camera Feed • ' + resolvedUrl;
+                        }
+                    }
+                } catch (_) {
+                    // Keep original page URL fallback
+                }
+            }
+
+            if (feedType === 'video' || feedType === 'hls') {
                 if (video) {
                     video.style.display = 'block';
                     video.onloadedmetadata = () => fitFeedCardToAspect(video.videoWidth || 1280, video.videoHeight || 720);
-                    video.src = url;
+                    if (feedType === 'hls' && !video.canPlayType('application/vnd.apple.mpegurl')) {
+                        const ok = await ensureHlsJs();
+                        if (ok && window.Hls?.isSupported?.()) {
+                            const hls = new window.Hls();
+                            hls.loadSource(resolvedUrl);
+                            hls.attachMedia(video);
+                        } else {
+                            if (hint) {
+                                hint.textContent = 'HLS unsupported in this environment. Use Open External.';
+                                hint.style.display = 'block';
+                            }
+                        }
+                    } else {
+                        video.src = resolvedUrl;
+                    }
                     video.play().catch(() => {});
                 }
                 fitFeedCardToAspect(1280, 720);
+            } else if (feedType === 'rtsp') {
+                if (hint) {
+                    hint.textContent = 'RTSP/RTMP is not browser-native here. Use Open External or a transcoded HTTP/HLS feed.';
+                    hint.style.display = 'block';
+                }
+                if (frame) {
+                    frame.style.display = 'block';
+                    frame.src = 'about:blank';
+                }
+                fitFeedCardToAspect(960, 540);
+            } else if (feedType === 'image') {
+                if (img) {
+                    img.style.display = 'block';
+                    img.onload = () => fitFeedCardToAspect(img.naturalWidth, img.naturalHeight);
+                    img.src = resolvedUrl;
+                }
             } else {
                 if (frame) {
                     frame.style.display = 'block';
-                    frame.src = url;
+                    frame.src = resolvedUrl;
                 }
-                // Hub-style fallback: page embeds (EarthCam etc.) may be blocked by CSP/X-Frame.
-                if (hint) hint.style.display = 'block';
+                if (hint) {
+                    hint.textContent = 'If this feed is blank, the source may block embedding (X-Frame-Options/CSP). Use Open External.';
+                    hint.style.display = 'block';
+                }
                 fitFeedCardToAspect(1280, 720);
             }
             if (modal) modal.classList.add('open');

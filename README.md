@@ -687,7 +687,7 @@ _Last maintenance update: 2026-02-25 20:54 CST (README troubleshooting + SIGINT 
 - ✅ Added frame readiness indicator in glasses status for easier field troubleshooting
 - ✅ Added `frame_age_ms` freshness telemetry + **Reconnect Glasses** control for post-restart / post-power-cycle recovery
 - ✅ Added auto one-shot reconnect when Watch Live detects repeated empty frame polls
-- ✅ Android feed renderer now matches hub strategy: direct media (`.mp4`, `.webm`, `.mov`, `.m3u8`) uses `<video>`, while source pages (including many EarthCam links) open as embeddable pages with external-open fallback when blocked
+- ✅ Android feed renderer now matches hub strategy end-to-end: feed-type detection, page→direct-media extraction attempt, direct media playback in `<video>` (including HLS fallback via hls.js), and page/embed fallback with external-open guidance
 - ✅ Added in-modal "embed blocked" hint for page feeds (same operator guidance as hub: use Open External when CSP/X-Frame blocks render)
 
 ### v0.2.2 (2026-02-24–25) — ADS-B Live + Full SIGINT Pipeline
