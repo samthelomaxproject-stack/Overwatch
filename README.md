@@ -19,6 +19,7 @@ Built for emergency response, field operations, and off-grid communications.
 - ✅ **Meta reconnect hardening** — added explicit **Reconnect Glasses** control + auto-reconnect attempt when Watch Live sees repeated frame misses
 - ✅ **Live feed UX update** — feed window now auto-sizes to incoming video, includes **Full Screen** toggle, plus **Stop Feed** action for camera/glasses sessions
 - ✅ **Hub-aligned feed rendering on Android** — direct video/HLS URLs now use `<video>` playback; page/EarthCam links stay in iframe with external fallback behavior
+- ✅ **OSINT Conflict Layer scaffold** — new ACLED-backed ingest API sidecar (`osint_hub/`) + map-layer integration (`CONFLICT`) with 1D/7D/30D filtering
 
 ### What's New in v0.2.2 (2026-02-24–25)
 - ✅ **ADS-B live tracking** — HackRF/dump1090 integration with real-time aircraft on 2D and 3D maps

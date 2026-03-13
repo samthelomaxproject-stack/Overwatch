@@ -74,6 +74,13 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     await load();
   }
 
+  async function loadMeta() {
+    const u = new URL((apiBase ? apiBase : '') + '/api/meta', window.location.origin).toString();
+    const res = await fetch(u);
+    if (!res.ok) throw new Error(`Conflict meta API error: ${res.status}`);
+    return await res.json();
+  }
+
   return {
     setVisible,
     setFilters(filters = {}) {
@@ -83,5 +90,6 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     },
     refreshIfVisible,
     load,
+    loadMeta,
   };
 };

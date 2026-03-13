@@ -443,6 +443,19 @@
                             <button class="tac-layer-btn" data-conflict-window="1d" onclick="setConflictWindow('1d')">1D</button>
                             <button class="tac-layer-btn" data-conflict-window="30d" onclick="setConflictWindow('30d')">30D</button>
                         </div>
+                        <div style="height: var(--space-xs);"></div>
+                        <div class="tac-layer-group" style="align-items:center;">
+                            <select id="conflictCountrySel" class="tac-input" style="max-width:170px;" onchange="setConflictCountry(this.value)">
+                                <option value="">GLOBAL</option>
+                            </select>
+                            <select id="conflictTypeSel" class="tac-input" style="max-width:240px;" onchange="setConflictType(this.value)">
+                                <option value="">ALL TYPES</option>
+                                <option value="Battles">Battles</option>
+                                <option value="Explosions/Remote violence">Explosions/Remote violence</option>
+                                <option value="Strategic developments">Strategic developments</option>
+                                <option value="Violence against civilians">Violence against civilians</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
@@ -815,11 +828,28 @@ ALPHA-3 | REAR"></textarea>
             if (window.initConflictModule && !conflictModule) {
                 const apiBase = (window.location.origin || '').replace(/:.*$/, ':8790');
                 initConflictModule(map, { apiBase })
-                    .then(mod => {
+                    .then(async (mod) => {
                         conflictModule = mod;
                         if (conflictModule) {
                             conflictModule.setFilters(conflictFilters);
                             conflictModule.setVisible(!!layerVisible.conflict);
+                            try {
+                                const meta = await conflictModule.loadMeta();
+                                const countrySel = document.getElementById('conflictCountrySel');
+                                if (countrySel && Array.isArray(meta?.countries)) {
+                                    const existing = new Set(Array.from(countrySel.options).map(o => o.value));
+                                    meta.countries.forEach(c => {
+                                        if (!existing.has(c)) {
+                                            const o = document.createElement('option');
+                                            o.value = c;
+                                            o.textContent = c;
+                                            countrySel.appendChild(o);
+                                        }
+                                    });
+                                }
+                            } catch (e) {
+                                debugLog('Conflict meta load failed: ' + (e?.message || e));
+                            }
                         }
                         debugLog('Conflict module initialized');
                     })
@@ -881,6 +911,22 @@ ALPHA-3 | REAR"></textarea>
             if (conflictModule && layerVisible.conflict) {
                 conflictModule.setFilters(conflictFilters);
                 conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
+            }
+        }
+
+        function setConflictCountry(country) {
+            conflictFilters.country = country || '';
+            if (conflictModule && layerVisible.conflict) {
+                conflictModule.setFilters(conflictFilters);
+                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict country reload failed: ' + (e?.message || e)));
+            }
+        }
+
+        function setConflictType(eventType) {
+            conflictFilters.eventTypes = eventType || '';
+            if (conflictModule && layerVisible.conflict) {
+                conflictModule.setFilters(conflictFilters);
+                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict type reload failed: ' + (e?.message || e)));
             }
         }
 

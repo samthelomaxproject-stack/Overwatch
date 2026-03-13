@@ -1,5 +1,8 @@
+import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -8,12 +11,76 @@ from .acled import fetch_acled
 from .db import get_conn, init_db
 
 load_dotenv()
-app = FastAPI(title="Overwatch OSINT Conflict API", version="0.1.0")
+app = FastAPI(title="Overwatch OSINT Conflict API", version="0.2.0")
+
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "300"))
+AUTO_INGEST_ENABLED = os.getenv("ACLED_AUTO_INGEST", "true").lower() in ("1", "true", "yes")
+AUTO_INGEST_INTERVAL_MIN = int(os.getenv("ACLED_AUTO_INGEST_INTERVAL_MIN", "30"))
+AUTO_INGEST_DAYS = int(os.getenv("ACLED_AUTO_INGEST_DAYS", "7"))
+
+_cache: Dict[str, Tuple[float, list]] = {}
+_cache_lock = threading.Lock()
+_last_ingest_meta = {"at": None, "count": 0, "ok": None, "error": None}
+_ingest_thread_started = False
 
 
 @app.on_event("startup")
 def startup():
+    global _ingest_thread_started
     init_db()
+    if AUTO_INGEST_ENABLED and not _ingest_thread_started:
+        t = threading.Thread(target=_ingest_loop, daemon=True)
+        t.start()
+        _ingest_thread_started = True
+
+
+def _clear_cache():
+    with _cache_lock:
+        _cache.clear()
+
+
+def _get_cache(key: str):
+    with _cache_lock:
+        item = _cache.get(key)
+        if not item:
+            return None
+        ts, payload = item
+        if (time.time() - ts) > CACHE_TTL_SECONDS:
+            _cache.pop(key, None)
+            return None
+        return payload
+
+
+def _set_cache(key: str, payload: list):
+    with _cache_lock:
+        _cache[key] = (time.time(), payload)
+
+
+def _ingest_once(days: int = AUTO_INGEST_DAYS, country: Optional[str] = None):
+    events = fetch_acled(days=days, country=country)
+    upsert_events(events)
+    _clear_cache()
+    _last_ingest_meta.update({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "count": len(events),
+        "ok": True,
+        "error": None,
+    })
+    return len(events)
+
+
+def _ingest_loop():
+    while True:
+        try:
+            _ingest_once(days=AUTO_INGEST_DAYS)
+        except Exception as e:
+            _last_ingest_meta.update({
+                "at": datetime.now(timezone.utc).isoformat(),
+                "count": 0,
+                "ok": False,
+                "error": str(e),
+            })
+        time.sleep(max(5, AUTO_INGEST_INTERVAL_MIN) * 60)
 
 
 def upsert_events(events: List[dict]):
@@ -21,7 +88,6 @@ def upsert_events(events: List[dict]):
         for ev in events:
             external_id = str(ev.get("event_id_cnty") or ev.get("event_id_no_cnty") or "")
             if not external_id:
-                # fallback deterministic key
                 external_id = f"acled:{ev.get('event_date')}:{ev.get('latitude')}:{ev.get('longitude')}:{ev.get('event_type')}"
 
             conn.execute(
@@ -81,33 +147,17 @@ def upsert_events(events: List[dict]):
         conn.commit()
 
 
-@app.get("/health")
-def health():
-    return {"ok": True, "service": "overwatch-osint", "version": "0.1.0"}
+def _query_events(window: str, country: Optional[str], event_types: Optional[str], limit: int):
+    cache_key = f"w={window}|c={country or ''}|t={event_types or ''}|l={limit}"
+    cached = _get_cache(cache_key)
+    if cached is not None:
+        return cached
 
-
-@app.post("/api/ingest/acled")
-def ingest_acled(days: int = Query(7, ge=1, le=30), country: Optional[str] = None):
-    try:
-        events = fetch_acled(days=days, country=country)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    upsert_events(events)
-    return {"ok": True, "ingested": len(events)}
-
-
-@app.get("/api/events")
-def get_events(
-    window: str = Query("7d", pattern="^(1d|7d|30d)$"),
-    country: Optional[str] = None,
-    event_types: Optional[str] = None,
-    limit: int = Query(1000, ge=1, le=5000),
-):
     days = {"1d": 1, "7d": 7, "30d": 30}[window]
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 
     where = ["date(event_date) >= date(?)"]
-    vals = [cutoff]
+    vals: List[object] = [cutoff]
 
     if country:
         where.append("country = ?")
@@ -152,6 +202,97 @@ def get_events(
                 "notes": r["notes"],
                 "source_scale": r["source_scale"],
                 "confidence": r["confidence_score"],
+                "updated_at": r["updated_at"],
                 "sources": [{"name": s["source_name"], "url": s["source_url"]} for s in src],
             })
-        return out
+
+    _set_cache(cache_key, out)
+    return out
+
+
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "service": "overwatch-osint",
+        "version": "0.2.0",
+        "auto_ingest": {
+            "enabled": AUTO_INGEST_ENABLED,
+            "interval_min": AUTO_INGEST_INTERVAL_MIN,
+            "days": AUTO_INGEST_DAYS,
+            "last": _last_ingest_meta,
+        },
+    }
+
+
+@app.post("/api/ingest/acled")
+def ingest_acled(days: int = Query(7, ge=1, le=30), country: Optional[str] = None):
+    try:
+        count = _ingest_once(days=days, country=country)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"ok": True, "ingested": count}
+
+
+@app.get("/api/events")
+def get_events(
+    window: str = Query("7d", pattern="^(1d|7d|30d)$"),
+    country: Optional[str] = None,
+    event_types: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=5000),
+):
+    try:
+        return _query_events(window=window, country=country, event_types=event_types, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/events/since")
+def get_events_since(
+    since: str,
+    country: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=5000),
+):
+    with get_conn() as conn:
+        where = ["datetime(updated_at) > datetime(?)"]
+        vals: List[object] = [since]
+        if country:
+            where.append("country = ?")
+            vals.append(country)
+        sql = f"""
+            SELECT * FROM conflict_events
+            WHERE {' AND '.join(where)}
+            ORDER BY datetime(updated_at) DESC
+            LIMIT ?
+        """
+        vals.append(limit)
+        rows = conn.execute(sql, vals).fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.get("/api/alerts/high-impact")
+def high_impact_alerts(
+    window: str = Query("1d", pattern="^(1d|7d|30d)$"),
+    min_fatalities: int = Query(10, ge=1, le=10000),
+    country: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=1000),
+):
+    events = _query_events(window=window, country=country, event_types=None, limit=5000)
+    filtered = [e for e in events if int(e.get("fatalities") or 0) >= min_fatalities]
+    return filtered[:limit]
+
+
+@app.get("/api/meta")
+def meta():
+    with get_conn() as conn:
+        countries = [r[0] for r in conn.execute("SELECT DISTINCT country FROM conflict_events WHERE country <> '' ORDER BY country ASC").fetchall()]
+        event_types = [r[0] for r in conn.execute("SELECT DISTINCT event_type FROM conflict_events WHERE event_type <> '' ORDER BY event_type ASC").fetchall()]
+    return {
+        "countries": countries,
+        "event_types": event_types,
+        "presets": {
+            "ukraine": ["Ukraine"],
+            "middle-east": ["Israel", "Palestine", "Lebanon", "Syria", "Iraq", "Yemen", "Iran"],
+            "africa-hotspots": ["Sudan", "DR Congo", "Somalia", "Mali", "Burkina Faso", "Niger", "Nigeria", "Ethiopia", "Mozambique"],
+        },
+    }
