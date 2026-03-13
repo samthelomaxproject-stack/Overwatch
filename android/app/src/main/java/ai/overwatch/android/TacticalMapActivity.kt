@@ -86,6 +86,16 @@ class TacticalMapActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
+        fun openFeedSourceInApp(url: String, title: String?) {
+            runCatching {
+                val i = Intent(this@TacticalMapActivity, CctvSourceActivity::class.java)
+                i.putExtra(CctvSourceActivity.EXTRA_URL, url)
+                i.putExtra(CctvSourceActivity.EXTRA_TITLE, title ?: "CCTV Source")
+                startActivity(i)
+            }
+        }
+
+        @JavascriptInterface
         fun bindLocalGlasses(entityUid: String): Boolean {
             return startMetaLocalStream(entityUid)
         }
@@ -1086,6 +1096,13 @@ class TacticalMapActivity : AppCompatActivity() {
                     img.src = resolvedUrl;
                 }
             } else {
+                // Hard hub parity for source-page feeds: open in a dedicated in-app source window
+                // instead of relying on nested iframe embedding.
+                if (window.AndroidBridge && typeof window.AndroidBridge.openFeedSourceInApp === 'function') {
+                    try { window.AndroidBridge.openFeedSourceInApp(resolvedUrl, 'CCTV Source'); } catch (_) {}
+                    document.getElementById('status').textContent = 'Opened source feed in dedicated in-app viewer';
+                    return;
+                }
                 if (frame) {
                     frame.style.display = 'block';
                     frame.src = resolvedUrl;
