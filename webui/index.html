@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Overwatch | Tactical Operations Center</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <link rel="stylesheet" href="tac-ui.css">
@@ -433,6 +435,13 @@
                             <button class="tac-layer-btn" onclick="toggleLayer('wifi')">Wi-Fi</button>
                             <button class="tac-layer-btn" data-layer="sat" onclick="toggleLayer('sat')">SAT</button>
                             <button class="tac-layer-btn" data-layer="cctv" onclick="toggleLayer('cctv')">CCTV</button>
+                            <button class="tac-layer-btn" data-layer="conflict" onclick="toggleLayer('conflict')">CONFLICT</button>
+                        </div>
+                        <div style="height: var(--space-xs);"></div>
+                        <div class="tac-layer-group">
+                            <button class="tac-layer-btn active" data-conflict-window="7d" onclick="setConflictWindow('7d')">CONFLICT 7D</button>
+                            <button class="tac-layer-btn" data-conflict-window="1d" onclick="setConflictWindow('1d')">1D</button>
+                            <button class="tac-layer-btn" data-conflict-window="30d" onclick="setConflictWindow('30d')">30D</button>
                         </div>
                     </div>
                 </div>
@@ -697,6 +706,8 @@ ALPHA-3 | REAR"></textarea>
     <script src="https://unpkg.com/h3-js@4.1.0/dist/h3-js.umd.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="conflict-module.js"></script>
     <script>
         // State
         let map = null;
@@ -706,6 +717,8 @@ ALPHA-3 | REAR"></textarea>
         let squads = [];
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
+        let conflictModule = null;
+        const conflictFilters = { windowRange: '7d', country: '', eventTypes: '' };
 
         // Map styles
         const mapStyles = {
@@ -797,6 +810,21 @@ ALPHA-3 | REAR"></textarea>
                 debugLog('Have stored location, updating marker');
                 updateMyLocation(lastKnownLocation.lat, lastKnownLocation.lon, lastKnownLocation.accuracy);
             }
+
+            // Conflict module init (OSINT events)
+            if (window.initConflictModule && !conflictModule) {
+                const apiBase = (window.location.origin || '').replace(/:.*$/, ':8790');
+                initConflictModule(map, { apiBase })
+                    .then(mod => {
+                        conflictModule = mod;
+                        if (conflictModule) {
+                            conflictModule.setFilters(conflictFilters);
+                            conflictModule.setVisible(!!layerVisible.conflict);
+                        }
+                        debugLog('Conflict module initialized');
+                    })
+                    .catch(e => debugLog('Conflict module init failed: ' + (e?.message || e)));
+            }
         }
 
         function setMapStyle(style) {
@@ -833,7 +861,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false };
 
         function syncCctvUiState() {
             const cctvOn = !!layerVisible.cctv;
@@ -843,6 +871,17 @@ ALPHA-3 | REAR"></textarea>
             document.querySelectorAll('[data-cctv-toggle="1"]').forEach(btn => {
                 btn.textContent = cctvOn ? 'CCTV ON' : 'CCTV OFF';
             });
+        }
+
+        function setConflictWindow(windowRange) {
+            conflictFilters.windowRange = windowRange;
+            document.querySelectorAll('[data-conflict-window]').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-conflict-window') === windowRange);
+            });
+            if (conflictModule && layerVisible.conflict) {
+                conflictModule.setFilters(conflictFilters);
+                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
+            }
         }
 
         function toggleLayer(layer, forceState = null) {
@@ -908,6 +947,15 @@ ALPHA-3 | REAR"></textarea>
                     renderCctvLayer();
                 } else {
                     clearCctvLayer();
+                }
+            }
+
+            if (layer === 'conflict' && conflictModule) {
+                debugLog(`🌍 Conflict layer toggled ${layerVisible.conflict ? 'ON' : 'OFF'}`);
+                conflictModule.setVisible(!!layerVisible.conflict);
+                if (layerVisible.conflict) {
+                    conflictModule.setFilters(conflictFilters);
+                    conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict load failed: ' + (e?.message || e)));
                 }
             }
         }
@@ -5417,6 +5465,12 @@ out body;
                 initMap();
                 debugLog('Map initialized');
             }, 100);
+
+            setInterval(() => {
+                if (conflictModule && layerVisible.conflict) {
+                    conflictModule.refreshIfVisible(false).catch(() => {});
+                }
+            }, 5 * 60 * 1000);
 
             debugLog('App initialized, waiting for Tauri...');
 
