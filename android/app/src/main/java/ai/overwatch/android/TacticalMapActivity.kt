@@ -623,6 +623,16 @@ class TacticalMapActivity : AppCompatActivity() {
                 <option value="COP" ${if (pliMode == "COP") "selected" else ""}>COP</option>
                 <option value="MERGED" ${if (pliMode == "MERGED") "selected" else ""}>MERGED</option>
             </select>
+            <div class="sb-label" style="margin-top:8px;">Conflict Feed Window</div>
+            <select id="conflictWindowSel" class="sb-input" style="margin-top:6px;">
+                <option value="1d">Day</option>
+                <option value="7d">Week</option>
+                <option value="30d">Month</option>
+                <option value="custom">Custom Range</option>
+            </select>
+            <input id="conflictDateFrom" class="sb-input" type="date" style="margin-top:6px;" />
+            <input id="conflictDateTo" class="sb-input" type="date" style="margin-top:6px;" />
+            <input id="conflictCountry" class="sb-input" placeholder="Conflict country filter (optional)" style="margin-top:6px;" />
         </div>
         
         <div class="sb-section">
@@ -699,6 +709,10 @@ class TacticalMapActivity : AppCompatActivity() {
         let UNIT_TYPE = localStorage.getItem('eud:unit_type') || 'Individual Soldier';
         let currentHub = localStorage.getItem('eud:hub') || document.getElementById('cfgHub').value;
         if (currentHub && !currentHub.endsWith('/')) currentHub += '/';
+        let conflictWindow = localStorage.getItem('eud:conflict_window') || '1d';
+        let conflictDateFrom = localStorage.getItem('eud:conflict_date_from') || '';
+        let conflictDateTo = localStorage.getItem('eud:conflict_date_to') || '';
+        let conflictCountry = localStorage.getItem('eud:conflict_country') || '';
         let trackedEntities = [];
         let entityMarkers = {};
         let copCursor = 0;
@@ -840,12 +854,26 @@ class TacticalMapActivity : AppCompatActivity() {
         // Update PLI mode selector
         document.getElementById('pliModeSel').value = PLI_MODE;
         document.getElementById('cfgUnitType').value = UNIT_TYPE;
+        document.getElementById('conflictWindowSel').value = conflictWindow;
+        document.getElementById('conflictDateFrom').value = conflictDateFrom;
+        document.getElementById('conflictDateTo').value = conflictDateTo;
+        document.getElementById('conflictCountry').value = conflictCountry;
         toggleSidebar(localStorage.getItem('eud:sidebar_collapsed') === '1');
         document.querySelectorAll('input[data-sat-group]').forEach(chk => {
             chk.checked = satSelectedGroups.includes(chk.value);
         });
         const satMaxInput = document.getElementById('satMaxInput');
         if (satMaxInput) satMaxInput.value = String(satMaxMarkers);
+
+        function syncConflictDateInputs() {
+            const custom = document.getElementById('conflictWindowSel').value === 'custom';
+            const from = document.getElementById('conflictDateFrom');
+            const to = document.getElementById('conflictDateTo');
+            if (from) from.style.display = custom ? 'block' : 'none';
+            if (to) to.style.display = custom ? 'block' : 'none';
+        }
+        document.getElementById('conflictWindowSel').addEventListener('change', syncConflictDateInputs);
+        syncConflictDateInputs();
 
         function ensureCesiumViewer() {
             if (cesiumViewer || !window.Cesium) return;
@@ -1580,7 +1608,17 @@ class TacticalMapActivity : AppCompatActivity() {
             if (!force && (now - lastConflictFetchAt) < 15_000) return;
             lastConflictFetchAt = now;
             try {
-                const resp = await fetch(currentHub + 'api/events?window=7d&limit=2000');
+                const qs = new URLSearchParams();
+                qs.set('limit', '2000');
+                if (conflictWindow === 'custom') {
+                    if (conflictDateFrom) qs.set('date_from', conflictDateFrom);
+                    if (conflictDateTo) qs.set('date_to', conflictDateTo);
+                    if (!conflictDateFrom && !conflictDateTo) qs.set('window', '1d');
+                } else {
+                    qs.set('window', conflictWindow || '1d');
+                }
+                if (conflictCountry) qs.set('country', conflictCountry);
+                const resp = await fetch(currentHub + 'api/events?' + qs.toString());
                 if (!resp.ok) return;
                 const rows = await resp.json();
                 const seen = new Set();
@@ -2439,6 +2477,10 @@ class TacticalMapActivity : AppCompatActivity() {
             const unitType = document.getElementById('cfgUnitType').value;
             const hub = document.getElementById('cfgHub').value.trim();
             const mode = document.getElementById('pliModeSel').value;
+            const cWindow = document.getElementById('conflictWindowSel').value;
+            const cFrom = document.getElementById('conflictDateFrom').value;
+            const cTo = document.getElementById('conflictDateTo').value;
+            const cCountry = document.getElementById('conflictCountry').value.trim();
             
             // Update callsign: persist to Android app storage + update JS variable + re-push
             if (cs) {
@@ -2473,9 +2515,19 @@ class TacticalMapActivity : AppCompatActivity() {
             localStorage.setItem('eud:unit_type', UNIT_TYPE);
             PLI_MODE = mode;
             localStorage.setItem('eud:pli_mode', PLI_MODE);
-            
+
+            conflictWindow = cWindow || '1d';
+            conflictDateFrom = cFrom || '';
+            conflictDateTo = cTo || '';
+            conflictCountry = cCountry || '';
+            localStorage.setItem('eud:conflict_window', conflictWindow);
+            localStorage.setItem('eud:conflict_date_from', conflictDateFrom);
+            localStorage.setItem('eud:conflict_date_to', conflictDateTo);
+            localStorage.setItem('eud:conflict_country', conflictCountry);
+
             applyLayerVisibility();
-            document.getElementById('status').textContent = 'Callsign updated to: ' + OWN_CALLSIGN + ' • Mode: ' + PLI_MODE;
+            if (layerVisibility.conflict) pollConflictEvents(true);
+            document.getElementById('status').textContent = 'Callsign: ' + OWN_CALLSIGN + ' • Mode: ' + PLI_MODE + ' • Conflict: ' + (conflictWindow === 'custom' ? (conflictDateFrom + '→' + conflictDateTo) : conflictWindow) + (conflictCountry ? (' • ' + conflictCountry) : '');
         }
         
         function focusOwn() {

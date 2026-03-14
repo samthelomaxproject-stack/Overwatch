@@ -10,7 +10,7 @@ This is the initial backend scaffold for global conflict event mapping in Overwa
 ## Endpoints
 - `GET /health`
 - `GET /api/meta` (countries/event types + presets)
-- `GET /api/events?window=1d|7d|30d&country=&event_types=`
+- `GET /api/events?window=1d|7d|30d&country=&event_types=&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`
 - `GET /api/events/since?since=ISO8601&country=`
 - `GET /api/alerts/high-impact?window=1d|min_fatalities=10&country=`
 - `POST /api/ingest/acled?days=7&country=` (manual ingest trigger)

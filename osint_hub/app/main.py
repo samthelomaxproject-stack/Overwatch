@@ -147,17 +147,27 @@ def upsert_events(events: List[dict]):
         conn.commit()
 
 
-def _query_events(window: str, country: Optional[str], event_types: Optional[str], limit: int):
-    cache_key = f"w={window}|c={country or ''}|t={event_types or ''}|l={limit}"
+def _query_events(window: str, country: Optional[str], event_types: Optional[str], limit: int, date_from: Optional[str] = None, date_to: Optional[str] = None):
+    cache_key = f"w={window}|c={country or ''}|t={event_types or ''}|l={limit}|df={date_from or ''}|dt={date_to or ''}"
     cached = _get_cache(cache_key)
     if cached is not None:
         return cached
 
-    days = {"1d": 1, "7d": 7, "30d": 30}[window]
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    where = []
+    vals: List[object] = []
 
-    where = ["date(event_date) >= date(?)"]
-    vals: List[object] = [cutoff]
+    if date_from:
+        where.append("date(event_date) >= date(?)")
+        vals.append(date_from)
+    if date_to:
+        where.append("date(event_date) <= date(?)")
+        vals.append(date_to)
+
+    if not date_from and not date_to:
+        days = {"1d": 1, "7d": 7, "30d": 30}[window]
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+        where.append("date(event_date) >= date(?)")
+        vals.append(cutoff)
 
     if country:
         where.append("country = ?")
@@ -236,13 +246,15 @@ def ingest_acled(days: int = Query(7, ge=1, le=30), country: Optional[str] = Non
 
 @app.get("/api/events")
 def get_events(
-    window: str = Query("7d", pattern="^(1d|7d|30d)$"),
+    window: str = Query("1d", pattern="^(1d|7d|30d)$"),
     country: Optional[str] = None,
     event_types: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     limit: int = Query(1000, ge=1, le=5000),
 ):
     try:
-        return _query_events(window=window, country=country, event_types=event_types, limit=limit)
+        return _query_events(window=window, country=country, event_types=event_types, limit=limit, date_from=date_from, date_to=date_to)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -439,9 +439,9 @@
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group">
-                            <button class="tac-layer-btn active" data-conflict-window="7d" onclick="setConflictWindow('7d')">CONFLICT 7D</button>
-                            <button class="tac-layer-btn" data-conflict-window="1d" onclick="setConflictWindow('1d')">1D</button>
-                            <button class="tac-layer-btn" data-conflict-window="30d" onclick="setConflictWindow('30d')">30D</button>
+                            <button class="tac-layer-btn" data-conflict-window="7d" onclick="setConflictWindow('7d')">WEEK</button>
+                            <button class="tac-layer-btn active" data-conflict-window="1d" onclick="setConflictWindow('1d')">DAY</button>
+                            <button class="tac-layer-btn" data-conflict-window="30d" onclick="setConflictWindow('30d')">MONTH</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group" style="align-items:center;">
@@ -731,7 +731,7 @@ ALPHA-3 | REAR"></textarea>
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
         let conflictModule = null;
-        const conflictFilters = { windowRange: '7d', country: '', eventTypes: '' };
+        const conflictFilters = { windowRange: '1d', country: '', eventTypes: '' };
 
         // Map styles
         const mapStyles = {

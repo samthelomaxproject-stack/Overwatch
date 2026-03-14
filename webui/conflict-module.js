@@ -10,7 +10,7 @@ window.initConflictModule = async function initConflictModule(map, options = {})
 
   const state = {
     visible: false,
-    windowRange: '7d',
+    windowRange: '1d',
     country: '',
     eventTypes: '',
     lastLoadedAt: 0,
