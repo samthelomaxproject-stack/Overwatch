@@ -633,6 +633,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 <label><input id="layerCams" type="checkbox" ${if (pullCams) "checked" else ""} onchange="applyLayerVisibility()" /> Cams</label>
                 <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> SAT</label>
                 <label><input id="layerAdsb" type="checkbox" checked onchange="applyLayerVisibility()" /> ADS-B</label>
+                <label><input id="layerConflict" type="checkbox" onchange="applyLayerVisibility()" /> Conflict</label>
             </div>
             <div class="sub-menu">
                 <div class="sb-label">SAT Groups</div>
@@ -717,7 +718,8 @@ class TacticalMapActivity : AppCompatActivity() {
             heat: $pullHeatJs,
             cams: $pullCamsJs,
             sat: $pullSatJs,
-            adsb: true
+            adsb: true,
+            conflict: false
         };
         
         // Layer markers storage
@@ -728,6 +730,8 @@ class TacticalMapActivity : AppCompatActivity() {
         let camCones = {};
         let satMarkers = {};
         let adsbMarkers = {};
+        let conflictMarkers = {};
+        let lastConflictFetchAt = 0;
         let is3DMode = false;
         let cesiumViewer = null;
         let cesiumNorthLock = false;
@@ -1508,6 +1512,7 @@ class TacticalMapActivity : AppCompatActivity() {
             layerVisibility.cams = document.getElementById('layerCams').checked;
             layerVisibility.sat = document.getElementById('layerSat').checked;
             layerVisibility.adsb = document.getElementById('layerAdsb').checked;
+            layerVisibility.conflict = document.getElementById('layerConflict').checked;
             
             Object.values(entityMarkers).forEach(m => {
                 if (layerVisibility.entities) {
@@ -1556,6 +1561,79 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (map.hasLayer(m)) map.removeLayer(m);
                 }
             });
+
+            Object.values(conflictMarkers).forEach(m => {
+                if (layerVisibility.conflict) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
+
+            if (layerVisibility.conflict) {
+                pollConflictEvents(false);
+            }
+        }
+
+        async function pollConflictEvents(force=false) {
+            const now = Date.now();
+            if (!force && (now - lastConflictFetchAt) < 15_000) return;
+            lastConflictFetchAt = now;
+            try {
+                const resp = await fetch(currentHub + 'api/events?window=7d&limit=2000');
+                if (!resp.ok) return;
+                const rows = await resp.json();
+                const seen = new Set();
+                (Array.isArray(rows) ? rows : []).forEach(ev => {
+                    const lat = Number(ev.latitude);
+                    const lon = Number(ev.longitude);
+                    if (!isFinite(lat) || !isFinite(lon)) return;
+                    const key = String(ev.external_id || ev.id || (lat.toFixed(5) + ',' + lon.toFixed(5) + ':' + (ev.event_date || '')));
+                    seen.add(key);
+
+                    const fatal = Number(ev.fatalities || 0);
+                    const color = fatal >= 10 ? '#ef4444' : '#f59e0b';
+                    const radius = Math.max(4, Math.min(10, 4 + fatal * 0.1));
+                    const sources = Array.isArray(ev.sources) ? ev.sources : [];
+                    const srcHtml = sources.length
+                        ? '<ul style="margin:4px 0 0 16px;padding:0;">' + sources.map(s => {
+                            const name = String(s.name || 'source');
+                            const url = String(s.url || '');
+                            return url ? ('<li><a href="' + url + '" target="_blank">' + name + '</a></li>') : ('<li>' + name + '</li>');
+                        }).join('') + '</ul>'
+                        : '<div style="font-size:11px;color:#94a3b8;">No direct source links</div>';
+
+                    const popup = '<div style="min-width:240px;">'
+                        + '<b>' + (ev.event_type || 'Conflict event') + '</b><br>'
+                        + '<span style="font-size:11px;color:#94a3b8;">' + (ev.event_date || '') + ' • ' + (ev.location || '-') + ', ' + (ev.country || '-') + '</span><br>'
+                        + '<b>Actors:</b> ' + (ev.actor1 || 'N/A') + (ev.actor2 ? (' vs ' + ev.actor2) : '') + '<br>'
+                        + '<b>Fatalities:</b> ' + (ev.fatalities ?? 'Unknown') + '<br>'
+                        + '<b>Notes:</b> ' + (ev.notes || 'N/A') + '<br>'
+                        + '<b>Sources:</b>' + srcHtml
+                        + '</div>';
+
+                    let marker = conflictMarkers[key];
+                    if (!marker) {
+                        marker = L.circleMarker([lat, lon], { radius, color, weight: 1, fillOpacity: 0.6 });
+                        marker.bindPopup(popup);
+                        conflictMarkers[key] = marker;
+                    } else {
+                        marker.setLatLng([lat, lon]);
+                        marker.setStyle({ radius, color });
+                        marker.bindPopup(popup);
+                    }
+
+                    if (layerVisibility.conflict && !map.hasLayer(marker)) marker.addTo(map);
+                    if (!layerVisibility.conflict && map.hasLayer(marker)) map.removeLayer(marker);
+                });
+
+                Object.keys(conflictMarkers).forEach(k => {
+                    if (!seen.has(k)) {
+                        if (map.hasLayer(conflictMarkers[k])) map.removeLayer(conflictMarkers[k]);
+                        delete conflictMarkers[k];
+                    }
+                });
+            } catch (_) {}
         }
         
         // ===== LOCATION HANDLING =====
@@ -2564,11 +2642,13 @@ class TacticalMapActivity : AppCompatActivity() {
         setInterval(pollLocalSatcom, 15000);
         setInterval(syncEntityFeedsFromHub, 10000);
         setInterval(refreshGlassesStatus, 1500);
+        setInterval(() => { if (layerVisibility.conflict) pollConflictEvents(false); }, 30000);
         pollCOP();
         pollAdsb();
         pollLocalSatcom();
         syncEntityFeedsFromHub();
         refreshGlassesStatus();
+        pollConflictEvents(true);
         updateSatDiag();
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';
