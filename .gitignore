@@ -4,6 +4,9 @@ sigint/target/
 
 # macOS
 .DS_Store
+
+# Local secrets
+osint_hub/.env
 **/.DS_Store
 
 # Python cache

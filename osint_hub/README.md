@@ -26,6 +26,13 @@ cp .env.example .env
 uvicorn app.main:app --reload --port 8790
 ```
 
+## ACLED auth guideline (current)
+- Use OAuth per ACLED docs:
+  - `POST https://acleddata.com/oauth/token`
+  - form fields: `username`, `password`, `grant_type=password`, `client_id=acled`
+- Use returned `access_token` as `Authorization: Bearer <token>` for `/api/acled/read` requests.
+- Refresh with `grant_type=refresh_token` + `client_id=acled` when needed.
+
 ## Notes
 - This is intentionally additive and does not replace existing Overwatch hub APIs yet.
 - Next phase: migrate storage to Postgres, integrate with existing hub service/routes, and connect webui + Android consumers.
