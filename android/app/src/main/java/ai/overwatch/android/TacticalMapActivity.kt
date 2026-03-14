@@ -1618,7 +1618,15 @@ class TacticalMapActivity : AppCompatActivity() {
                     qs.set('window', conflictWindow || '1d');
                 }
                 if (conflictCountry) qs.set('country', conflictCountry);
-                const resp = await fetch(currentHub + 'api/events?' + qs.toString());
+                let resp = await fetch(currentHub + 'api/events?' + qs.toString());
+                if (!resp.ok) {
+                    // Fallback to OSINT sidecar on :8790 if hub API doesn't expose /api/events
+                    try {
+                        const u = new URL(currentHub);
+                        const sidecarBase = u.protocol + '//' + u.hostname + ':8790/';
+                        resp = await fetch(sidecarBase + 'api/events?' + qs.toString());
+                    } catch (_) {}
+                }
                 if (!resp.ok) return;
                 const rows = await resp.json();
                 const seen = new Set();
@@ -1632,6 +1640,8 @@ class TacticalMapActivity : AppCompatActivity() {
                     const fatal = Number(ev.fatalities || 0);
                     const color = fatal >= 10 ? '#ef4444' : '#f59e0b';
                     const radius = Math.max(4, Math.min(10, 4 + fatal * 0.1));
+                    const fireHtml = '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:' + color + ';font-size:18px;line-height:1;filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">🔥</div>';
+                    const fireIcon = L.divIcon({ html: fireHtml, className: 'conflict-fire-icon', iconSize: [20,20], iconAnchor: [10,10] });
                     const sources = Array.isArray(ev.sources) ? ev.sources : [];
                     const srcHtml = sources.length
                         ? '<ul style="margin:4px 0 0 16px;padding:0;">' + sources.map(s => {
@@ -1652,12 +1662,12 @@ class TacticalMapActivity : AppCompatActivity() {
 
                     let marker = conflictMarkers[key];
                     if (!marker) {
-                        marker = L.circleMarker([lat, lon], { radius, color, weight: 1, fillOpacity: 0.6 });
+                        marker = L.marker([lat, lon], { icon: fireIcon });
                         marker.bindPopup(popup);
                         conflictMarkers[key] = marker;
                     } else {
                         marker.setLatLng([lat, lon]);
-                        marker.setStyle({ radius, color });
+                        marker.setIcon(fireIcon);
                         marker.bindPopup(popup);
                     }
 
