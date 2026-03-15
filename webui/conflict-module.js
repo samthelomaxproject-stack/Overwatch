@@ -13,12 +13,20 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     windowRange: '1d',
     country: '',
     eventTypes: '',
+    dateFrom: '',
+    dateTo: '',
     lastLoadedAt: 0,
   };
 
   function buildUrl() {
     const u = new URL((apiBase ? apiBase : '') + '/api/events', window.location.origin);
-    u.searchParams.set('window', state.windowRange);
+    if (state.windowRange === 'custom') {
+      if (state.dateFrom) u.searchParams.set('date_from', state.dateFrom);
+      if (state.dateTo) u.searchParams.set('date_to', state.dateTo);
+      if (!state.dateFrom && !state.dateTo) u.searchParams.set('window', '1d');
+    } else {
+      u.searchParams.set('window', state.windowRange);
+    }
     if (state.country) u.searchParams.set('country', state.country);
     if (state.eventTypes) u.searchParams.set('event_types', state.eventTypes);
     return u.toString();
@@ -87,6 +95,8 @@ window.initConflictModule = async function initConflictModule(map, options = {})
       if (filters.windowRange) state.windowRange = filters.windowRange;
       if (typeof filters.country === 'string') state.country = filters.country;
       if (typeof filters.eventTypes === 'string') state.eventTypes = filters.eventTypes;
+      if (typeof filters.dateFrom === 'string') state.dateFrom = filters.dateFrom;
+      if (typeof filters.dateTo === 'string') state.dateTo = filters.dateTo;
     },
     refreshIfVisible,
     load,

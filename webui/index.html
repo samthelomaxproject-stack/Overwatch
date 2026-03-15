@@ -436,24 +436,22 @@
                             <button class="tac-layer-btn" data-layer="sat" onclick="toggleLayer('sat')">SAT</button>
                             <button class="tac-layer-btn" data-layer="cctv" onclick="toggleLayer('cctv')">CCTV</button>
                             <button class="tac-layer-btn" data-layer="conflict" onclick="toggleLayer('conflict')">CONFLICT</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('cams')">CAMS</button>
+                            <button class="tac-layer-btn" onclick="toggleLayer('heat')">HEAT</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group">
                             <button class="tac-layer-btn" data-conflict-window="7d" onclick="setConflictWindow('7d')">WEEK</button>
                             <button class="tac-layer-btn active" data-conflict-window="1d" onclick="setConflictWindow('1d')">DAY</button>
                             <button class="tac-layer-btn" data-conflict-window="30d" onclick="setConflictWindow('30d')">MONTH</button>
+                            <button class="tac-layer-btn" data-conflict-window="custom" onclick="setConflictWindow('custom')">CUSTOM</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group" style="align-items:center;">
+                            <input id="conflictDateFrom" type="date" class="tac-input" style="max-width:160px;display:none;" onchange="setConflictDateRange()" />
+                            <input id="conflictDateTo" type="date" class="tac-input" style="max-width:160px;display:none;" onchange="setConflictDateRange()" />
                             <select id="conflictCountrySel" class="tac-input" style="max-width:170px;" onchange="setConflictCountry(this.value)">
                                 <option value="">GLOBAL</option>
-                            </select>
-                            <select id="conflictTypeSel" class="tac-input" style="max-width:240px;" onchange="setConflictType(this.value)">
-                                <option value="">ALL TYPES</option>
-                                <option value="Battles">Battles</option>
-                                <option value="Explosions/Remote violence">Explosions/Remote violence</option>
-                                <option value="Strategic developments">Strategic developments</option>
-                                <option value="Violence against civilians">Violence against civilians</option>
                             </select>
                         </div>
                     </div>
@@ -731,7 +729,7 @@ ALPHA-3 | REAR"></textarea>
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
         let conflictModule = null;
-        const conflictFilters = { windowRange: '1d', country: '', eventTypes: '' };
+        const conflictFilters = { windowRange: '1d', country: '', eventTypes: '', dateFrom: '', dateTo: '' };
 
         // Map styles
         const mapStyles = {
@@ -833,6 +831,7 @@ ALPHA-3 | REAR"></textarea>
                         if (conflictModule) {
                             conflictModule.setFilters(conflictFilters);
                             conflictModule.setVisible(!!layerVisible.conflict);
+                            syncConflictDateInputs();
                             try {
                                 const meta = await conflictModule.loadMeta();
                                 const countrySel = document.getElementById('conflictCountrySel');
@@ -891,7 +890,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false, cams: false, heat: false };
 
         function syncCctvUiState() {
             const cctvOn = !!layerVisible.cctv;
@@ -903,14 +902,42 @@ ALPHA-3 | REAR"></textarea>
             });
         }
 
+        function syncConflictDateInputs() {
+            const custom = conflictFilters.windowRange === 'custom';
+            const from = document.getElementById('conflictDateFrom');
+            const to = document.getElementById('conflictDateTo');
+            if (from) from.style.display = custom ? 'inline-block' : 'none';
+            if (to) to.style.display = custom ? 'inline-block' : 'none';
+        }
+
         function setConflictWindow(windowRange) {
             conflictFilters.windowRange = windowRange;
+            if (windowRange !== 'custom') {
+                conflictFilters.dateFrom = '';
+                conflictFilters.dateTo = '';
+                const from = document.getElementById('conflictDateFrom');
+                const to = document.getElementById('conflictDateTo');
+                if (from) from.value = '';
+                if (to) to.value = '';
+            }
             document.querySelectorAll('[data-conflict-window]').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-conflict-window') === windowRange);
             });
+            syncConflictDateInputs();
             if (conflictModule && layerVisible.conflict) {
                 conflictModule.setFilters(conflictFilters);
                 conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
+            }
+        }
+
+        function setConflictDateRange() {
+            const from = document.getElementById('conflictDateFrom');
+            const to = document.getElementById('conflictDateTo');
+            conflictFilters.dateFrom = from?.value || '';
+            conflictFilters.dateTo = to?.value || '';
+            if (conflictModule && layerVisible.conflict && conflictFilters.windowRange === 'custom') {
+                conflictModule.setFilters(conflictFilters);
+                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict date reload failed: ' + (e?.message || e)));
             }
         }
 
@@ -919,14 +946,6 @@ ALPHA-3 | REAR"></textarea>
             if (conflictModule && layerVisible.conflict) {
                 conflictModule.setFilters(conflictFilters);
                 conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict country reload failed: ' + (e?.message || e)));
-            }
-        }
-
-        function setConflictType(eventType) {
-            conflictFilters.eventTypes = eventType || '';
-            if (conflictModule && layerVisible.conflict) {
-                conflictModule.setFilters(conflictFilters);
-                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict type reload failed: ' + (e?.message || e)));
             }
         }
 
@@ -972,6 +991,18 @@ ALPHA-3 | REAR"></textarea>
             if (layer === 'wifi') {
                 layerVisible.wifi ? renderHexLayer('wifi') : clearHexLayer('wifi');
             }
+            if (layer === 'heat') {
+                const on = !!layerVisible.heat;
+                layerVisible.rf = on;
+                layerVisible.wifi = on;
+                if (on) {
+                    renderHexLayer('rf');
+                    renderHexLayer('wifi');
+                } else {
+                    clearHexLayer('rf');
+                    clearHexLayer('wifi');
+                }
+            }
 
             if (layer === 'sat') {
                 debugLog(`🛰️ SAT layer toggled ${layerVisible.sat ? 'ON' : 'OFF'}`);
@@ -986,9 +1017,14 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
 
-            if (layer === 'cctv') {
+            if (layer === 'cctv' || layer === 'cams') {
+                if (layer === 'cams') {
+                    layerVisible.cctv = !!layerVisible.cams;
+                } else {
+                    layerVisible.cams = !!layerVisible.cctv;
+                }
                 syncCctvUiState();
-                debugLog(`📹 CCTV layer toggled ${layerVisible.cctv ? 'ON' : 'OFF'}`);
+                debugLog(`📹 CCTV/CAMS layer toggled ${layerVisible.cctv ? 'ON' : 'OFF'}`);
                 if (layerVisible.cctv) {
                     renderCctvLayer();
                 } else {
