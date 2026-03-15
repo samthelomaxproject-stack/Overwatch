@@ -21,6 +21,8 @@ This sidecar is the **hub-first OSINT backend** for conflict and Shodan layers.
 - `POST /api/shodan/refresh-region?bbox=&category=sdr,satcom&force=false`
 - `GET /api/shodan/detail/{id}`
 - `GET /api/shodan/categories`
+- `POST /api/shodan/mock-seed` (verification-only mock data)
+- `POST /api/shodan/mock-clear` (remove only `source=mock_shodan` rows)
 
 ## Quick start
 ```bash

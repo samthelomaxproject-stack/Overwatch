@@ -314,6 +314,7 @@ def get_shodan_events(
             "shodan_url": r["shodan_url"],
             "query": r["query"],
             "region_key": r["region_key"],
+            "source": r["source"],
             "style": {"icon": "divIcon", "color": "#8b5cf6", "radius": 6},
             "popup": {
                 "title": (r["product"] or "Shodan") + f" • {r['ip']}:{r['port']}",
@@ -349,6 +350,52 @@ def get_shodan_meta() -> Dict[str, object]:
 
 def get_categories() -> List[str]:
     return list(CATEGORY_QUERIES.keys())
+
+
+def seed_mock_findings() -> Dict[str, object]:
+    now = _now_iso()
+    base = [
+        {"id": "mock-sdr-1", "category": "sdr", "ip": "198.51.100.10", "port": 8073, "product": "OpenWebRX", "lat": 33.1819, "lon": -96.8877, "city": "Frisco", "region_code": "TX"},
+        {"id": "mock-sdr-2", "category": "sdr", "ip": "198.51.100.11", "port": 8073, "product": "KiwiSDR", "lat": 33.1750, "lon": -96.9000, "city": "Frisco", "region_code": "TX"},
+        {"id": "mock-adsb-1", "category": "adsb_receiver", "ip": "198.51.100.20", "port": 30003, "product": "dump1090", "lat": 33.1702, "lon": -96.8801, "city": "Plano", "region_code": "TX"},
+        {"id": "mock-adsb-2", "category": "adsb_receiver", "ip": "198.51.100.21", "port": 80, "product": "tar1090", "lat": 33.1600, "lon": -96.8700, "city": "Plano", "region_code": "TX"},
+        {"id": "mock-sat-1", "category": "satcom", "ip": "198.51.100.30", "port": 443, "product": "iDirect NMS", "lat": 33.1900, "lon": -96.8600, "city": "McKinney", "region_code": "TX"},
+        {"id": "mock-sat-2", "category": "satcom", "ip": "198.51.100.31", "port": 443, "product": "Hughes Gateway", "lat": 33.2000, "lon": -96.8450, "city": "McKinney", "region_code": "TX"},
+        {"id": "mock-cam-1", "category": "camera", "ip": "198.51.100.40", "port": 554, "product": "Hikvision Camera", "lat": 33.1550, "lon": -96.9050, "city": "Frisco", "region_code": "TX"},
+        {"id": "mock-cam-2", "category": "camera", "ip": "198.51.100.41", "port": 80, "product": "Axis Cam UI", "lat": 33.1450, "lon": -96.9150, "city": "Frisco", "region_code": "TX"},
+    ]
+
+    with get_conn() as conn:
+        for m in base:
+            conn.execute(
+                """
+                INSERT INTO shodan_findings (
+                  id, ip, port, transport, org, isp, asn, hostnames, domains, product, version, os, tags, vulns,
+                  category, lat, lon, country_code, country_name, city, region_code, timestamp, last_seen,
+                  shodan_url, query, source, region_key, inserted_at, updated_at, stale_score
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
+                  lat=excluded.lat, lon=excluded.lon, category=excluded.category, product=excluded.product,
+                  city=excluded.city, region_code=excluded.region_code, source=excluded.source,
+                  updated_at=excluded.updated_at, last_seen=excluded.last_seen
+                """,
+                (
+                    m["id"], m["ip"], m["port"], "tcp", "Mock Org", "Mock ISP", "AS65000", "", "",
+                    m["product"], "", "", "mock,verification", "", m["category"], m["lat"], m["lon"],
+                    "US", "United States", m["city"], m["region_code"], now, now,
+                    f"https://www.shodan.io/host/{m['ip']}", "mock seed", "mock_shodan", "tile10:12:8", now, now, 0,
+                ),
+            )
+        conn.commit()
+    return {"ok": True, "inserted": len(base), "source": "mock_shodan"}
+
+
+def clear_mock_findings() -> Dict[str, object]:
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM shodan_findings WHERE source='mock_shodan'")
+        deleted = cur.rowcount if cur.rowcount is not None else 0
+        conn.commit()
+    return {"ok": True, "deleted": int(deleted), "source": "mock_shodan"}
 
 
 def get_detail(item_id: str) -> Optional[dict]:

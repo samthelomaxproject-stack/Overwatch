@@ -15,6 +15,8 @@ from .shodan import (
     get_shodan_meta,
     get_categories,
     get_detail,
+    seed_mock_findings,
+    clear_mock_findings,
     scheduler_enabled,
     scheduler_interval_sec,
 )
@@ -487,3 +489,15 @@ def shodan_detail(item_id: str):
 @app.get("/api/shodan/categories")
 def shodan_categories():
     return {"items": get_categories()}
+
+
+@app.post("/api/shodan/mock-seed")
+def shodan_mock_seed():
+    # verification-only helper; does not touch live discovery logic.
+    return seed_mock_findings()
+
+
+@app.post("/api/shodan/mock-clear")
+def shodan_mock_clear():
+    # cleanup helper to remove only mock records.
+    return clear_mock_findings()
