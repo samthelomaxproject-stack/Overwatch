@@ -644,6 +644,7 @@ class TacticalMapActivity : AppCompatActivity() {
                 <label><input id="layerSat" type="checkbox" ${if (pullSat) "checked" else ""} onchange="applyLayerVisibility()" /> SAT</label>
                 <label><input id="layerAdsb" type="checkbox" checked onchange="applyLayerVisibility()" /> ADS-B</label>
                 <label><input id="layerConflict" type="checkbox" onchange="applyLayerVisibility()" /> Conflict</label>
+                <label><input id="layerShodan" type="checkbox" onchange="applyLayerVisibility()" /> Shodan</label>
             </div>
             <div class="sub-menu">
                 <div class="sb-label">SAT Groups</div>
@@ -733,7 +734,8 @@ class TacticalMapActivity : AppCompatActivity() {
             cams: $pullCamsJs,
             sat: $pullSatJs,
             adsb: true,
-            conflict: false
+            conflict: false,
+            shodan: false
         };
         
         // Layer markers storage
@@ -745,7 +747,9 @@ class TacticalMapActivity : AppCompatActivity() {
         let satMarkers = {};
         let adsbMarkers = {};
         let conflictMarkers = {};
+        let shodanMarkers = {};
         let lastConflictFetchAt = 0;
+        let lastShodanFetchAt = 0;
         let is3DMode = false;
         let cesiumViewer = null;
         let cesiumNorthLock = false;
@@ -1541,6 +1545,7 @@ class TacticalMapActivity : AppCompatActivity() {
             layerVisibility.sat = document.getElementById('layerSat').checked;
             layerVisibility.adsb = document.getElementById('layerAdsb').checked;
             layerVisibility.conflict = document.getElementById('layerConflict').checked;
+            layerVisibility.shodan = document.getElementById('layerShodan').checked;
             
             Object.values(entityMarkers).forEach(m => {
                 if (layerVisibility.entities) {
@@ -1598,8 +1603,19 @@ class TacticalMapActivity : AppCompatActivity() {
                 }
             });
 
+            Object.values(shodanMarkers).forEach(m => {
+                if (layerVisibility.shodan) {
+                    if (!map.hasLayer(m)) m.addTo(map);
+                } else {
+                    if (map.hasLayer(m)) map.removeLayer(m);
+                }
+            });
+
             if (layerVisibility.conflict) {
                 pollConflictEvents(false);
+            }
+            if (layerVisibility.shodan) {
+                pollShodanEvents(false);
             }
         }
 
@@ -1639,7 +1655,6 @@ class TacticalMapActivity : AppCompatActivity() {
 
                     const fatal = Number(ev.fatalities || 0);
                     const color = fatal >= 10 ? '#ef4444' : '#f59e0b';
-                    const radius = Math.max(4, Math.min(10, 4 + fatal * 0.1));
                     const fireHtml = '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:' + color + ';font-size:18px;line-height:1;filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">🔥</div>';
                     const fireIcon = L.divIcon({ html: fireHtml, className: 'conflict-fire-icon', iconSize: [20,20], iconAnchor: [10,10] });
                     const sources = Array.isArray(ev.sources) ? ev.sources : [];
@@ -1679,6 +1694,62 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (!seen.has(k)) {
                         if (map.hasLayer(conflictMarkers[k])) map.removeLayer(conflictMarkers[k]);
                         delete conflictMarkers[k];
+                    }
+                });
+            } catch (_) {}
+        }
+
+        async function pollShodanEvents(force=false) {
+            const now = Date.now();
+            if (!force && (now - lastShodanFetchAt) < 30_000) return;
+            lastShodanFetchAt = now;
+            try {
+                const b = map.getBounds();
+                const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
+                const qs = new URLSearchParams();
+                qs.set('bbox', bbox);
+                qs.set('limit', '1000');
+                let resp = await fetch(currentHub + 'api/shodan/markers?' + qs.toString());
+                if (!resp.ok) {
+                    try {
+                        const u = new URL(currentHub);
+                        const sidecarBase = u.protocol + '//' + u.hostname + ':8790/';
+                        resp = await fetch(sidecarBase + 'api/shodan/markers?' + qs.toString());
+                    } catch (_) {}
+                }
+                if (!resp.ok) return;
+                const rows = await resp.json();
+                const seen = new Set();
+                (Array.isArray(rows) ? rows : []).forEach(r => {
+                    const lat = Number(r.lat);
+                    const lon = Number(r.lon);
+                    if (!isFinite(lat) || !isFinite(lon)) return;
+                    const key = String(r.id || (r.ip + ':' + r.port));
+                    seen.add(key);
+                    const html = '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;line-height:1;filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">🛰️</div>';
+                    const icon = L.divIcon({ html, className: 'shodan-icon', iconSize: [18,18], iconAnchor: [9,9] });
+                    const popup = '<div style="min-width:220px;">'
+                        + '<b>Shodan ' + (r.ip || '-') + ':' + (r.port || '-') + '</b><br>'
+                        + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>'
+                        + '<b>Org:</b> ' + (r.org || '-') + '<br>'
+                        + '<b>ASN:</b> ' + (r.asn || '-') + '<br>'
+                        + '<b>Product:</b> ' + (r.product || '-') + '<br>'
+                        + '<b>Category:</b> ' + (r.category || '-') + '</div>';
+                    let marker = shodanMarkers[key];
+                    if (!marker) {
+                        marker = L.marker([lat, lon], { icon });
+                        shodanMarkers[key] = marker;
+                    } else {
+                        marker.setLatLng([lat, lon]);
+                        marker.setIcon(icon);
+                    }
+                    marker.bindPopup(popup);
+                    if (layerVisibility.shodan && !map.hasLayer(marker)) marker.addTo(map);
+                });
+                Object.keys(shodanMarkers).forEach(k => {
+                    if (!seen.has(k)) {
+                        if (map.hasLayer(shodanMarkers[k])) map.removeLayer(shodanMarkers[k]);
+                        delete shodanMarkers[k];
                     }
                 });
             } catch (_) {}
@@ -2705,12 +2776,14 @@ class TacticalMapActivity : AppCompatActivity() {
         setInterval(syncEntityFeedsFromHub, 10000);
         setInterval(refreshGlassesStatus, 1500);
         setInterval(() => { if (layerVisibility.conflict) pollConflictEvents(false); }, 30000);
+        setInterval(() => { if (layerVisibility.shodan) pollShodanEvents(false); }, 30000);
         pollCOP();
         pollAdsb();
         pollLocalSatcom();
         syncEntityFeedsFromHub();
         refreshGlassesStatus();
         pollConflictEvents(true);
+        pollShodanEvents(true);
         updateSatDiag();
         
         document.getElementById('status').textContent = PLI_MODE === 'LOCAL' ? 'Local Mode + COP Sync' : 'Connecting...';

@@ -1,6 +1,6 @@
-# Overwatch OSINT Conflict Module (Initial Scaffold)
+# Overwatch OSINT Module (Conflict + Shodan)
 
-This is the initial backend scaffold for global conflict event mapping in Overwatch.
+This sidecar is the **hub-first OSINT backend** for conflict and Shodan layers.
 
 ## Stack (scaffold)
 - FastAPI (Python)
@@ -14,6 +14,8 @@ This is the initial backend scaffold for global conflict event mapping in Overwa
 - `GET /api/events/since?since=ISO8601&country=`
 - `GET /api/alerts/high-impact?window=1d|min_fatalities=10&country=`
 - `POST /api/ingest/acled?days=7&country=` (manual ingest trigger)
+- `GET /api/shodan/markers?bbox=minLon,minLat,maxLon,maxLat&categories=sdr,camera&country=&limit=600&refresh=false`
+- `POST /api/shodan/refresh?bbox=minLon,minLat,maxLon,maxLat&categories=sdr,adsb_receiver&force=true`
 
 ## Quick start
 ```bash
@@ -22,7 +24,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# edit .env and set ACLED_EMAIL + ACLED_KEY
+# edit .env and set ACLED_USERNAME + ACLED_PASSWORD (+ optional SHODAN_API_KEY)
 uvicorn app.main:app --reload --port 8790
 ```
 
@@ -33,5 +35,7 @@ uvicorn app.main:app --reload --port 8790
 - Use returned `access_token` as `Authorization: Bearer <token>` for `/api/acled/read` requests.
 
 ## Notes
+- Hub-first rule: only this sidecar talks to Shodan API; web/APK consume normalized hub endpoints only.
+- Cache-first discovery minimizes Shodan credit usage (region/category TTL + SQLite findings cache).
 - This is intentionally additive and does not replace existing Overwatch hub APIs yet.
 - Next phase: migrate storage to Postgres, integrate with existing hub service/routes, and connect webui + Android consumers.

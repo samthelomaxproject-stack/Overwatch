@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from .acled import fetch_acled
 from .db import get_conn, init_db
+from .shodan import discover_shodan, get_shodan_markers, scheduler_enabled, scheduler_interval_sec
 
 load_dotenv()
 app = FastAPI(title="Overwatch OSINT Conflict API", version="0.2.0")
@@ -22,16 +23,22 @@ _cache: Dict[str, Tuple[float, list]] = {}
 _cache_lock = threading.Lock()
 _last_ingest_meta = {"at": None, "count": 0, "ok": None, "error": None}
 _ingest_thread_started = False
+_shodan_thread_started = False
+_last_shodan_meta = {"at": None, "fetched": 0, "ok": None, "error": None}
 
 
 @app.on_event("startup")
 def startup():
-    global _ingest_thread_started
+    global _ingest_thread_started, _shodan_thread_started
     init_db()
     if AUTO_INGEST_ENABLED and not _ingest_thread_started:
         t = threading.Thread(target=_ingest_loop, daemon=True)
         t.start()
         _ingest_thread_started = True
+    if scheduler_enabled() and not _shodan_thread_started:
+        t = threading.Thread(target=_shodan_loop, daemon=True)
+        t.start()
+        _shodan_thread_started = True
 
 
 def _clear_cache():
@@ -81,6 +88,35 @@ def _ingest_loop():
                 "error": str(e),
             })
         time.sleep(max(5, AUTO_INGEST_INTERVAL_MIN) * 60)
+
+
+def _shodan_discover_once(force_refresh: bool = False):
+    try:
+        result = discover_shodan(bbox=None, categories=None, force_refresh=force_refresh)
+        _last_shodan_meta.update({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "fetched": int(result.get("fetched", 0)),
+            "ok": bool(result.get("ok", False)),
+            "error": result.get("reason") if not result.get("ok", False) else None,
+        })
+        return result
+    except Exception as e:
+        _last_shodan_meta.update({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "fetched": 0,
+            "ok": False,
+            "error": str(e),
+        })
+        raise
+
+
+def _shodan_loop():
+    while True:
+        try:
+            _shodan_discover_once(force_refresh=False)
+        except Exception:
+            pass
+        time.sleep(max(30, scheduler_interval_sec()))
 
 
 def upsert_events(events: List[dict]):
@@ -232,6 +268,11 @@ def health():
             "days": AUTO_INGEST_DAYS,
             "last": _last_ingest_meta,
         },
+        "shodan": {
+            "scheduler_enabled": scheduler_enabled(),
+            "scheduler_interval_sec": scheduler_interval_sec(),
+            "last": _last_shodan_meta,
+        },
     }
 
 
@@ -308,3 +349,40 @@ def meta():
             "africa-hotspots": ["Sudan", "DR Congo", "Somalia", "Mali", "Burkina Faso", "Niger", "Nigeria", "Ethiopia", "Mozambique"],
         },
     }
+
+
+@app.get("/api/shodan/markers")
+def shodan_markers(
+    bbox: Optional[str] = None,
+    categories: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = Query(600, ge=1, le=5000),
+    refresh: bool = Query(False),
+):
+    cat_list = [c.strip() for c in (categories or "").split(",") if c.strip()]
+    try:
+        if refresh:
+            _shodan_discover_once(force_refresh=True)
+        return get_shodan_markers(bbox=bbox, categories=cat_list or None, country=country, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/shodan/refresh")
+def shodan_refresh(
+    bbox: Optional[str] = None,
+    categories: Optional[str] = None,
+    force: bool = Query(True),
+):
+    cat_list = [c.strip() for c in (categories or "").split(",") if c.strip()]
+    try:
+        result = discover_shodan(bbox=bbox, categories=cat_list or None, force_refresh=force)
+        _last_shodan_meta.update({
+            "at": datetime.now(timezone.utc).isoformat(),
+            "fetched": int(result.get("fetched", 0)),
+            "ok": bool(result.get("ok", False)),
+            "error": result.get("reason") if not result.get("ok", False) else None,
+        })
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

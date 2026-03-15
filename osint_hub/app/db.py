@@ -40,6 +40,41 @@ CREATE TABLE IF NOT EXISTS event_sources (
 CREATE INDEX IF NOT EXISTS idx_events_date ON conflict_events(event_date DESC);
 CREATE INDEX IF NOT EXISTS idx_events_type ON conflict_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_country ON conflict_events(country);
+
+CREATE TABLE IF NOT EXISTS shodan_findings (
+  id TEXT PRIMARY KEY,
+  ip TEXT,
+  port INTEGER,
+  transport TEXT,
+  org TEXT,
+  isp TEXT,
+  asn TEXT,
+  hostnames TEXT,
+  product TEXT,
+  tags TEXT,
+  vulns TEXT,
+  country_code TEXT,
+  country_name TEXT,
+  city TEXT,
+  latitude REAL,
+  longitude REAL,
+  category TEXT,
+  source_query TEXT,
+  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS shodan_region_cache (
+  region_key TEXT NOT NULL,
+  categories_key TEXT NOT NULL,
+  last_discovery_at TEXT NOT NULL,
+  last_result_count INTEGER DEFAULT 0,
+  PRIMARY KEY (region_key, categories_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_shodan_updated ON shodan_findings(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shodan_category ON shodan_findings(category);
+CREATE INDEX IF NOT EXISTS idx_shodan_geo ON shodan_findings(latitude, longitude);
 """
 
 
