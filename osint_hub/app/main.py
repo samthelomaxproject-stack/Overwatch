@@ -9,7 +9,15 @@ from fastapi import FastAPI, HTTPException, Query
 
 from .acled import fetch_acled
 from .db import get_conn, init_db
-from .shodan import discover_shodan, get_shodan_markers, scheduler_enabled, scheduler_interval_sec
+from .shodan import (
+    discover_shodan,
+    get_shodan_events,
+    get_shodan_meta,
+    get_categories,
+    get_detail,
+    scheduler_enabled,
+    scheduler_interval_sec,
+)
 
 load_dotenv()
 app = FastAPI(title="Overwatch OSINT Conflict API", version="0.2.0")
@@ -25,6 +33,8 @@ _last_ingest_meta = {"at": None, "count": 0, "ok": None, "error": None}
 _ingest_thread_started = False
 _shodan_thread_started = False
 _last_shodan_meta = {"at": None, "fetched": 0, "ok": None, "error": None}
+_shodan_refresh_lock = threading.Lock()
+_shodan_refresh_inflight = set()
 
 
 @app.on_event("startup")
@@ -117,6 +127,24 @@ def _shodan_loop():
         except Exception:
             pass
         time.sleep(max(30, scheduler_interval_sec()))
+
+
+def _queue_shodan_refresh(bbox: Optional[str], categories: Optional[List[str]], force: bool = False) -> bool:
+    key = f"{bbox or 'global'}|{','.join(sorted(categories or []))}|{int(force)}"
+    with _shodan_refresh_lock:
+        if key in _shodan_refresh_inflight:
+            return False
+        _shodan_refresh_inflight.add(key)
+
+    def _run():
+        try:
+            discover_shodan(bbox=bbox, categories=categories, force_refresh=force)
+        finally:
+            with _shodan_refresh_lock:
+                _shodan_refresh_inflight.discard(key)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
 
 
 def upsert_events(events: List[dict]):
@@ -351,38 +379,111 @@ def meta():
     }
 
 
-@app.get("/api/shodan/markers")
-def shodan_markers(
+@app.get("/api/shodan/events")
+def shodan_events(
     bbox: Optional[str] = None,
-    categories: Optional[str] = None,
+    category: Optional[str] = None,
+    since: Optional[str] = None,
+    stale: Optional[int] = Query(None, ge=1, le=720),
     country: Optional[str] = None,
-    limit: int = Query(600, ge=1, le=5000),
-    refresh: bool = Query(False),
+    limit: int = Query(500, ge=1, le=5000),
 ):
-    cat_list = [c.strip() for c in (categories or "").split(",") if c.strip()]
-    try:
-        if refresh:
-            _shodan_discover_once(force_refresh=True)
-        return get_shodan_markers(bbox=bbox, categories=cat_list or None, country=country, limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
+    configured = bool(os.getenv("SHODAN_API_KEY", "").strip())
+    if not configured:
+        return {
+            "items": [],
+            "meta": {
+                "source": "hub_shodan_cache",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "configured": False,
+                "stale": False,
+                "queued_refresh": False,
+                "region_keys": [],
+            },
+        }
+
+    queued = False
+    if stale is not None:
+        # stale hint triggers background refresh only; response remains cache-first.
+        queued = _queue_shodan_refresh(bbox=bbox, categories=cat_list or None, force=False)
+
+    items = get_shodan_events(bbox=bbox, categories=cat_list or None, since=since, country=country, limit=limit)
+    region_keys = sorted(list({str(i.get("region_key") or "") for i in items if i.get("region_key")}))
+    return {
+        "items": items,
+        "meta": {
+            "source": "hub_shodan_cache",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "configured": True,
+            "stale": False,
+            "queued_refresh": queued,
+            "region_keys": region_keys,
+        },
+    }
 
 
-@app.post("/api/shodan/refresh")
-def shodan_refresh(
+@app.get("/api/shodan/events/since")
+def shodan_events_since(
+    since: str,
+    category: Optional[str] = None,
     bbox: Optional[str] = None,
-    categories: Optional[str] = None,
-    force: bool = Query(True),
+    country: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=5000),
 ):
-    cat_list = [c.strip() for c in (categories or "").split(",") if c.strip()]
-    try:
-        result = discover_shodan(bbox=bbox, categories=cat_list or None, force_refresh=force)
-        _last_shodan_meta.update({
-            "at": datetime.now(timezone.utc).isoformat(),
-            "fetched": int(result.get("fetched", 0)),
-            "ok": bool(result.get("ok", False)),
-            "error": result.get("reason") if not result.get("ok", False) else None,
-        })
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
+    items = get_shodan_events(bbox=bbox, categories=cat_list or None, since=since, country=country, limit=limit)
+    return {"items": items, "meta": {"source": "hub_shodan_cache", "generated_at": datetime.now(timezone.utc).isoformat()}}
+
+
+@app.get("/api/shodan/meta")
+def shodan_meta():
+    return get_shodan_meta()
+
+
+@app.post("/api/shodan/ingest")
+def shodan_ingest(
+    bbox: Optional[str] = None,
+    category: Optional[str] = None,
+    force: bool = Query(False),
+):
+    cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
+    result = discover_shodan(bbox=bbox, categories=cat_list or None, force_refresh=force)
+    _last_shodan_meta.update({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "fetched": int(result.get("fetched", 0)),
+        "ok": bool(result.get("ok", False)),
+        "error": result.get("reason") if not result.get("ok", False) else None,
+    })
+    return result
+
+
+@app.post("/api/shodan/refresh-region")
+def shodan_refresh_region(
+    bbox: Optional[str] = None,
+    category: Optional[str] = None,
+    force: bool = Query(False),
+):
+    cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
+    queued = _queue_shodan_refresh(bbox=bbox, categories=cat_list or None, force=force)
+    return {
+        "accepted": True,
+        "queued": queued,
+        "force": force,
+        "bbox": bbox,
+        "categories": cat_list,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/shodan/detail/{item_id}")
+def shodan_detail(item_id: str):
+    row = get_detail(item_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="not found")
+    return row
+
+
+@app.get("/api/shodan/categories")
+def shodan_categories():
+    return {"items": get_categories()}

@@ -14,8 +14,13 @@ This sidecar is the **hub-first OSINT backend** for conflict and Shodan layers.
 - `GET /api/events/since?since=ISO8601&country=`
 - `GET /api/alerts/high-impact?window=1d|min_fatalities=10&country=`
 - `POST /api/ingest/acled?days=7&country=` (manual ingest trigger)
-- `GET /api/shodan/markers?bbox=minLon,minLat,maxLon,maxLat&categories=sdr,camera&country=&limit=600&refresh=false`
-- `POST /api/shodan/refresh?bbox=minLon,minLat,maxLon,maxLat&categories=sdr,adsb_receiver&force=true`
+- `GET /api/shodan/events?bbox=minLon,minLat,maxLon,maxLat&category=sdr,camera&since=&limit=500&stale=`
+- `GET /api/shodan/events/since?since=ISO8601&bbox=&category=`
+- `GET /api/shodan/meta`
+- `POST /api/shodan/ingest?bbox=&category=&force=false`
+- `POST /api/shodan/refresh-region?bbox=&category=sdr,satcom&force=false`
+- `GET /api/shodan/detail/{id}`
+- `GET /api/shodan/categories`
 
 ## Quick start
 ```bash

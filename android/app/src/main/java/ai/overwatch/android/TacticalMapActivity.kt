@@ -1709,18 +1709,19 @@ class TacticalMapActivity : AppCompatActivity() {
                 const qs = new URLSearchParams();
                 qs.set('bbox', bbox);
                 qs.set('limit', '1000');
-                let resp = await fetch(currentHub + 'api/shodan/markers?' + qs.toString());
+                let resp = await fetch(currentHub + 'api/shodan/events?' + qs.toString());
                 if (!resp.ok) {
                     try {
                         const u = new URL(currentHub);
                         const sidecarBase = u.protocol + '//' + u.hostname + ':8790/';
-                        resp = await fetch(sidecarBase + 'api/shodan/markers?' + qs.toString());
+                        resp = await fetch(sidecarBase + 'api/shodan/events?' + qs.toString());
                     } catch (_) {}
                 }
                 if (!resp.ok) return;
-                const rows = await resp.json();
+                const payload = await resp.json();
+                const rows = Array.isArray(payload?.items) ? payload.items : [];
                 const seen = new Set();
-                (Array.isArray(rows) ? rows : []).forEach(r => {
+                rows.forEach(r => {
                     const lat = Number(r.lat);
                     const lon = Number(r.lon);
                     if (!isFinite(lat) || !isFinite(lon)) return;

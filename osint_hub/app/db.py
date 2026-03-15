@@ -50,31 +50,59 @@ CREATE TABLE IF NOT EXISTS shodan_findings (
   isp TEXT,
   asn TEXT,
   hostnames TEXT,
+  domains TEXT,
   product TEXT,
+  version TEXT,
+  os TEXT,
   tags TEXT,
   vulns TEXT,
+  category TEXT,
+  lat REAL,
+  lon REAL,
   country_code TEXT,
   country_name TEXT,
   city TEXT,
-  latitude REAL,
-  longitude REAL,
-  category TEXT,
-  source_query TEXT,
-  last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  region_code TEXT,
+  timestamp TEXT,
+  last_seen TEXT,
+  shodan_url TEXT,
+  query TEXT,
+  source TEXT DEFAULT 'shodan',
+  region_key TEXT,
+  inserted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  stale_score INTEGER DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS shodan_region_cache (
-  region_key TEXT NOT NULL,
-  categories_key TEXT NOT NULL,
-  last_discovery_at TEXT NOT NULL,
-  last_result_count INTEGER DEFAULT 0,
-  PRIMARY KEY (region_key, categories_key)
+CREATE TABLE IF NOT EXISTS shodan_region_cache_state (
+  region_key TEXT,
+  category TEXT,
+  last_discovery_at TEXT,
+  ttl_sec INTEGER,
+  last_result_count INTEGER,
+  last_status TEXT,
+  last_error TEXT,
+  PRIMARY KEY(region_key, category)
+);
+
+CREATE TABLE IF NOT EXISTS shodan_query_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  query TEXT,
+  bbox TEXT,
+  country TEXT,
+  region_key TEXT,
+  category TEXT,
+  limit_requested INTEGER,
+  result_count INTEGER,
+  started_at TEXT,
+  finished_at TEXT,
+  status TEXT,
+  error TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_shodan_updated ON shodan_findings(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shodan_category ON shodan_findings(category);
-CREATE INDEX IF NOT EXISTS idx_shodan_geo ON shodan_findings(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_shodan_geo ON shodan_findings(lat, lon);
 """
 
 
