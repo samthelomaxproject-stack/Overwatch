@@ -436,8 +436,6 @@
                             <button class="tac-layer-btn" data-layer="sat" onclick="toggleLayer('sat')">SAT</button>
                             <button class="tac-layer-btn" data-layer="cctv" onclick="toggleLayer('cctv')">CCTV</button>
                             <button class="tac-layer-btn" data-layer="conflict" onclick="toggleLayer('conflict')">CONFLICT</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('cams')">CAMS</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('heat')">HEAT</button>
                         </div>
                         <div style="height: var(--space-xs);"></div>
                         <div class="tac-layer-group">
@@ -890,7 +888,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false, cams: false, heat: false };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false };
 
         function syncCctvUiState() {
             const cctvOn = !!layerVisible.cctv;
@@ -991,18 +989,6 @@ ALPHA-3 | REAR"></textarea>
             if (layer === 'wifi') {
                 layerVisible.wifi ? renderHexLayer('wifi') : clearHexLayer('wifi');
             }
-            if (layer === 'heat') {
-                const on = !!layerVisible.heat;
-                layerVisible.rf = on;
-                layerVisible.wifi = on;
-                if (on) {
-                    renderHexLayer('rf');
-                    renderHexLayer('wifi');
-                } else {
-                    clearHexLayer('rf');
-                    clearHexLayer('wifi');
-                }
-            }
 
             if (layer === 'sat') {
                 debugLog(`🛰️ SAT layer toggled ${layerVisible.sat ? 'ON' : 'OFF'}`);
@@ -1017,14 +1003,9 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
 
-            if (layer === 'cctv' || layer === 'cams') {
-                if (layer === 'cams') {
-                    layerVisible.cctv = !!layerVisible.cams;
-                } else {
-                    layerVisible.cams = !!layerVisible.cctv;
-                }
+            if (layer === 'cctv') {
                 syncCctvUiState();
-                debugLog(`📹 CCTV/CAMS layer toggled ${layerVisible.cctv ? 'ON' : 'OFF'}`);
+                debugLog(`📹 CCTV layer toggled ${layerVisible.cctv ? 'ON' : 'OFF'}`);
                 if (layerVisible.cctv) {
                     renderCctvLayer();
                 } else {
