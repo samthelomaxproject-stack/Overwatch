@@ -3280,7 +3280,7 @@ out body;
                 const directSsid = String(data.ssid || data.top_ssid || data.network_name || data.display_name || '').trim();
                 const directBssid = String(data.bssid || data.top_bssid || data.ap_bssid || '').trim();
                 if (directSsid || directBssid) {
-                    rows.push({ ssid: directSsid, bssid: directBssid });
+                    rows.push({ ssid: directSsid, bssid: directBssid, src: 'hub' });
                 }
 
                 // 2) Scanner cache match by channel/band
@@ -3293,15 +3293,11 @@ out body;
                 if (matched.length === 0) {
                     matched = scans.filter(n => Number(n.channel) === ch);
                 }
-                if (matched.length === 0) {
-                    matched = [...scans]
-                        .sort((a, b) => Number(b.rssi_dbm || -200) - Number(a.rssi_dbm || -200))
-                        .slice(0, 4);
-                }
 
                 matched.forEach(n => rows.push({
                     ssid: String(n.display_name || '').trim(),
                     bssid: String(n.bssid_display || '').trim(),
+                    src: 'scan',
                 }));
 
                 const seen = new Set();
@@ -3315,7 +3311,7 @@ out body;
                         uniq.push(r);
                     });
 
-                return uniq.slice(0, 4);
+                return uniq.slice(0, 8);
             } catch (_) {
                 return [];
             }
@@ -3334,11 +3330,13 @@ out body;
                 const primary = ids[0] || {};
                 const ssid = primary.ssid || '(SSID unavailable)';
                 const bssid = primary.bssid || '(BSSID unavailable)';
+                const extra = ids.slice(1, 3).map(x => `${x.ssid || '(SSID unavailable)'} / ${x.bssid || '(BSSID unavailable)'}`).join('<br>');
+                const extraLine = extra ? `<br><strong>Also:</strong><br>${extra}` : '';
                 return `<span style="font-family:monospace;font-size:11px;">
                     <strong>SSID:</strong> ${ssid}<br>
                     <strong>BSSID:</strong> ${bssid}<br>
                     ${data.dimension || ''} · Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
-                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
+                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${extraLine}
                 </span>`;
             }
         }
@@ -3351,6 +3349,14 @@ out body;
             const panel = document.getElementById(type === 'rf' ? 'rfDetailPanel' : 'wifiDetailPanel');
             if (!panel) return;
             const ago = data.updated_at ? Math.floor((Date.now()/1000 - data.updated_at)) + 's ago' : '--';
+            const ids = type === 'wifi' ? getWifiIdentitiesForHeatCell(data) : [];
+            const idBlock = (type === 'wifi' && ids.length)
+                ? `<div style="margin-top:var(--space-sm);font-family:var(--font-mono);font-size:0.72rem;line-height:1.35;">
+                    <div style="color:var(--text-muted);margin-bottom:4px;">SSID / BSSID</div>
+                    ${ids.map(x => `<div style="padding:2px 0;"><span style="color:var(--text-secondary);">${x.ssid || '(SSID unavailable)'}</span> <span style="color:var(--text-muted);">/ ${x.bssid || '(BSSID unavailable)'}</span></div>`).join('')}
+                </div>`
+                : '';
+
             panel.innerHTML = `
                 <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);">Cell: ${cellId}</div>
                 <div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--accent-cyan);margin-bottom:var(--space-sm);">${data.dimension || ''}</div>
@@ -3361,6 +3367,7 @@ out body;
                     <span style="color:var(--text-muted);">Confidence</span><span>${(data.confidence * 100).toFixed(0)}%</span>
                     <span style="color:var(--text-muted);">Updated</span><span>${ago}</span>
                 </div>
+                ${idBlock}
             `;
         }
 
