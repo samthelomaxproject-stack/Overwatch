@@ -702,11 +702,15 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .tac-map-controls-layer-list {
-  max-height: 180px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 6px;
   display: grid;
   gap: 4px;
+}
+
+.tac-sidebar .tac-panel {
+  overflow: visible;
 }
