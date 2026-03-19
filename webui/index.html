@@ -820,6 +820,9 @@ ALPHA-3 | REAR"></textarea>
 
             map.on('moveend zoomend', () => {
                 scheduleCctvAutoRefresh();
+                // Recompute heatmap kernel at current zoom to avoid muddy low-zoom blending.
+                if (layerVisible.rf) updateHeatmap('rf');
+                if (layerVisible.wifi) updateHeatmap('wifi');
             });
 
             // If we have a location already, show it
@@ -3154,40 +3157,55 @@ out body;
                 });
             }
 
-            // Leaflet.heat options — opacity via maxOpacity so map remains visible
+            // Leaflet.heat options (zoom-adaptive kernel to reduce muddy blending when zoomed out)
+            const z = map.getZoom ? map.getZoom() : 12;
+            const radius = Math.max(16, Math.min(42, 16 + (z - 8) * 2));
+            const blur = Math.max(10, Math.min(28, 10 + (z - 8) * 1.2));
+            const minOpacity = z <= 9 ? 0.12 : (z <= 11 ? 0.18 : 0.24);
+
             const rfOpts = {
-                radius: 40,
-                blur: 30,
+                radius,
+                blur,
                 maxZoom: 18,
                 max: 1.0,
-                minOpacity: 0.25,
+                minOpacity,
                 gradient: {
-                    0.0: 'rgba(0,0,180,0.6)',
-                    0.3: 'rgba(0,200,200,0.65)',
-                    0.55: 'rgba(0,220,0,0.7)',
-                    0.75: 'rgba(255,200,0,0.75)',
-                    1.0: 'rgba(255,40,0,0.8)'
+                    0.00: '#0b1f6a',
+                    0.18: '#1756d8',
+                    0.38: '#00b6ff',
+                    0.58: '#35d07f',
+                    0.76: '#f4d03f',
+                    0.90: '#ff8c42',
+                    1.00: '#ff3b30'
                 }
             };
             const wifiOpts = {
-                radius: 40,
-                blur: 30,
+                radius,
+                blur,
                 maxZoom: 18,
                 max: 1.0,
-                minOpacity: 0.25,
+                minOpacity,
                 gradient: {
-                    0.0: 'rgba(0,50,200,0.6)',
-                    0.4: 'rgba(0,180,255,0.65)',
-                    0.65: 'rgba(255,140,0,0.7)',
-                    1.0: 'rgba(255,60,0,0.8)'
+                    0.00: '#0b1f6a',
+                    0.22: '#1d4ed8',
+                    0.44: '#00c2ff',
+                    0.62: '#7ddf64',
+                    0.80: '#ffb347',
+                    1.00: '#ff5a36'
                 }
             };
 
             if (type === 'rf') {
-                if (rfHeatLayer) { rfHeatLayer.setLatLngs(points); }
+                if (rfHeatLayer) {
+                    if (rfHeatLayer.setOptions) rfHeatLayer.setOptions(rfOpts);
+                    rfHeatLayer.setLatLngs(points);
+                }
                 else { rfHeatLayer = L.heatLayer(points, rfOpts).addTo(map); }
             } else {
-                if (wifiHeatLayer) { wifiHeatLayer.setLatLngs(points); }
+                if (wifiHeatLayer) {
+                    if (wifiHeatLayer.setOptions) wifiHeatLayer.setOptions(wifiOpts);
+                    wifiHeatLayer.setLatLngs(points);
+                }
                 else { wifiHeatLayer = L.heatLayer(points, wifiOpts).addTo(map); }
             }
 
