@@ -5083,18 +5083,22 @@ out body;
 
             // Sidebar shows only EUD status records from get_eud_statuses.
             const rows = (eudStatusNodes || [])
-                .map(n => ({
-                    id: String(n.device_id || ''),
-                    label: String(n.device_name || n.callsign || '').trim(),
-                    status: String(n.status || 'UNKNOWN'),
-                    sourceType: String(n.source_type || 'unknown'),
-                    ageSecs: Number.isFinite(Number(n.age_secs)) ? Number(n.age_secs) : null,
-                }))
-                // show only actionable EUDs: connected + recent + named
+                .map(n => {
+                    const id = String(n.device_id || '');
+                    const rawLabel = String(n.device_name || n.callsign || '').trim();
+                    const shortId = id ? `${id.slice(0,6)}…${id.slice(-4)}` : 'UNKNOWN-EUD';
+                    return {
+                        id,
+                        label: rawLabel || shortId,
+                        status: String(n.status || 'UNKNOWN'),
+                        sourceType: String(n.source_type || 'unknown'),
+                        ageSecs: Number.isFinite(Number(n.age_secs)) ? Number(n.age_secs) : null,
+                    };
+                })
+                // show actionable EUDs: connected + recent
                 .filter(r => !!r.id)
                 .filter(r => r.status === 'CONNECTED')
-                .filter(r => r.ageSecs === null || r.ageSecs <= 60)
-                .filter(r => r.label.length > 0)
+                .filter(r => r.ageSecs === null || r.ageSecs <= 90)
                 .sort((a, b) => (a.ageSecs ?? 999999) - (b.ageSecs ?? 999999))
                 .slice(0, 30);
 
