@@ -3954,7 +3954,8 @@ out body;
             const altMeters = Math.max(1000, (p.altKm || 0) * 1000);
             const label = `${s.name}\nNORAD ${s.norad || '?'}`;
             const iss = isIssSatellite(s);
-            const color = iss ? Cesium.Color.fromCssColorString('#38bdf8') : Cesium.Color.fromCssColorString('#ffea00');
+            // APK-like tactical handling: force yellow sat color in 3D for consistency.
+            const color = Cesium.Color.fromCssColorString('#ffea00');
 
             if (cesiumSatEntities[s.id]) {
                 const entity = cesiumSatEntities[s.id];
@@ -3982,7 +3983,9 @@ out body;
                         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
                         pixelOffset: new Cesium.Cartesian2(0, -12),
-                        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000000)
+                        // Keep names visible in 3D like APK tactical mode.
+                        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                        scaleByDistance: new Cesium.NearFarScalar(1e4, 1.1, 4e7, 0.8)
                     },
                     polyline: {
                         positions: [
