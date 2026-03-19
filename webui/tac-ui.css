@@ -252,12 +252,9 @@ h1, h2, h3, h4, h5, h6 {
   margin-top: var(--space-sm);
 }
 
-.tac-sidebar-entity-list {
-  max-height: 180px;
-  overflow-y: auto;
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  background: rgba(0,0,0,0.1);
+#sidebarEntityList {
+  display: grid;
+  gap: 2px;
 }
 
 .tac-sidebar-entity-empty {

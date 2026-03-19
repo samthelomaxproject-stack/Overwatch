@@ -333,7 +333,7 @@
             <!-- Sidebar -->
             <nav class="tac-sidebar">
                 <div class="tac-nav-section">Entities</div>
-                <div id="sidebarEntityList" class="tac-sidebar-entity-list">
+                <div id="sidebarEntityList">
                     <div class="tac-sidebar-entity-empty">NO ACTIVE ENTITIES</div>
                 </div>
 
@@ -4480,6 +4480,7 @@ out body;
 
             // Update aircraft count display
             document.getElementById('adsbCount').textContent = Object.keys(aircraftMarkers).length;
+            renderSidebarEntities();
 
             // Mirror to 3D Cesium view if active and layer visible
             if (is3DMode && layerVisible.adsb) {
@@ -4606,6 +4607,7 @@ out body;
                     // Count = what's actually on screen
                     const el = document.getElementById('adsbCount');
                     if (el) el.textContent = Object.keys(aircraftMarkers).length;
+                    renderSidebarEntities();
 
                 } catch (e) {
                     // silent
