@@ -5085,12 +5085,16 @@ out body;
             const rows = (eudStatusNodes || [])
                 .map(n => ({
                     id: String(n.device_id || ''),
-                    label: String(n.device_name || n.callsign || n.device_id || 'UNKNOWN-EUD'),
+                    label: String(n.device_name || n.callsign || '').trim(),
                     status: String(n.status || 'UNKNOWN'),
                     sourceType: String(n.source_type || 'unknown'),
                     ageSecs: Number.isFinite(Number(n.age_secs)) ? Number(n.age_secs) : null,
                 }))
+                // show only actionable EUDs: connected + recent + named
                 .filter(r => !!r.id)
+                .filter(r => r.status === 'CONNECTED')
+                .filter(r => r.ageSecs === null || r.ageSecs <= 60)
+                .filter(r => r.label.length > 0)
                 .sort((a, b) => (a.ageSecs ?? 999999) - (b.ageSecs ?? 999999))
                 .slice(0, 30);
 
