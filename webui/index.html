@@ -354,6 +354,43 @@
                     <span class="tac-nav-shortcut">⌘3</span>
                 </div>
 
+
+                <div class="tac-nav-section">Map Controls</div>
+                <div class="tac-panel" style="margin: 0 var(--space-xs);">
+                    <div class="tac-panel-body" style="padding: var(--space-sm);">
+                        <label class="tac-label" style="display:block; margin-bottom: 4px;">Map Type</label>
+                        <select id="sidebarMapType" class="tac-input" style="width:100%; margin-bottom: var(--space-sm);">
+                            <option value="dark">Dark</option>
+                            <option value="satellite">Satellite</option>
+                            <option value="hybrid">Hybrid</option>
+                            <option value="terrain">Terrain</option>
+                        </select>
+
+                        <label class="tac-label" style="display:block; margin-bottom: 4px;">Conflict Window</label>
+                        <select id="sidebarConflictWindow" class="tac-input" style="width:100%; margin-bottom: var(--space-sm);">
+                            <option value="7d">Week</option>
+                            <option value="1d">Day</option>
+                            <option value="30d">Month</option>
+                            <option value="custom">Custom</option>
+                        </select>
+
+                        <button class="tac-quick-btn" id="sidebar3DToggle" style="width:100%; margin-bottom: var(--space-sm);">3D OFF</button>
+
+                        <div style="display:grid; gap:4px;">
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="units" checked> Units</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="zones" checked> Zones</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="adsb"> ADS-B / Air</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="ais"> AIS</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="rf"> RF</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="wifi"> Wi-Fi</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="sat"> Nodes / Comms</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="cctv"> Visual</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="conflict"> Conflict</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="shodan"> Shodan</label>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="tac-nav-section">Assets</div>
                 <div class="tac-nav-item" data-view="squads" data-key="4">
                     <span class="tac-nav-icon">◉</span>
@@ -417,44 +454,10 @@
                 <div class="tac-view" id="view-map">
                     <div class="tac-map-container" id="map"></div>
                     <div id="cesiumContainer" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:10;"></div>
-                    <div class="tac-map-overlay" id="mapOverlay" style="z-index: 1000;">
-                        <div class="tac-layer-group">
-                            <button class="tac-layer-btn active" onclick="setMapStyle('dark')">DARK</button>
-                            <button class="tac-layer-btn" onclick="setMapStyle('satellite')">SAT</button>
-                            <button class="tac-layer-btn" onclick="setMapStyle('hybrid')">HYB</button>
-                            <button class="tac-layer-btn" onclick="setMapStyle('terrain')">TER</button>
-                            <button class="tac-layer-btn" onclick="toggle3D()">3D</button>
-                        </div>
-                        <div style="height: var(--space-xs);"></div>
-                        <div class="tac-layer-group">
-                            <button class="tac-layer-btn active" onclick="toggleLayer('units')">UNITS</button>
-                            <button class="tac-layer-btn active" onclick="toggleLayer('zones')">ZONES</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('adsb')">ADS-B</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('ais')">AIS</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('rf')">RF</button>
-                            <button class="tac-layer-btn" onclick="toggleLayer('wifi')">Wi-Fi</button>
-                            <button class="tac-layer-btn" data-layer="sat" onclick="toggleLayer('sat')">SAT</button>
-                            <button class="tac-layer-btn" data-layer="cctv" onclick="toggleLayer('cctv')">CCTV</button>
-                            <button class="tac-layer-btn" data-layer="conflict" onclick="toggleLayer('conflict')">CONFLICT</button>
-                            <button class="tac-layer-btn" data-layer="shodan" onclick="toggleLayer('shodan')">SHODAN</button>
-                        </div>
-                        <div style="height: var(--space-xs);"></div>
-                        <div class="tac-layer-group">
-                            <button class="tac-layer-btn" data-conflict-window="7d" onclick="setConflictWindow('7d')">WEEK</button>
-                            <button class="tac-layer-btn active" data-conflict-window="1d" onclick="setConflictWindow('1d')">DAY</button>
-                            <button class="tac-layer-btn" data-conflict-window="30d" onclick="setConflictWindow('30d')">MONTH</button>
-                            <button class="tac-layer-btn" data-conflict-window="custom" onclick="setConflictWindow('custom')">CUSTOM</button>
-                        </div>
-                        <div style="height: var(--space-xs);"></div>
-                        <div class="tac-layer-group" style="align-items:center;">
-                            <input id="conflictDateFrom" type="date" class="tac-input" style="max-width:160px;display:none;" onchange="setConflictDateRange()" />
-                            <input id="conflictDateTo" type="date" class="tac-input" style="max-width:160px;display:none;" onchange="setConflictDateRange()" />
-                            <select id="conflictCountrySel" class="tac-input" style="max-width:170px;" onchange="setConflictCountry(this.value)">
-                                <option value="">GLOBAL</option>
-                            </select>
-                        </div>
-                    </div>
+                    <div class="tac-map-overlay" id="mapOverlay" style="z-index: 1000; display:none;"></div>
                 </div>
+
+                <!-- SDR View -->
 
                 <!-- SDR View -->
                 <div class="tac-view" id="view-sdr">
@@ -860,12 +863,8 @@ ALPHA-3 | REAR"></textarea>
 
         function setMapStyle(style) {
             currentStyle = style;
-            document.querySelectorAll('.tac-layer-group:first-child .tac-layer-btn').forEach(btn => {
-                btn.classList.remove('active');
-                if (btn.textContent.toLowerCase().includes(style.substring(0, 3))) {
-                    btn.classList.add('active');
-                }
-            });
+            const mapSel = document.getElementById('sidebarMapType');
+            if (mapSel) mapSel.value = style;
 
             if (map) {
                 // Remove all tile layers
@@ -904,6 +903,44 @@ ALPHA-3 | REAR"></textarea>
             });
         }
 
+        function syncSidebarMapControls() {
+            const mapSel = document.getElementById('sidebarMapType');
+            if (mapSel) mapSel.value = currentStyle;
+            const cw = document.getElementById('sidebarConflictWindow');
+            if (cw) cw.value = conflictFilters.windowRange || '1d';
+            const btn3d = document.getElementById('sidebar3DToggle');
+            if (btn3d) btn3d.textContent = is3DMode ? '3D ON' : '3D OFF';
+            document.querySelectorAll('[data-sidebar-layer]').forEach(inp => {
+                const layer = inp.getAttribute('data-sidebar-layer');
+                if (layer && layerVisible.hasOwnProperty(layer)) {
+                    inp.checked = !!layerVisible[layer];
+                }
+            });
+        }
+
+        function initSidebarMapControls() {
+            const mapSel = document.getElementById('sidebarMapType');
+            if (mapSel) {
+                mapSel.addEventListener('change', () => setMapStyle(mapSel.value));
+            }
+            const conflictSel = document.getElementById('sidebarConflictWindow');
+            if (conflictSel) {
+                conflictSel.addEventListener('change', () => setConflictWindow(conflictSel.value));
+            }
+            const btn3d = document.getElementById('sidebar3DToggle');
+            if (btn3d) {
+                btn3d.addEventListener('click', () => toggle3D());
+            }
+            document.querySelectorAll('[data-sidebar-layer]').forEach(inp => {
+                inp.addEventListener('change', () => {
+                    const layer = inp.getAttribute('data-sidebar-layer');
+                    if (!layer) return;
+                    toggleLayer(layer, !!inp.checked);
+                });
+            });
+            syncSidebarMapControls();
+        }
+
         function syncConflictDateInputs() {
             const custom = conflictFilters.windowRange === 'custom';
             const from = document.getElementById('conflictDateFrom');
@@ -930,6 +967,7 @@ ALPHA-3 | REAR"></textarea>
                 conflictModule.setFilters(conflictFilters);
                 conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
             }
+            syncSidebarMapControls();
         }
 
         function setConflictDateRange() {
@@ -1089,6 +1127,7 @@ ALPHA-3 | REAR"></textarea>
                     pollShodanMarkers(true).catch(() => {});
                 }
             }
+            syncSidebarMapControls();
         }
 
         // 3D Cesium View
@@ -1193,14 +1232,14 @@ ALPHA-3 | REAR"></textarea>
                 }
 
                 is3DMode = true;
-                event.target.classList.add('active');
+                syncSidebarMapControls();
                 debugLog('Switched to 3D view');
             } else {
                 // Switch back to 2D
                 mapDiv.style.display = 'block';
                 cesiumDiv.style.display = 'none';
                 is3DMode = false;
-                event.target.classList.remove('active');
+                syncSidebarMapControls();
                 debugLog('Switched to 2D view');
 
                 // Restore overlay position
@@ -5072,6 +5111,7 @@ out body;
             }
             renderEntities();
             renderSidebarEntities();
+            initSidebarMapControls();
             updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
         }
 
