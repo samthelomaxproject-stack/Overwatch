@@ -929,7 +929,10 @@ ALPHA-3 | REAR"></textarea>
             }
             const btn3d = document.getElementById('sidebar3DToggle');
             if (btn3d) {
-                btn3d.addEventListener('click', () => toggle3D());
+                btn3d.addEventListener('click', () => {
+                    activateView('map');
+                    toggle3D();
+                });
             }
             document.querySelectorAll('[data-sidebar-layer]').forEach(inp => {
                 inp.addEventListener('change', () => {
