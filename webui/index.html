@@ -946,7 +946,8 @@ ALPHA-3 | REAR"></textarea>
             const groups = Array.from(document.querySelectorAll('[data-sidebar-sat-group]'))
                 .filter(x => x.checked)
                 .map(x => x.value);
-            satSelectedGroups = groups.length ? groups : ['stations'];
+            satSelectedGroups = groups.filter(g => SUPPORTED_SAT_GROUPS.includes(String(g)));
+            if (!satSelectedGroups.length) satSelectedGroups = ['stations'];
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
             if (layerVisible.sat) {
                 renderSatLayer(true);
@@ -989,6 +990,7 @@ ALPHA-3 | REAR"></textarea>
                     if (layerVisible.wifi) updateHeatmap('wifi');
                 });
             }
+            applySidebarSatGroups();
             syncSidebarMapControls();
         }
 
@@ -1018,6 +1020,7 @@ ALPHA-3 | REAR"></textarea>
                 conflictModule.setFilters(conflictFilters);
                 conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
             }
+            applySidebarSatGroups();
             syncSidebarMapControls();
         }
 
@@ -1178,6 +1181,7 @@ ALPHA-3 | REAR"></textarea>
                     pollShodanMarkers(true).catch(() => {});
                 }
             }
+            applySidebarSatGroups();
             syncSidebarMapControls();
         }
 
@@ -1927,10 +1931,12 @@ ALPHA-3 | REAR"></textarea>
         let satUpdateTimer = null;
         let satOrbit2d = null;
         let satOrbit3d = null;
+        const SUPPORTED_SAT_GROUPS = ['stations','weather','starlink','military'];
         let satSelectedGroups = (() => {
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
-                return Array.isArray(saved) && saved.length ? saved : ['stations', 'weather', 'starlink'];
+                const sanitized = Array.isArray(saved) ? saved.filter(g => SUPPORTED_SAT_GROUPS.includes(String(g))) : [];
+                return sanitized.length ? sanitized : ['stations', 'weather', 'starlink'];
             } catch (_) { return ['stations', 'weather', 'starlink']; }
         })();
         let satMaxMarkers = (() => {
@@ -2277,6 +2283,8 @@ ALPHA-3 | REAR"></textarea>
 
         async function renderSatLayer(force=false) {
             if (!layerVisible.sat || !map) return;
+            satSelectedGroups = satSelectedGroups.filter(g => SUPPORTED_SAT_GROUPS.includes(String(g)));
+            if (!satSelectedGroups.length) satSelectedGroups = ['stations'];
             const ok = await ensureSatelliteJs();
             if (!ok) { debugLog('🛰️ satellite.js failed to load'); return; }
 
