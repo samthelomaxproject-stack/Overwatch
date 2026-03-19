@@ -3300,8 +3300,8 @@ out body;
                 }
 
                 matched.forEach(n => rows.push({
-                    ssid: String(n.display_name || n.ssid || '').trim(),
-                    bssid: String(n.bssid || n.bssid_display || '').trim(),
+                    ssid: String(n.ssid || '').trim(),
+                    bssid: String(n.bssid || '').trim(),
                 }));
 
                 const seen = new Set();
@@ -3332,15 +3332,13 @@ out body;
             } else {
                 const ids = getWifiIdentitiesForHeatCell(data);
                 const primary = ids[0] || {};
-                const ssid = primary.ssid || 'Unknown SSID';
-                const bssid = primary.bssid || 'BSSID unavailable';
-                const other = ids.slice(1).map(x => [x.ssid || 'Unknown SSID', x.bssid || 'BSSID unavailable'].join(' / '));
-                const otherLine = other.length ? `<br>Other: ${other.join(', ')}` : '';
+                const ssid = primary.ssid || '(SSID unavailable)';
+                const bssid = primary.bssid || '(BSSID unavailable)';
                 return `<span style="font-family:monospace;font-size:11px;">
                     <strong>SSID:</strong> ${ssid}<br>
                     <strong>BSSID:</strong> ${bssid}<br>
                     ${data.dimension || ''} · Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
-                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${otherLine}
+                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
                 </span>`;
             }
         }
@@ -3553,11 +3551,11 @@ out body;
 
             const rows = sorted.map(n => {
                 const strength = n.rssi_dbm > -50 ? 'var(--accent-orange)' : n.rssi_dbm > -70 ? 'var(--accent-cyan)' : 'var(--text-secondary)';
-                const bars = Math.max(1, Math.round((n.rssi_dbm + 100) / 9));
-                const barStr = '▮'.repeat(Math.min(bars,8)) + '▯'.repeat(Math.max(0,8-bars));
+                const nameVal = (lastScanMode === 'C') ? (n.ssid || '(hidden SSID)') : n.display_name;
+                const bssidVal = (lastScanMode === 'C') ? (n.bssid || '(BSSID unavailable)') : (n.bssid_display || '(withheld by macOS)');
                 return `<div style="display:grid;grid-template-columns:${showBssid ? '2fr 2fr 50px 70px' : '1fr 50px 70px'};gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
-                    <span style="color:var(--text-secondary);font-size:0.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${n.display_name}">${n.display_name}</span>
-                    ${showBssid ? `<span style="color:var(--text-muted);font-size:0.65rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis;" title="${n.bssid_display||''}">${n.bssid_display || '(withheld by macOS)'}</span>` : ''}
+                    <span style="color:var(--text-secondary);font-size:0.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${nameVal}">${nameVal}</span>
+                    ${showBssid ? `<span style="color:var(--text-muted);font-size:0.65rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis;" title="${bssidVal}">${bssidVal}</span>` : ''}
                     <span style="text-align:right;color:var(--text-muted);font-size:0.7rem;">${n.band}</span>
                     <span style="text-align:right;color:${strength};font-size:0.7rem;">${n.rssi_dbm} dBm</span>
                 </div>`;
