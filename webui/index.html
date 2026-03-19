@@ -3377,6 +3377,7 @@ out body;
         let lastScanMode = 'A';
 
         let lastEudStatusSnapshot = '';
+        let eudStatusNodes = [];
 
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
@@ -3397,6 +3398,7 @@ out body;
                 if (!result || !result.ok) return;
 
                 const nodes = result.nodes || [];
+                eudStatusNodes = nodes;
                 const summary = nodes.map(n => `${n.device_id}:${n.status}`).join('|');
                 if (summary !== lastEudStatusSnapshot) {
                     lastEudStatusSnapshot = summary;
@@ -3416,6 +3418,7 @@ out body;
                 const staleEl = document.getElementById('eudStaleCount');
                 if (activeEl) activeEl.textContent = String(active);
                 if (staleEl) staleEl.textContent = String(stale);
+                renderSidebarEntities();
             } catch (e) {
                 // silent
             }
@@ -5077,21 +5080,19 @@ out body;
         function renderSidebarEntities() {
             const list = document.getElementById('sidebarEntityList');
             if (!list) return;
-            purgeStaleEntities();
 
-            // Sidebar shows EUDs only (from tracked/PLI entities).
-            const rows = trackedEntities
-                .filter(e => e && e.uid)
-                .map(e => ({
-                    id: e.uid,
-                    label: e.callsign || e.uid || 'UNKNOWN',
-                    kind: 'EUD',
-                    lastSeen: entitySeenMs(e),
-                    lat: e.lat,
-                    lon: e.lon,
+            // Sidebar shows only EUD status records from get_eud_statuses.
+            const rows = (eudStatusNodes || [])
+                .map(n => ({
+                    id: String(n.device_id || ''),
+                    label: String(n.device_name || n.callsign || n.device_id || 'UNKNOWN-EUD'),
+                    status: String(n.status || 'UNKNOWN'),
+                    sourceType: String(n.source_type || 'unknown'),
+                    ageSecs: Number.isFinite(Number(n.age_secs)) ? Number(n.age_secs) : null,
                 }))
-                .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
-                .slice(0, 20);
+                .filter(r => !!r.id)
+                .sort((a, b) => (a.ageSecs ?? 999999) - (b.ageSecs ?? 999999))
+                .slice(0, 30);
 
             if (!rows.length) {
                 list.innerHTML = '<div class="tac-sidebar-entity-empty">NO ACTIVE EUDS</div>';
@@ -5099,31 +5100,38 @@ out body;
             }
 
             list.innerHTML = rows.map(e => {
-                const ageS = Math.max(0, Math.floor((Date.now() - (e.lastSeen || 0)) / 1000));
-                const age = e.lastSeen ? (ageS < 60 ? `${ageS}s` : `${Math.floor(ageS/60)}m`) : '--';
-                return `<button class="tac-sidebar-entity-item" data-entity-id="${e.id}">
+                const age = (e.ageSecs === null) ? '--' : (e.ageSecs < 60 ? `${e.ageSecs}s` : `${Math.floor(e.ageSecs/60)}m`);
+                return `<button class="tac-sidebar-entity-item" data-eud-id="${e.id}">
                     <span class="tac-sidebar-entity-name">${e.label}</span>
-                    <span class="tac-sidebar-entity-meta">${e.kind} · ${age}</span>
+                    <span class="tac-sidebar-entity-meta">EUD · ${e.status} · ${age}</span>
                 </button>`;
             }).join('');
 
-            list.querySelectorAll('[data-entity-id]').forEach(btn => {
+            list.querySelectorAll('[data-eud-id]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const id = btn.getAttribute('data-entity-id');
-                    const ent = trackedEntities.find(x => String(x.uid) === String(id));
+                    const deviceId = btn.getAttribute('data-eud-id');
+                    if (!deviceId) return;
+
+                    // Try to map EUD status record to an existing tracked map entity.
+                    const ent = trackedEntities.find(x => {
+                        const uid = String(x.uid || '');
+                        const cs = String(x.callsign || '');
+                        return uid === `node-${deviceId}` || uid === deviceId || cs === deviceId;
+                    });
+
                     if (!ent) return;
                     activateView('map');
                     if (map && Number.isFinite(ent.lat) && Number.isFinite(ent.lon)) {
                         map.setView([ent.lat, ent.lon], Math.max(12, map.getZoom() || 12));
                     }
-                    const m = entityMarkers[id];
+                    const m = entityMarkers[ent.uid];
                     if (m && map && !map.hasLayer(m) && layerVisible.units) m.addTo(map);
                     if (m && m.openTooltip) m.openTooltip();
                 });
             });
         }
 
-        function ingestPLI(pli) {
+                function ingestPLI(pli) {
             // pli = { uid, callsign, type, affiliation, lat, lon, altitude, speed, course, mgrs, timestamp }
             const existing = trackedEntities.findIndex(e => e.uid === pli.uid);
             const isNew = existing < 0;
