@@ -3300,8 +3300,8 @@ out body;
                 }
 
                 matched.forEach(n => rows.push({
-                    ssid: String(n.ssid || '').trim(),
-                    bssid: String(n.bssid || '').trim(),
+                    ssid: String(n.display_name || '').trim(),
+                    bssid: String(n.bssid_display || '').trim(),
                 }));
 
                 const seen = new Set();
@@ -3468,6 +3468,7 @@ out body;
 
         let lastEudStatusSnapshot = '';
         let eudStatusNodes = [];
+        let lastPrivacyEnforceTs = 0;
 
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
@@ -3521,6 +3522,16 @@ out body;
                 if (result) {
                     lastScanResults = result.networks || [];
                     lastScanMode = result.mode || 'A';
+
+                    // Enforce operator-selected mode C if backend scan mode drifts.
+                    if (currentPrivacyMode === 'C' && lastScanMode !== 'C') {
+                        const now = Date.now();
+                        if ((now - lastPrivacyEnforceTs) > 15000) {
+                            lastPrivacyEnforceTs = now;
+                            try { await window.__TAURI__.core.invoke('set_privacy_mode', { mode: 'C' }); } catch (_) {}
+                        }
+                    }
+
                     renderWifiScanResults();
                 }
             } catch(e) { /* collector not running yet */ }
@@ -3541,6 +3552,12 @@ out body;
             const modeLabel = { 'A': '🔒 Channel only', 'B': '🔑 Hashed IDs', 'C': '⚠️ Raw identifiers' }[lastScanMode] || lastScanMode;
             const modeColor = { 'A': 'var(--accent-cyan)', 'B': 'var(--accent-orange)', 'C': '#f56565' }[lastScanMode] || 'var(--text-muted)';
 
+            const badge = document.getElementById('wifiModeBadge');
+            if (badge) {
+                badge.textContent = `🔒 Mode ${lastScanMode}`;
+                badge.style.color = modeColor;
+            }
+
             // Header differs by mode
             const showBssid = lastScanMode !== 'A';
             const nameLabel = lastScanMode === 'A' ? 'CHANNEL' : 'NETWORK';
@@ -3551,8 +3568,8 @@ out body;
 
             const rows = sorted.map(n => {
                 const strength = n.rssi_dbm > -50 ? 'var(--accent-orange)' : n.rssi_dbm > -70 ? 'var(--accent-cyan)' : 'var(--text-secondary)';
-                const nameVal = (lastScanMode === 'C') ? (n.ssid || '(hidden SSID)') : n.display_name;
-                const bssidVal = (lastScanMode === 'C') ? (n.bssid || '(BSSID unavailable)') : (n.bssid_display || '(withheld by macOS)');
+                const nameVal = (lastScanMode === 'C') ? (n.display_name || '(hidden SSID)') : n.display_name;
+                const bssidVal = (lastScanMode === 'C') ? (n.bssid_display || '(BSSID unavailable)') : (n.bssid_display || '(withheld by macOS)');
                 return `<div style="display:grid;grid-template-columns:${showBssid ? '2fr 2fr 50px 70px' : '1fr 50px 70px'};gap:4px;padding:5px 8px;border-bottom:1px solid rgba(255,255,255,0.04);align-items:center;">
                     <span style="color:var(--text-secondary);font-size:0.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${nameVal}">${nameVal}</span>
                     ${showBssid ? `<span style="color:var(--text-muted);font-size:0.65rem;font-family:monospace;overflow:hidden;text-overflow:ellipsis;" title="${bssidVal}">${bssidVal}</span>` : ''}
@@ -4240,7 +4257,7 @@ out body;
                         <div class="tac-panel-header">
                             <span class="tac-panel-title">📶 Wi-Fi Density</span>
                             <div style="display:flex;gap:var(--space-xs);align-items:center;">
-                                <span style="font-size:0.7rem;color:var(--accent-green);">🔒 Mode A</span>
+                                <span id="wifiModeBadge" style="font-size:0.7rem;color:var(--accent-green);">🔒 Mode A</span>
                                 <button class="tac-btn tac-btn-sm tac-btn-secondary" id="wifiMapBtn" onclick="toggleLayer('wifi');this.classList.toggle('tac-btn-primary');this.classList.toggle('tac-btn-secondary');">HEATMAP</button>
                             </div>
                         </div>
