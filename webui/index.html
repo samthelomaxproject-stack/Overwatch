@@ -3275,14 +3275,29 @@ out body;
         function getWifiIdentitiesForHeatCell(data) {
             try {
                 const ch = Number(data.channel);
-                const band = String(data.band || '').toLowerCase();
-                const rows = (lastScanResults || [])
-                    .filter(n => Number(n.channel) === ch && String(n.band || '').toLowerCase() === band)
+                const normBand = (v) => String(v ?? '').toLowerCase().replace(/\s*ghz/g, '').trim();
+                const band = normBand(data.band);
+                const scans = (lastScanResults || []);
+
+                // Prefer strict channel+band match, then relax to channel-only if needed.
+                let matched = scans.filter(n => Number(n.channel) === ch && normBand(n.band) === band);
+                if (matched.length === 0) {
+                    matched = scans.filter(n => Number(n.channel) === ch);
+                }
+                // Final fallback: strongest recent networks so tooltip still shows identities.
+                if (matched.length === 0) {
+                    matched = [...scans]
+                        .sort((a, b) => Number(b.rssi_dbm || -200) - Number(a.rssi_dbm || -200))
+                        .slice(0, 4);
+                }
+
+                const rows = matched
                     .map(n => ({
                         ssid: String(n.display_name || n.ssid || '').trim(),
-                        bssid: String(n.bssid_display || n.bssid || '').trim(),
+                        bssid: String(n.bssid || n.bssid_display || '').trim(),
                     }))
                     .filter(r => r.ssid || r.bssid);
+
                 const seen = new Set();
                 const uniq = [];
                 rows.forEach(r => {
