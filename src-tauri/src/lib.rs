@@ -965,7 +965,7 @@ fn nsstring_to_string(obj: *mut objc::runtime::Object) -> String {
 }
 
 #[cfg(target_os = "macos")]
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct UiWifiNetwork {
     display_name: String,
     bssid_display: Option<String>,
@@ -974,6 +974,16 @@ struct UiWifiNetwork {
     rssi_dbm: i32,
     privacy_mode: String,
 }
+
+#[cfg(target_os = "macos")]
+struct NativeWifiCache {
+    at: Instant,
+    mode: String,
+    networks: Vec<UiWifiNetwork>,
+}
+
+#[cfg(target_os = "macos")]
+static NATIVE_WIFI_CACHE: Mutex<Option<NativeWifiCache>> = Mutex::new(None);
 
 #[cfg(target_os = "macos")]
 fn scan_wifi_native_for_ui(mode: sigint::wifi::PrivacyMode) -> Result<Vec<UiWifiNetwork>, String> {
@@ -1071,13 +1081,47 @@ fn get_wifi_scan_results() -> serde_json::Value {
     #[cfg(target_os = "macos")]
     {
         if mode == sigint::wifi::PrivacyMode::C {
+            // Throttle native CoreWLAN scans to reduce UI stalls/loading spinner.
+            const NATIVE_WIFI_TTL_SECS: u64 = 20;
+            if let Ok(cache) = NATIVE_WIFI_CACHE.lock() {
+                if let Some(c) = &*cache {
+                    if c.mode == mode.as_str() && c.at.elapsed().as_secs() <= NATIVE_WIFI_TTL_SECS {
+                        return serde_json::json!({
+                            "mode": mode.as_str(),
+                            "count": c.networks.len(),
+                            "networks": c.networks,
+                            "source": "corewlan-native-cache"
+                        });
+                    }
+                }
+            }
+
             if let Ok(native) = scan_wifi_native_for_ui(mode) {
+                if let Ok(mut cache) = NATIVE_WIFI_CACHE.lock() {
+                    *cache = Some(NativeWifiCache {
+                        at: Instant::now(),
+                        mode: mode.as_str().to_string(),
+                        networks: native.clone(),
+                    });
+                }
                 return serde_json::json!({
                     "mode": mode.as_str(),
                     "count": native.len(),
                     "networks": native,
                     "source": "corewlan-native"
                 });
+            }
+
+            // Native scan failed: return last cached native sample if available.
+            if let Ok(cache) = NATIVE_WIFI_CACHE.lock() {
+                if let Some(c) = &*cache {
+                    return serde_json::json!({
+                        "mode": mode.as_str(),
+                        "count": c.networks.len(),
+                        "networks": c.networks,
+                        "source": "corewlan-native-stale-cache"
+                    });
+                }
             }
         }
     }
