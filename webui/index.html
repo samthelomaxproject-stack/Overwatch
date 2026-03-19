@@ -1165,9 +1165,22 @@ ALPHA-3 | REAR"></textarea>
         function toggle3D() {
             const mapDiv = document.getElementById('map');
             const cesiumDiv = document.getElementById('cesiumContainer');
+            if (!mapDiv || !cesiumDiv) return;
 
-            if (!is3DMode) {
+            // Derive actual visual state to avoid stale toggle state.
+            const currently3D = is3DMode || cesiumDiv.style.display === 'block';
+
+            if (!currently3D) {
                 // Switch to 3D
+                if (typeof Cesium === 'undefined') {
+                    debugLog('ERROR: Cesium not loaded; staying in 2D');
+                    mapDiv.style.display = 'block';
+                    cesiumDiv.style.display = 'none';
+                    is3DMode = false;
+                    syncSidebarMapControls();
+                    return;
+                }
+
                 mapDiv.style.display = 'none';
                 cesiumDiv.style.display = 'block';
 
@@ -1198,6 +1211,10 @@ ALPHA-3 | REAR"></textarea>
                         debugLog('Cesium viewer created successfully');
                     } catch (e) {
                         debugLog('ERROR creating Cesium: ' + e.message);
+                        mapDiv.style.display = 'block';
+                        cesiumDiv.style.display = 'none';
+                        is3DMode = false;
+                        syncSidebarMapControls();
                         return;
                     }
                 }
