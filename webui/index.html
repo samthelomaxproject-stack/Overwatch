@@ -3274,38 +3274,47 @@ out body;
 
         function getWifiIdentitiesForHeatCell(data) {
             try {
+                const rows = [];
+
+                // 1) Direct identity from hub tile if present (works even without local scan cache)
+                const directSsid = String(data.ssid || data.top_ssid || data.network_name || data.display_name || '').trim();
+                const directBssid = String(data.bssid || data.top_bssid || data.ap_bssid || '').trim();
+                if (directSsid || directBssid) {
+                    rows.push({ ssid: directSsid, bssid: directBssid });
+                }
+
+                // 2) Scanner cache match by channel/band
                 const ch = Number(data.channel);
                 const normBand = (v) => String(v ?? '').toLowerCase().replace(/\s*ghz/g, '').trim();
                 const band = normBand(data.band);
                 const scans = (lastScanResults || []);
 
-                // Prefer strict channel+band match, then relax to channel-only if needed.
                 let matched = scans.filter(n => Number(n.channel) === ch && normBand(n.band) === band);
                 if (matched.length === 0) {
                     matched = scans.filter(n => Number(n.channel) === ch);
                 }
-                // Final fallback: strongest recent networks so tooltip still shows identities.
                 if (matched.length === 0) {
                     matched = [...scans]
                         .sort((a, b) => Number(b.rssi_dbm || -200) - Number(a.rssi_dbm || -200))
                         .slice(0, 4);
                 }
 
-                const rows = matched
-                    .map(n => ({
-                        ssid: String(n.display_name || n.ssid || '').trim(),
-                        bssid: String(n.bssid || n.bssid_display || '').trim(),
-                    }))
-                    .filter(r => r.ssid || r.bssid);
+                matched.forEach(n => rows.push({
+                    ssid: String(n.display_name || n.ssid || '').trim(),
+                    bssid: String(n.bssid || n.bssid_display || '').trim(),
+                }));
 
                 const seen = new Set();
                 const uniq = [];
-                rows.forEach(r => {
-                    const k = `${r.ssid}|${r.bssid}`;
-                    if (seen.has(k)) return;
-                    seen.add(k);
-                    uniq.push(r);
-                });
+                rows
+                    .filter(r => r.ssid || r.bssid)
+                    .forEach(r => {
+                        const k = `${r.ssid}|${r.bssid}`;
+                        if (seen.has(k)) return;
+                        seen.add(k);
+                        uniq.push(r);
+                    });
+
                 return uniq.slice(0, 4);
             } catch (_) {
                 return [];
@@ -3654,6 +3663,9 @@ out body;
                                 dimension: dim,
                                 mean_val: ch.mean_rssi_dbm,
                                 max_val: ch.max_rssi_dbm,
+                                // Optional identity hints from hub payload when available
+                                ssid: ch.ssid || ch.top_ssid || ch.display_name || ch.network_name || null,
+                                bssid: ch.bssid || ch.top_bssid || ch.ap_bssid || null,
                                 updated_at: Math.floor(Date.now() / 1000)
                             };
                             wifiChanged = true;
