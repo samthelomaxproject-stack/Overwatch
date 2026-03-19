@@ -3272,16 +3272,26 @@ out body;
             } catch(e) {}
         }
 
-        function getWifiNamesForHeatCell(data) {
+        function getWifiIdentitiesForHeatCell(data) {
             try {
                 const ch = Number(data.channel);
                 const band = String(data.band || '').toLowerCase();
-                const names = (lastScanResults || [])
+                const rows = (lastScanResults || [])
                     .filter(n => Number(n.channel) === ch && String(n.band || '').toLowerCase() === band)
-                    .map(n => String(n.display_name || n.ssid || '').trim())
-                    .filter(Boolean);
-                const uniq = [...new Set(names)].slice(0, 4);
-                return uniq;
+                    .map(n => ({
+                        ssid: String(n.display_name || n.ssid || '').trim(),
+                        bssid: String(n.bssid_display || n.bssid || '').trim(),
+                    }))
+                    .filter(r => r.ssid || r.bssid);
+                const seen = new Set();
+                const uniq = [];
+                rows.forEach(r => {
+                    const k = `${r.ssid}|${r.bssid}`;
+                    if (seen.has(k)) return;
+                    seen.add(k);
+                    uniq.push(r);
+                });
+                return uniq.slice(0, 4);
             } catch (_) {
                 return [];
             }
@@ -3296,16 +3306,17 @@ out body;
                     Samples: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
                 </span>`;
             } else {
-                const names = getWifiNamesForHeatCell(data);
-                const primaryName = names[0] || data.ssid || 'Unknown Network';
-                const bssid = data.bssid || '';
-                const bssidLine = bssid ? `<br>BSSID: ${bssid}` : '';
-                const extraNames = names.slice(1).join(', ');
-                const extraLine = extraNames ? `<br>Other: ${extraNames}` : '';
+                const ids = getWifiIdentitiesForHeatCell(data);
+                const primary = ids[0] || {};
+                const ssid = primary.ssid || 'Unknown SSID';
+                const bssid = primary.bssid || 'BSSID unavailable';
+                const other = ids.slice(1).map(x => [x.ssid || 'Unknown SSID', x.bssid || 'BSSID unavailable'].join(' / '));
+                const otherLine = other.length ? `<br>Other: ${other.join(', ')}` : '';
                 return `<span style="font-family:monospace;font-size:11px;">
-                    <strong>${primaryName}</strong>${bssidLine}<br>
+                    <strong>SSID:</strong> ${ssid}<br>
+                    <strong>BSSID:</strong> ${bssid}<br>
                     ${data.dimension || ''} · Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
-                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${extraLine}
+                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${otherLine}
                 </span>`;
             }
         }
