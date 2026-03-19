@@ -1930,7 +1930,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     renderSatellites(data.satellites);
                 }
                 
-                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount + ' cache:' + Object.keys(deltaHeatCache).length + ' camsΔ:' + Object.keys(deltaCamCache).length + ' satΔ:' + Object.keys(deltaSatCache).length;
+                document.getElementById('status').textContent = 'COP: ' + entityCount + ' entities, ' + camCount + ' cams, ' + heatCount + ' heat, ' + satCount + ' sat • Δheat:' + lastDeltaHeatCount + ' cache:' + Object.keys(deltaHeatCache).length + ' camsΔ:' + Object.keys(deltaCamCache).length + ' satΔ:' + Object.keys(deltaSatCache).length + ' cursor:' + copCursor;
             } catch (e) {
                 document.getElementById('status').textContent = 'COP Error: ' + e.message;
             }
@@ -1938,7 +1938,7 @@ class TacticalMapActivity : AppCompatActivity() {
 
         async function pollDeltaLayers() {
             try {
-                const url = currentHub + 'api/delta?device_id=' + encodeURIComponent(OWN_CALLSIGN) + '&cursor=' + copCursor;
+                const url = currentHub + 'api/delta?cursor=' + copCursor;
                 const resp = await fetch(url);
                 if (!resp.ok) return;
                 const data = await resp.json();
@@ -2771,7 +2771,7 @@ class TacticalMapActivity : AppCompatActivity() {
         }, 10000);
         
         // Poll COP + ADS-B continuously (LOCAL keeps local primary but still syncs/pulls)
-        setInterval(pollCOP, 5000);
+        setInterval(pollCOP, 3000);
         setInterval(pollAdsb, 5000);
         setInterval(pollLocalSatcom, 15000);
         setInterval(syncEntityFeedsFromHub, 10000);
