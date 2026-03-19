@@ -4480,7 +4480,6 @@ out body;
 
             // Update aircraft count display
             document.getElementById('adsbCount').textContent = Object.keys(aircraftMarkers).length;
-            renderSidebarEntities();
 
             // Mirror to 3D Cesium view if active and layer visible
             if (is3DMode && layerVisible.adsb) {
@@ -5071,41 +5070,33 @@ out body;
             if (!list) return;
             purgeStaleEntities();
 
-            const pliRows = trackedEntities.map(e => ({
-                key: `pli:${e.uid}`,
-                id: e.uid,
-                src: 'pli',
-                label: e.callsign || e.uid || 'UNKNOWN',
-                kind: (e.type || 'entity').toUpperCase(),
-                lastSeen: e.lastSeen || 0,
-                lat: e.lat,
-                lon: e.lon,
-            }));
-
-            const acRows = (adsbAircraft || []).map(ac => ({
-                key: `adsb:${ac.icao}`,
-                id: ac.icao,
-                src: 'adsb',
-                label: ac.callsign || ac.icao || 'UNKNOWN',
-                kind: 'AIRCRAFT',
-                lastSeen: ac._lastSeen || 0,
-                lat: ac.latitude,
-                lon: ac.longitude,
-            }));
-
-            const rows = [...pliRows, ...acRows]
-                .sort((a,b) => (b.lastSeen||0) - (a.lastSeen||0))
+            // Sidebar shows EUDs only (from tracked/PLI entities).
+            const rows = trackedEntities
+                .filter(e => {
+                    const t = String(e.type || '').toLowerCase();
+                    // Accept explicit EUD or generic device/personnel-like tracked entities.
+                    return t.includes('eud') || t.includes('device') || t.includes('personnel') || t === '';
+                })
+                .map(e => ({
+                    id: e.uid,
+                    label: e.callsign || e.uid || 'UNKNOWN',
+                    kind: 'EUD',
+                    lastSeen: e.lastSeen || 0,
+                    lat: e.lat,
+                    lon: e.lon,
+                }))
+                .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
                 .slice(0, 20);
 
             if (!rows.length) {
-                list.innerHTML = '<div class="tac-sidebar-entity-empty">NO ACTIVE ENTITIES</div>';
+                list.innerHTML = '<div class="tac-sidebar-entity-empty">NO ACTIVE EUDS</div>';
                 return;
             }
 
             list.innerHTML = rows.map(e => {
                 const ageS = Math.max(0, Math.floor((Date.now() - (e.lastSeen || 0)) / 1000));
                 const age = e.lastSeen ? (ageS < 60 ? `${ageS}s` : `${Math.floor(ageS/60)}m`) : '--';
-                return `<button class="tac-sidebar-entity-item" data-entity-src="${e.src}" data-entity-id="${e.id}">
+                return `<button class="tac-sidebar-entity-item" data-entity-id="${e.id}">
                     <span class="tac-sidebar-entity-name">${e.label}</span>
                     <span class="tac-sidebar-entity-meta">${e.kind} · ${age}</span>
                 </button>`;
@@ -5113,23 +5104,10 @@ out body;
 
             list.querySelectorAll('[data-entity-id]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const src = btn.getAttribute('data-entity-src');
                     const id = btn.getAttribute('data-entity-id');
-                    activateView('map');
-                    if (src === 'adsb') {
-                        const ac = (adsbAircraft || []).find(a => String(a.icao) === String(id));
-                        if (!ac) return;
-                        if (map && Number.isFinite(ac.latitude) && Number.isFinite(ac.longitude)) {
-                            map.setView([ac.latitude, ac.longitude], Math.max(12, map.getZoom() || 12));
-                        }
-                        const m = aircraftMarkers[id];
-                        if (m && map && !map.hasLayer(m) && layerVisible.adsb) m.addTo(map);
-                        if (m && m.openPopup) m.openPopup();
-                        return;
-                    }
-
                     const ent = trackedEntities.find(x => String(x.uid) === String(id));
                     if (!ent) return;
+                    activateView('map');
                     if (map && Number.isFinite(ent.lat) && Number.isFinite(ent.lon)) {
                         map.setView([ent.lat, ent.lon], Math.max(12, map.getZoom() || 12));
                     }
@@ -5151,7 +5129,6 @@ out body;
                 trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now() };
             }
             renderEntities();
-            renderSidebarEntities();
             initSidebarMapControls();
             updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
         }
