@@ -332,6 +332,11 @@
         <div class="tac-container">
             <!-- Sidebar -->
             <nav class="tac-sidebar">
+                <div class="tac-nav-section">Entities</div>
+                <div id="sidebarEntityList" class="tac-sidebar-entity-list">
+                    <div class="tac-sidebar-entity-empty">NO ACTIVE ENTITIES</div>
+                </div>
+
                 <div class="tac-nav-section">Operations</div>
                 <div class="tac-nav-item active" data-view="packets" data-key="1">
                     <span class="tac-nav-icon">◫</span>
@@ -354,11 +359,6 @@
                     <span class="tac-nav-icon">◉</span>
                     <span>Squads</span>
                     <span class="tac-nav-shortcut">⌘4</span>
-                </div>
-                <div class="tac-nav-item" data-view="entities" data-key="5">
-                    <span class="tac-nav-icon">⬡</span>
-                    <span>Entities</span>
-                    <span class="tac-nav-shortcut">⌘5</span>
                 </div>
                 <div class="tac-nav-item" data-view="satcom" data-key="6">
                     <span class="tac-nav-icon">◐</span>
@@ -756,20 +756,21 @@ ALPHA-3 | REAR"></textarea>
 
         let currentStyle = 'dark';
 
+        function activateView(view) {
+            document.querySelectorAll('.tac-nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelector(`.tac-nav-item[data-view="${view}"]`)?.classList.add('active');
+            document.querySelectorAll('.tac-view').forEach(m => m.classList.remove('active'));
+            document.getElementById('view-' + view)?.classList.add('active');
+            if (view === 'map' && !map) {
+                setTimeout(initMap, 100);
+            }
+        }
+
         // Navigation
         document.querySelectorAll('.tac-nav-item').forEach(item => {
             item.addEventListener('click', () => {
                 const view = item.dataset.view;
-
-                document.querySelectorAll('.tac-nav-item').forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-
-                document.querySelectorAll('.tac-view').forEach(m => m.classList.remove('active'));
-                document.getElementById('view-' + view).classList.add('active');
-
-                if (view === 'map' && !map) {
-                    setTimeout(initMap, 100);
-                }
+                activateView(view);
             });
         });
 
@@ -3211,10 +3212,7 @@ out body;
 
         function showTileDetail(type, cellId, data) {
             // Switch to SDR/SIGINT view and highlight the tile
-            document.querySelectorAll('.tac-nav-item').forEach(i => i.classList.remove('active'));
-            document.querySelector('[data-view="sdr"]')?.classList.add('active');
-            document.querySelectorAll('.tac-view').forEach(v => v.classList.remove('active'));
-            document.getElementById('view-sdr')?.classList.add('active');
+            activateView('sdr');
 
             // Update detail panel
             const panel = document.getElementById(type === 'rf' ? 'rfDetailPanel' : 'wifiDetailPanel');
@@ -5001,9 +4999,66 @@ out body;
         // === ENTITY STATE ===
         // Populated dynamically from PLI (Position Location Information) received via mesh
         let trackedEntities = [];
+        const ENTITY_STALE_MS = 60000;
         let entityFilter = 'all';
         let entityMarkers = {}; // map markers keyed by entity uid
         let entityLastPos = {}; // uid -> {lat, lon} for heading inference
+
+        function purgeStaleEntities() {
+            const cutoff = Date.now() - ENTITY_STALE_MS;
+            const stale = trackedEntities.filter(e => (e.lastSeen || 0) < cutoff);
+            if (!stale.length) return;
+
+            stale.forEach(e => {
+                const uid = e.uid;
+                if (entityMarkers[uid]) {
+                    if (map && map.hasLayer(entityMarkers[uid])) map.removeLayer(entityMarkers[uid]);
+                    delete entityMarkers[uid];
+                }
+                delete entityLastPos[uid];
+            });
+            trackedEntities = trackedEntities.filter(e => (e.lastSeen || 0) >= cutoff);
+        }
+
+        function renderSidebarEntities() {
+            const list = document.getElementById('sidebarEntityList');
+            if (!list) return;
+            purgeStaleEntities();
+
+            const rows = [...trackedEntities]
+                .sort((a,b) => (b.lastSeen||0) - (a.lastSeen||0))
+                .slice(0, 12);
+
+            if (!rows.length) {
+                list.innerHTML = '<div class="tac-sidebar-entity-empty">NO ACTIVE ENTITIES</div>';
+                return;
+            }
+
+            list.innerHTML = rows.map(e => {
+                const ageS = Math.max(0, Math.floor((Date.now() - (e.lastSeen || 0)) / 1000));
+                const age = ageS < 60 ? `${ageS}s` : `${Math.floor(ageS/60)}m`;
+                const label = e.callsign || e.uid || 'UNKNOWN';
+                return `<button class="tac-sidebar-entity-item" data-entity-id="${e.uid}">
+                    <span class="tac-sidebar-entity-name">${label}</span>
+                    <span class="tac-sidebar-entity-meta">${(e.type || 'ENTITY').toUpperCase()} · ${age}</span>
+                </button>`;
+            }).join('');
+
+            list.querySelectorAll('[data-entity-id]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const uid = btn.getAttribute('data-entity-id');
+                    const ent = trackedEntities.find(x => String(x.uid) === String(uid));
+                    if (!ent) return;
+                    activateView('map');
+                    if (map && Number.isFinite(ent.lat) && Number.isFinite(ent.lon)) {
+                        map.setView([ent.lat, ent.lon], Math.max(12, map.getZoom() || 12));
+                    }
+                    const m = entityMarkers[uid];
+                    if (m && map && !map.hasLayer(m) && layerVisible.units) m.addTo(map);
+                    if (m && m.openTooltip) m.openTooltip();
+                });
+            });
+        }
 
         function ingestPLI(pli) {
             // pli = { uid, callsign, type, affiliation, lat, lon, altitude, speed, course, mgrs, timestamp }
@@ -5016,11 +5071,13 @@ out body;
                 trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now() };
             }
             renderEntities();
+            renderSidebarEntities();
             updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
         }
 
         function renderEntities() {
             const list = document.getElementById('entityList');
+            purgeStaleEntities();
             const filtered = entityFilter === 'all'
                 ? trackedEntities
                 : trackedEntities.filter(e => e.affiliation === entityFilter);
@@ -5048,6 +5105,7 @@ out body;
                     <div class="tac-entity-coords" style="font-size:0.7rem;">${e.mgrs || (e.lat && e.lon ? e.lat.toFixed(4)+', '+e.lon.toFixed(4) : '--')}</div>
                 </div>`;
             }).join('');
+            renderSidebarEntities();
         }
 
         function filterEntities(type) {
@@ -5606,6 +5664,9 @@ out body;
                 if (layerVisible.shodan) {
                     pollShodanMarkers(false).catch(() => {});
                 }
+                // Reuse existing interval for entity stale purge (60s TTL target)
+                renderSidebarEntities();
+                renderEntities();
             }, 30 * 1000);
 
             debugLog('App initialized, waiting for Tauri...');
