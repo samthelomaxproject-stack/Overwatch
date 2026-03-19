@@ -2371,11 +2371,24 @@ NOSS 3-4 A
                     iconAnchor: iss ? [10,10] : [8,8]
                 });
                 if (!satMarkers[s.id]) {
-                    satMarkers[s.id] = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1500 });
-                    satMarkers[s.id].bindPopup(`<div style="min-width:240px;"><div style="font-weight:700;color:${color};">${s.name}</div><div style="font-size:12px;color:#94a3b8;">NORAD ${s.norad || 'n/a'} • ${s.group}</div><div style="font-size:12px;color:#cbd5e1;">Alt ${p.altKm?.toFixed(1)} km</div><div style="margin-top:8px;"><button onclick="satShowOrbit('${s.id}')" style="width:100%;">Show Orbit (90m)</button></div></div>`);
+                    satMarkers[s.id] = L.marker([p.lat, p.lon], { icon, zIndexOffset: 1500, riseOnHover: true });
+                    satMarkers[s.id]
+                        .bindTooltip(String(s.name || 'SAT'), {
+                            permanent: true,
+                            direction: 'top',
+                            offset: [0, -10],
+                            className: 'sat-name-tooltip'
+                        })
+                        .bindPopup(`<div style="min-width:240px;"><div style="font-weight:700;color:${color};">${s.name}</div><div style="font-size:12px;color:#94a3b8;">NORAD ${s.norad || 'n/a'} • ${s.group}</div><div style="font-size:12px;color:#cbd5e1;">Alt ${p.altKm?.toFixed(1)} km</div><div style="margin-top:8px;"><button onclick="satShowOrbit('${s.id}')" style="width:100%;">Show Orbit (90m)</button></div></div>`)
+                        .on('click', () => {
+                            // Ensure click context is centered so popup appears at marker, not off-screen.
+                            if (map) map.panTo(satMarkers[s.id].getLatLng(), { animate: true });
+                            satMarkers[s.id].openPopup();
+                        });
                 } else {
                     satMarkers[s.id].setLatLng([p.lat, p.lon]);
                     satMarkers[s.id].setIcon(icon);
+                    satMarkers[s.id].setTooltipContent(String(s.name || 'SAT'));
                 }
                 if (!map.hasLayer(satMarkers[s.id])) satMarkers[s.id].addTo(map);
                 if (is3DMode && cesiumViewer) addSatToCesium(s, p);

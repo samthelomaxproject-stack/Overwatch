@@ -711,3 +711,18 @@ h1, h2, h3, h4, h5, h6 {
 .tac-sidebar .tac-panel {
   overflow: visible;
 }
+
+/* Satellite labels (APK-like always-visible naming) */
+.sat-name-tooltip {
+  background: rgba(10, 14, 24, 0.9);
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.sat-name-tooltip:before {
+  border-top-color: rgba(250, 204, 21, 0.45);
+}
