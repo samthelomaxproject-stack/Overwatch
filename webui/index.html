@@ -2202,6 +2202,34 @@ ALPHA-3 | REAR"></textarea>
             });
         }
 
+        
+        const SAT_TLE_FALLBACK = {
+            stations: `ISS (ZARYA)
+1 25544U 98067A   26079.50000000  .00016717  00000+0  30208-3 0  9994
+2 25544  51.6437  52.1097 0004457 220.6632 248.2119 15.49915320544447
+TIANGONG
+1 48274U 21035A   26079.50000000  .00016602  00000+0  20766-3 0  9998
+2 48274  41.4741  32.5161 0007427 203.0428 257.1697 15.59566156275980`,
+            weather: `NOAA 19
+1 33591U 09005A   26079.50000000  .00000087  00000+0  78828-4 0  9990
+2 33591  99.1953 125.3652 0014284 194.8902 165.1562 14.12416399874994
+METOP-B
+1 38771U 12049A   26079.50000000  .00000073  00000+0  60967-4 0  9990
+2 38771  98.7030 104.9900 0001389 104.1408 255.9994 14.21498913696283`,
+            starlink: `STARLINK-1007
+1 44713U 19074B   26079.50000000  .00002291  00000+0  16792-3 0  9990
+2 44713  53.0540 115.5528 0001261 106.8706 253.2493 15.06395523361284
+STARLINK-1019
+1 44728U 19074Q   26079.50000000  .00002078  00000+0  15279-3 0  9994
+2 44728  53.0526  95.1153 0001513 109.9476 250.1708 15.06302117361265`,
+            military: `USA 245
+1 39232U 13043A   26079.50000000  .00000012  00000+0  00000+0 0  9995
+2 39232  63.4201  98.2147 0125000 220.0000 139.9000 13.40600000500001
+NOSS 3-4 A
+1 31701U 07027A   26079.50000000  .00000042  00000+0  26117-4 0  9990
+2 31701  63.4343 179.4018 0120426  49.8244 311.2996 13.40663531888888`
+        };
+
         function satGroupUrl(group) {
             return `https://celestrak.org/NORAD/elements/gp.php?GROUP=${encodeURIComponent(group)}&FORMAT=TLE`;
         }
@@ -2243,12 +2271,36 @@ ALPHA-3 | REAR"></textarea>
                     if (cached && (Date.now() - cached.ts) < SAT_CACHE_TTL_MS) return cached.items || [];
                 } catch (_) {}
             }
-            const resp = await fetch(satGroupUrl(group));
-            if (!resp.ok) throw new Error(`TLE fetch ${group} ${resp.status}`);
-            const text = await resp.text();
-            const items = parseTleText(text, group);
-            safeSetCctvCache(key, items);
-            return items;
+
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 4500);
+            try {
+                const resp = await fetch(satGroupUrl(group), { signal: ctrl.signal });
+                if (!resp.ok) throw new Error(`TLE fetch ${group} ${resp.status}`);
+                const text = await resp.text();
+                const items = parseTleText(text, group);
+                safeSetCctvCache(key, items);
+                return items;
+            } catch (e) {
+                // 1) stale cached fallback
+                try {
+                    const cached = JSON.parse(localStorage.getItem(key) || 'null');
+                    if (cached && Array.isArray(cached.items) && cached.items.length) {
+                        debugLog(`🛰️ SAT using stale cache for ${group} (${cached.items.length})`);
+                        return cached.items;
+                    }
+                } catch (_) {}
+                // 2) embedded fallback set so SAT overlay remains operational offline
+                const fallbackText = SAT_TLE_FALLBACK[group] || '';
+                const fallbackItems = parseTleText(fallbackText, group);
+                if (fallbackItems.length) {
+                    debugLog(`🛰️ SAT using embedded fallback for ${group} (${fallbackItems.length})`);
+                    return fallbackItems;
+                }
+                throw e;
+            } finally {
+                clearTimeout(t);
+            }
         }
 
         function satSubpointFromTle(s) {
