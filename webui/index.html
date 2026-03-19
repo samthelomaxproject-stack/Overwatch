@@ -5045,13 +5045,22 @@ out body;
         // Populated dynamically from PLI (Position Location Information) received via mesh
         let trackedEntities = [];
         const ENTITY_STALE_MS = 60000;
+
+        function entitySeenMs(e) {
+            if (!e) return 0;
+            if (Number.isFinite(e.lastSeen)) return e.lastSeen;
+            const ts = e.timestamp || e.ts || e.time || null;
+            if (!ts) return 0;
+            const ms = Date.parse(String(ts));
+            return Number.isFinite(ms) ? ms : 0;
+        }
         let entityFilter = 'all';
         let entityMarkers = {}; // map markers keyed by entity uid
         let entityLastPos = {}; // uid -> {lat, lon} for heading inference
 
         function purgeStaleEntities() {
             const cutoff = Date.now() - ENTITY_STALE_MS;
-            const stale = trackedEntities.filter(e => (e.lastSeen || 0) < cutoff);
+            const stale = trackedEntities.filter(e => entitySeenMs(e) < cutoff);
             if (!stale.length) return;
 
             stale.forEach(e => {
@@ -5062,7 +5071,7 @@ out body;
                 }
                 delete entityLastPos[uid];
             });
-            trackedEntities = trackedEntities.filter(e => (e.lastSeen || 0) >= cutoff);
+            trackedEntities = trackedEntities.filter(e => entitySeenMs(e) >= cutoff);
         }
 
         function renderSidebarEntities() {
@@ -5072,16 +5081,12 @@ out body;
 
             // Sidebar shows EUDs only (from tracked/PLI entities).
             const rows = trackedEntities
-                .filter(e => {
-                    const t = String(e.type || '').toLowerCase();
-                    // Accept explicit EUD or generic device/personnel-like tracked entities.
-                    return t.includes('eud') || t.includes('device') || t.includes('personnel') || t === '';
-                })
+                .filter(e => e && e.uid)
                 .map(e => ({
                     id: e.uid,
                     label: e.callsign || e.uid || 'UNKNOWN',
                     kind: 'EUD',
-                    lastSeen: e.lastSeen || 0,
+                    lastSeen: entitySeenMs(e),
                     lat: e.lat,
                     lon: e.lon,
                 }))
@@ -5123,10 +5128,10 @@ out body;
             const existing = trackedEntities.findIndex(e => e.uid === pli.uid);
             const isNew = existing < 0;
             if (isNew) {
-                trackedEntities.push({ ...pli, lastSeen: Date.now() });
+                trackedEntities.push({ ...pli, lastSeen: Date.now(), timestamp: pli.timestamp || new Date().toISOString() });
                 debugLog(`📍 New entity: ${pli.callsign || pli.uid} [${pli.lat.toFixed(4)}, ${pli.lon.toFixed(4)}]`);
             } else {
-                trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now() };
+                trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now(), timestamp: pli.timestamp || trackedEntities[existing].timestamp || new Date().toISOString() };
             }
             renderEntities();
             initSidebarMapControls();
