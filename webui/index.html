@@ -387,12 +387,20 @@
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="ais"> AIS</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="rf"> RF</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="wifi"> Wi-Fi</label>
-                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="sat"> Nodes / Comms</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="sat"> Satellites</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="cctv"> Cams</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="conflict"> Conflict</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="shodan"> Shodan</label>
                         </div>
                         <div style="margin-top:4px;font-size:0.625rem;color:var(--text-muted);font-family:var(--font-mono);">Scroll list for additional overlays</div>
+
+                        <label class="tac-label" style="display:block; margin-top: var(--space-sm); margin-bottom: 4px;">Satellite Groups</label>
+                        <div id="sidebarSatGroups" class="tac-map-controls-layer-list" style="max-height: 120px;">
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="stations" checked> Stations</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="weather" checked> Weather</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="starlink" checked> Starlink</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="military" checked> Military</label>
+                        </div>
                     </div>
                 </div>
 
@@ -924,10 +932,25 @@ ALPHA-3 | REAR"></textarea>
                     inp.checked = !!layerVisible[layer];
                 }
             });
+            document.querySelectorAll('[data-sidebar-sat-group]').forEach(inp => {
+                const g = inp.getAttribute('value');
+                inp.checked = satSelectedGroups.includes(g);
+            });
             const heat = document.getElementById('sidebarHeatIntensity');
             const heatLbl = document.getElementById('sidebarHeatIntensityLabel');
             if (heat) heat.value = String(heatmapIntensity.toFixed(1));
             if (heatLbl) heatLbl.textContent = `${heatmapIntensity.toFixed(1)}x`;
+        }
+
+        function applySidebarSatGroups() {
+            const groups = Array.from(document.querySelectorAll('[data-sidebar-sat-group]'))
+                .filter(x => x.checked)
+                .map(x => x.value);
+            satSelectedGroups = groups.length ? groups : ['stations'];
+            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
+            if (layerVisible.sat) {
+                renderSatLayer(true);
+            }
         }
 
         function initSidebarMapControls() {
@@ -952,6 +975,9 @@ ALPHA-3 | REAR"></textarea>
                     if (!layer) return;
                     toggleLayer(layer, !!inp.checked);
                 });
+            });
+            document.querySelectorAll('[data-sidebar-sat-group]').forEach(inp => {
+                inp.addEventListener('change', () => applySidebarSatGroups());
             });
             const heat = document.getElementById('sidebarHeatIntensity');
             const heatLbl = document.getElementById('sidebarHeatIntensityLabel');
