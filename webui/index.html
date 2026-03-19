@@ -3297,11 +3297,15 @@ out body;
                 </span>`;
             } else {
                 const names = getWifiNamesForHeatCell(data);
-                const namesLine = names.length ? `<br>Names: ${names.join(', ')}` : '';
+                const primaryName = names[0] || data.ssid || 'Unknown Network';
+                const bssid = data.bssid || '';
+                const bssidLine = bssid ? `<br>BSSID: ${bssid}` : '';
+                const extraNames = names.slice(1).join(', ');
+                const extraLine = extraNames ? `<br>Other: ${extraNames}` : '';
                 return `<span style="font-family:monospace;font-size:11px;">
-                    Wi-Fi · ${data.dimension || ''}<br>
-                    Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
-                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${namesLine}
+                    <strong>${primaryName}</strong>${bssidLine}<br>
+                    ${data.dimension || ''} · Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
+                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${extraLine}
                 </span>`;
             }
         }
