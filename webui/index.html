@@ -376,7 +376,7 @@
 
                         <button class="tac-quick-btn" id="sidebar3DToggle" style="width:100%; margin-bottom: var(--space-sm);">3D OFF</button>
 
-                        <div style="display:grid; gap:4px;">
+                        <div class="tac-map-controls-layer-list" id="sidebarLayerOptions">
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="units" checked> Units</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="zones" checked> Zones</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="adsb"> ADS-B / Air</label>
@@ -388,6 +388,7 @@
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="conflict"> Conflict</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="shodan"> Shodan</label>
                         </div>
+                        <div style="margin-top:4px;font-size:0.625rem;color:var(--text-muted);font-family:var(--font-mono);">Scroll list for additional overlays</div>
                     </div>
                 </div>
 
