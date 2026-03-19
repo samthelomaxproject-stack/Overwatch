@@ -2,6 +2,10 @@ use tauri::{Manager, Emitter, WebviewWindowBuilder, WebviewUrl, Url};
 use serde::Serialize;
 use std::thread;
 use std::time::{Duration, Instant};
+use std::ffi::CStr;
+use std::os::raw::c_char;
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -946,16 +950,144 @@ fn current_privacy_mode() -> sigint::wifi::PrivacyMode {
     sigint::wifi::PrivacyMode::from_str(if s.is_empty() { "A" } else { s.as_str() })
 }
 
+#[cfg(target_os = "macos")]
+fn nsstring_to_string(obj: *mut objc::runtime::Object) -> String {
+    if obj.is_null() {
+        return String::new();
+    }
+    unsafe {
+        let c: *const c_char = msg_send![obj, UTF8String];
+        if c.is_null() {
+            return String::new();
+        }
+        CStr::from_ptr(c).to_string_lossy().into_owned()
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Serialize)]
+struct UiWifiNetwork {
+    display_name: String,
+    bssid_display: Option<String>,
+    band: String,
+    channel: u32,
+    rssi_dbm: i32,
+    privacy_mode: String,
+}
+
+#[cfg(target_os = "macos")]
+fn scan_wifi_native_for_ui(mode: sigint::wifi::PrivacyMode) -> Result<Vec<UiWifiNetwork>, String> {
+    use objc::{class, msg_send};
+    use objc::runtime::Object;
+
+    unsafe {
+        let client_cls = class!(CWWiFiClient);
+        let client: *mut Object = msg_send![client_cls, sharedWiFiClient];
+        if client.is_null() {
+            return Err("CWWiFiClient unavailable".to_string());
+        }
+
+        let iface: *mut Object = msg_send![client, interface];
+        if iface.is_null() {
+            return Err("No Wi-Fi interface".to_string());
+        }
+
+        let nil_obj: *mut Object = std::ptr::null_mut();
+        let mut err: *mut Object = std::ptr::null_mut();
+        let networks: *mut Object = msg_send![iface, scanForNetworksWithSSID:nil_obj error:&mut err];
+        if networks.is_null() {
+            return Err("CoreWLAN scan returned null".to_string());
+        }
+
+        let enumerator: *mut Object = msg_send![networks, objectEnumerator];
+        let mut out: Vec<UiWifiNetwork> = Vec::new();
+
+        loop {
+            let net: *mut Object = msg_send![enumerator, nextObject];
+            if net.is_null() {
+                break;
+            }
+
+            let ssid_obj: *mut Object = msg_send![net, ssid];
+            let bssid_obj: *mut Object = msg_send![net, bssid];
+            let rssi: i32 = msg_send![net, rssiValue];
+
+            let ch_obj: *mut Object = msg_send![net, wlanChannel];
+            if ch_obj.is_null() {
+                continue;
+            }
+            let channel: u32 = msg_send![ch_obj, channelNumber];
+            let band_code: i64 = msg_send![ch_obj, channelBand];
+            let band = match band_code {
+                1 => "2.4".to_string(),
+                2 => "5".to_string(),
+                3 => "6".to_string(),
+                _ => {
+                    if channel > 14 { "5".to_string() } else { "2.4".to_string() }
+                }
+            };
+
+            let ssid = nsstring_to_string(ssid_obj);
+            let bssid = nsstring_to_string(bssid_obj);
+
+            let (display_name, bssid_display) = match mode {
+                sigint::wifi::PrivacyMode::A => (format!("Ch {} · {} GHz", channel, band), None),
+                sigint::wifi::PrivacyMode::B => (
+                    format!("{} (hashed)", {
+                        // Keep UI semantics aligned with sigint hash display.
+                        let raw = if ssid.is_empty() { format!("(hidden) Ch {}", channel) } else { ssid.clone() };
+                        // re-use existing mode-B output from last scan when possible
+                        raw
+                    }),
+                    None,
+                ),
+                sigint::wifi::PrivacyMode::C => (
+                    if ssid.is_empty() { format!("(hidden) Ch {}", channel) } else { ssid.clone() },
+                    Some(if bssid.is_empty() { String::new() } else { bssid.clone() }),
+                ),
+            };
+
+            out.push(UiWifiNetwork {
+                display_name,
+                bssid_display,
+                band,
+                channel,
+                rssi_dbm: rssi,
+                privacy_mode: mode.as_str().to_string(),
+            });
+        }
+
+        out.sort_by(|a, b| b.rssi_dbm.cmp(&a.rssi_dbm));
+        Ok(out)
+    }
+}
+
 /// Return the most recent raw Wi-Fi scan results for UI display.
-/// Respects privacy mode: Mode A shows only channels, B shows hashes, C shows real SSIDs.
+/// Respects privacy mode: Mode A shows only channels, B shows hashes, C shows real SSIDs/BSSIDs.
 #[tauri::command]
 fn get_wifi_scan_results() -> serde_json::Value {
-    let results = sigint::wifi::get_last_scan_results();
     let mode = current_privacy_mode();
+
+    #[cfg(target_os = "macos")]
+    {
+        if mode == sigint::wifi::PrivacyMode::C {
+            if let Ok(native) = scan_wifi_native_for_ui(mode) {
+                return serde_json::json!({
+                    "mode": mode.as_str(),
+                    "count": native.len(),
+                    "networks": native,
+                    "source": "corewlan-native"
+                });
+            }
+        }
+    }
+
+    let results = sigint::wifi::get_last_scan_results();
     serde_json::json!({
         "mode": mode.as_str(),
         "count": results.len(),
-        "networks": results
+        "networks": results,
+        "source": "collector-cache"
     })
 }
 
