@@ -364,6 +364,7 @@
                             <option value="satellite">Satellite</option>
                             <option value="hybrid">Hybrid</option>
                             <option value="terrain">Terrain</option>
+                            <option value="3d">3D</option>
                         </select>
 
                         <label class="tac-label" style="display:block; margin-bottom: 4px;">Conflict Window</label>
@@ -374,7 +375,6 @@
                             <option value="custom">Custom</option>
                         </select>
 
-                        <button class="tac-quick-btn" id="sidebar3DToggle" style="width:100%; margin-bottom: var(--space-sm);">3D OFF</button>
 
                         <label class="tac-label" style="display:block; margin-bottom: 4px;">Heatmap Intensity</label>
                         <input id="sidebarHeatIntensity" type="range" min="0.5" max="1.8" step="0.1" value="1.0" style="width:100%; margin-bottom:2px;" />
@@ -921,11 +921,9 @@ ALPHA-3 | REAR"></textarea>
 
         function syncSidebarMapControls() {
             const mapSel = document.getElementById('sidebarMapType');
-            if (mapSel) mapSel.value = currentStyle;
+            if (mapSel) mapSel.value = is3DMode ? "3d" : currentStyle;
             const cw = document.getElementById('sidebarConflictWindow');
             if (cw) cw.value = conflictFilters.windowRange || '1d';
-            const btn3d = document.getElementById('sidebar3DToggle');
-            if (btn3d) btn3d.textContent = is3DMode ? '3D ON' : '3D OFF';
             document.querySelectorAll('[data-sidebar-layer]').forEach(inp => {
                 const layer = inp.getAttribute('data-sidebar-layer');
                 if (layer && layerVisible.hasOwnProperty(layer)) {
@@ -957,18 +955,21 @@ ALPHA-3 | REAR"></textarea>
         function initSidebarMapControls() {
             const mapSel = document.getElementById('sidebarMapType');
             if (mapSel) {
-                mapSel.addEventListener('change', () => setMapStyle(mapSel.value));
+                mapSel.addEventListener('change', () => {
+                    const v = mapSel.value;
+                    if (v === '3d') {
+                        activateView('map');
+                        if (!is3DMode) toggle3D();
+                        return;
+                    }
+                    // switching to 2D style from 3D should first disable 3D
+                    if (is3DMode) toggle3D();
+                    setMapStyle(v);
+                });
             }
             const conflictSel = document.getElementById('sidebarConflictWindow');
             if (conflictSel) {
                 conflictSel.addEventListener('change', () => setConflictWindow(conflictSel.value));
-            }
-            const btn3d = document.getElementById('sidebar3DToggle');
-            if (btn3d) {
-                btn3d.addEventListener('click', () => {
-                    activateView('map');
-                    toggle3D();
-                });
             }
             document.querySelectorAll('[data-sidebar-layer]').forEach(inp => {
                 inp.addEventListener('change', () => {
