@@ -376,6 +376,10 @@
 
                         <button class="tac-quick-btn" id="sidebar3DToggle" style="width:100%; margin-bottom: var(--space-sm);">3D OFF</button>
 
+                        <label class="tac-label" style="display:block; margin-bottom: 4px;">Heatmap Intensity</label>
+                        <input id="sidebarHeatIntensity" type="range" min="0.5" max="1.8" step="0.1" value="1.0" style="width:100%; margin-bottom:2px;" />
+                        <div id="sidebarHeatIntensityLabel" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:var(--space-sm);">1.0x</div>
+
                         <div class="tac-map-controls-layer-list" id="sidebarLayerOptions">
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="units" checked> Units</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="zones" checked> Zones</label>
@@ -599,7 +603,7 @@
                                 <label class="tac-label">SIGINT Wi-Fi Privacy Mode</label>
                                 <div style="margin-bottom:var(--space-sm);">
                                     <label style="display:flex;align-items:flex-start;gap:var(--space-sm);cursor:pointer;margin-bottom:var(--space-sm);">
-                                        <input type="radio" name="privacyMode" value="A" checked onchange="setPrivacyMode('A')" style="margin-top:3px;">
+                                        <input type="radio" name="privacyMode" value="A" onchange="setPrivacyMode('A')" style="margin-top:3px;">
                                         <span>
                                             <span style="color:var(--accent-cyan);font-weight:600;">Mode A — Channel Only (Default)</span><br>
                                             <span style="font-size:0.75rem;color:var(--text-muted);">No BSSID or SSID transmitted. Only band, channel, and RSSI. Maximum privacy.</span>
@@ -613,7 +617,7 @@
                                         </span>
                                     </label>
                                     <label style="display:flex;align-items:flex-start;gap:var(--space-sm);cursor:pointer;">
-                                        <input type="radio" name="privacyMode" value="C" onchange="setPrivacyMode('C')" style="margin-top:3px;">
+                                        <input type="radio" name="privacyMode" value="C" checked onchange="setPrivacyMode('C')" style="margin-top:3px;">
                                         <span>
                                             <span style="color:#f56565;font-weight:600;">Mode C — Raw Identifiers ⚠️</span><br>
                                             <span style="font-size:0.75rem;color:var(--text-muted);">Full BSSID and SSID stored and transmitted. Only use on trusted, isolated networks.</span>
@@ -920,6 +924,10 @@ ALPHA-3 | REAR"></textarea>
                     inp.checked = !!layerVisible[layer];
                 }
             });
+            const heat = document.getElementById('sidebarHeatIntensity');
+            const heatLbl = document.getElementById('sidebarHeatIntensityLabel');
+            if (heat) heat.value = String(heatmapIntensity.toFixed(1));
+            if (heatLbl) heatLbl.textContent = `${heatmapIntensity.toFixed(1)}x`;
         }
 
         function initSidebarMapControls() {
@@ -945,6 +953,16 @@ ALPHA-3 | REAR"></textarea>
                     toggleLayer(layer, !!inp.checked);
                 });
             });
+            const heat = document.getElementById('sidebarHeatIntensity');
+            const heatLbl = document.getElementById('sidebarHeatIntensityLabel');
+            if (heat) {
+                heat.addEventListener('input', () => {
+                    heatmapIntensity = Number(heat.value) || 1.0;
+                    if (heatLbl) heatLbl.textContent = `${heatmapIntensity.toFixed(1)}x`;
+                    if (layerVisible.rf) updateHeatmap('rf');
+                    if (layerVisible.wifi) updateHeatmap('wifi');
+                });
+            }
             syncSidebarMapControls();
         }
 
@@ -3118,7 +3136,7 @@ out body;
                     if (!data.cellId || !window.h3) return;
                     const signalIntensity = Math.max(0, Math.min(1, (data.mean_val + 100) / 60));
                     const opacityFactor = Math.max(0.3, data.confidence || 0.5);
-                    const finalIntensity = signalIntensity * opacityFactor;
+                    const finalIntensity = Math.max(0, Math.min(1, signalIntensity * opacityFactor * heatmapIntensity));
                     const prev = cellBest[data.cellId] || 0;
                     if (finalIntensity > prev) cellBest[data.cellId] = finalIntensity;
                 });
@@ -3143,7 +3161,7 @@ out body;
                     const countBoost = Math.min(1, (data.sample_count || 1) / 8);
                     const signalIntensity = rssiIntensity * 0.7 + countBoost * 0.3;
                     const opacityFactor = Math.max(0.3, data.confidence || 0.5);
-                    const finalIntensity = signalIntensity * opacityFactor;
+                    const finalIntensity = Math.max(0, Math.min(1, signalIntensity * opacityFactor * heatmapIntensity));
                     if (finalIntensity < 0.05) return;
 
                     // deterministic tiny jitter based on channel
@@ -3254,6 +3272,21 @@ out body;
             } catch(e) {}
         }
 
+        function getWifiNamesForHeatCell(data) {
+            try {
+                const ch = Number(data.channel);
+                const band = String(data.band || '').toLowerCase();
+                const names = (lastScanResults || [])
+                    .filter(n => Number(n.channel) === ch && String(n.band || '').toLowerCase() === band)
+                    .map(n => String(n.display_name || n.ssid || '').trim())
+                    .filter(Boolean);
+                const uniq = [...new Set(names)].slice(0, 4);
+                return uniq;
+            } catch (_) {
+                return [];
+            }
+        }
+
         function buildHexTooltip(type, data) {
             if (type === 'rf') {
                 return `<span style="font-family:monospace;font-size:11px;">
@@ -3263,10 +3296,12 @@ out body;
                     Samples: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
                 </span>`;
             } else {
+                const names = getWifiNamesForHeatCell(data);
+                const namesLine = names.length ? `<br>Names: ${names.join(', ')}` : '';
                 return `<span style="font-family:monospace;font-size:11px;">
                     Wi-Fi · ${data.dimension || ''}<br>
                     Mean RSSI: ${data.mean_val?.toFixed(1)} dBm<br>
-                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%
+                    Networks: ${data.sample_count} · Conf: ${(data.confidence * 100).toFixed(0)}%${namesLine}
                 </span>`;
             }
         }
@@ -5657,7 +5692,8 @@ out body;
             document.getElementById('keyGroup').style.display = e.target.value === 'secure' ? 'block' : 'none';
         });
 
-        let currentPrivacyMode = 'A';
+        let currentPrivacyMode = 'C';
+        let heatmapIntensity = 1.0;
 
         async function setPrivacyMode(mode) {
             currentPrivacyMode = mode;
@@ -5744,6 +5780,9 @@ out body;
                     console.error('Immediate GPS check failed:', e);
                 });
             }
+
+            // Default privacy mode C per operator requirement
+            setPrivacyMode('C');
 
             // Initialize map immediately so GPS can show location
             setTimeout(() => {
