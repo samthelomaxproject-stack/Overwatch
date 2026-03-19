@@ -945,10 +945,11 @@ ALPHA-3 | REAR"></textarea>
                 .filter(x => x.checked)
                 .map(x => x.value);
             satSelectedGroups = groups.filter(g => SUPPORTED_SAT_GROUPS.includes(String(g)));
-            if (!satSelectedGroups.length) satSelectedGroups = ['stations'];
+            // Allow empty selection to remain empty (do not auto-force Stations).
             localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
             if (layerVisible.sat) {
-                renderSatLayer(true);
+                if (satSelectedGroups.length) renderSatLayer(true);
+                else clearSatLayer();
             }
         }
 
@@ -1021,7 +1022,6 @@ ALPHA-3 | REAR"></textarea>
                 conflictModule.setFilters(conflictFilters);
                 conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
             }
-            applySidebarSatGroups();
             syncSidebarMapControls();
         }
 
@@ -1182,7 +1182,6 @@ ALPHA-3 | REAR"></textarea>
                     pollShodanMarkers(true).catch(() => {});
                 }
             }
-            applySidebarSatGroups();
             syncSidebarMapControls();
         }
 
@@ -2337,7 +2336,10 @@ NOSS 3-4 A
         async function renderSatLayer(force=false) {
             if (!layerVisible.sat || !map) return;
             satSelectedGroups = satSelectedGroups.filter(g => SUPPORTED_SAT_GROUPS.includes(String(g)));
-            if (!satSelectedGroups.length) satSelectedGroups = ['stations'];
+            if (!satSelectedGroups.length) {
+                clearSatLayer();
+                return;
+            }
             const ok = await ensureSatelliteJs();
             if (!ok) { debugLog('🛰️ satellite.js failed to load'); return; }
 
