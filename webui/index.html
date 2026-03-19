@@ -1464,9 +1464,9 @@ ALPHA-3 | REAR"></textarea>
                         // Update counter display
                         const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
                         if (existing >= 0) {
-                            adsbAircraft[existing] = {...adsbAircraft[existing], ...ac};
+                            adsbAircraft[existing] = {...adsbAircraft[existing], ...ac, _lastSeen: Date.now()};
                         } else {
-                            adsbAircraft.push(ac);
+                            adsbAircraft.push({ ...ac, _lastSeen: Date.now() });
                         }
                         
                         // Real-time display
@@ -4359,6 +4359,7 @@ out body;
 
         function addAircraftToMap(ac) {
             if (!map || !ac.latitude || !ac.longitude) return;
+            ac._lastSeen = Date.now();
 
             // Determine icon color based on altitude (like Intercept)
             let iconColor = 'var(--accent-orange)'; // default
@@ -4594,9 +4595,9 @@ out body;
                         for (const ac of aircraft) {
                             const existing = adsbAircraft.findIndex(a => a.icao === ac.icao);
                             if (existing >= 0) {
-                                adsbAircraft[existing] = { ...adsbAircraft[existing], ...ac };
+                                adsbAircraft[existing] = { ...adsbAircraft[existing], ...ac, _lastSeen: Date.now() };
                             } else {
-                                adsbAircraft.push(ac);
+                                adsbAircraft.push({ ...ac, _lastSeen: Date.now() });
                             }
                             if (ac.latitude && ac.longitude) addAircraftToMap(ac);
                         }
@@ -5068,9 +5069,31 @@ out body;
             if (!list) return;
             purgeStaleEntities();
 
-            const rows = [...trackedEntities]
+            const pliRows = trackedEntities.map(e => ({
+                key: `pli:${e.uid}`,
+                id: e.uid,
+                src: 'pli',
+                label: e.callsign || e.uid || 'UNKNOWN',
+                kind: (e.type || 'entity').toUpperCase(),
+                lastSeen: e.lastSeen || 0,
+                lat: e.lat,
+                lon: e.lon,
+            }));
+
+            const acRows = (adsbAircraft || []).map(ac => ({
+                key: `adsb:${ac.icao}`,
+                id: ac.icao,
+                src: 'adsb',
+                label: ac.callsign || ac.icao || 'UNKNOWN',
+                kind: 'AIRCRAFT',
+                lastSeen: ac._lastSeen || 0,
+                lat: ac.latitude,
+                lon: ac.longitude,
+            }));
+
+            const rows = [...pliRows, ...acRows]
                 .sort((a,b) => (b.lastSeen||0) - (a.lastSeen||0))
-                .slice(0, 12);
+                .slice(0, 20);
 
             if (!rows.length) {
                 list.innerHTML = '<div class="tac-sidebar-entity-empty">NO ACTIVE ENTITIES</div>';
@@ -5079,24 +5102,36 @@ out body;
 
             list.innerHTML = rows.map(e => {
                 const ageS = Math.max(0, Math.floor((Date.now() - (e.lastSeen || 0)) / 1000));
-                const age = ageS < 60 ? `${ageS}s` : `${Math.floor(ageS/60)}m`;
-                const label = e.callsign || e.uid || 'UNKNOWN';
-                return `<button class="tac-sidebar-entity-item" data-entity-id="${e.uid}">
-                    <span class="tac-sidebar-entity-name">${label}</span>
-                    <span class="tac-sidebar-entity-meta">${(e.type || 'ENTITY').toUpperCase()} · ${age}</span>
+                const age = e.lastSeen ? (ageS < 60 ? `${ageS}s` : `${Math.floor(ageS/60)}m`) : '--';
+                return `<button class="tac-sidebar-entity-item" data-entity-src="${e.src}" data-entity-id="${e.id}">
+                    <span class="tac-sidebar-entity-name">${e.label}</span>
+                    <span class="tac-sidebar-entity-meta">${e.kind} · ${age}</span>
                 </button>`;
             }).join('');
 
             list.querySelectorAll('[data-entity-id]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const uid = btn.getAttribute('data-entity-id');
-                    const ent = trackedEntities.find(x => String(x.uid) === String(uid));
-                    if (!ent) return;
+                    const src = btn.getAttribute('data-entity-src');
+                    const id = btn.getAttribute('data-entity-id');
                     activateView('map');
+                    if (src === 'adsb') {
+                        const ac = (adsbAircraft || []).find(a => String(a.icao) === String(id));
+                        if (!ac) return;
+                        if (map && Number.isFinite(ac.latitude) && Number.isFinite(ac.longitude)) {
+                            map.setView([ac.latitude, ac.longitude], Math.max(12, map.getZoom() || 12));
+                        }
+                        const m = aircraftMarkers[id];
+                        if (m && map && !map.hasLayer(m) && layerVisible.adsb) m.addTo(map);
+                        if (m && m.openPopup) m.openPopup();
+                        return;
+                    }
+
+                    const ent = trackedEntities.find(x => String(x.uid) === String(id));
+                    if (!ent) return;
                     if (map && Number.isFinite(ent.lat) && Number.isFinite(ent.lon)) {
                         map.setView([ent.lat, ent.lon], Math.max(12, map.getZoom() || 12));
                     }
-                    const m = entityMarkers[uid];
+                    const m = entityMarkers[id];
                     if (m && map && !map.hasLayer(m) && layerVisible.units) m.addTo(map);
                     if (m && m.openTooltip) m.openTooltip();
                 });
