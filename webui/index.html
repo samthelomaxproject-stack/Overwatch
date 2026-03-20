@@ -377,8 +377,8 @@
 
 
                         <label class="tac-label" style="display:block; margin-bottom: 4px;">Heatmap Intensity</label>
-                        <input id="sidebarHeatIntensity" type="range" min="0.5" max="1.8" step="0.1" value="1.0" style="width:100%; margin-bottom:2px;" />
-                        <div id="sidebarHeatIntensityLabel" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:var(--space-sm);">1.0x</div>
+                        <input id="sidebarHeatIntensity" type="range" min="0.5" max="1.8" step="0.1" value="0.5" style="width:100%; margin-bottom:2px;" />
+                        <div id="sidebarHeatIntensityLabel" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);margin-bottom:var(--space-sm);">0.5x</div>
 
                         <div class="tac-map-controls-layer-list" id="sidebarLayerOptions">
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="units" checked> Units</label>
@@ -398,8 +398,8 @@
                         <div id="sidebarSatGroups" class="tac-map-controls-layer-list" style="max-height: 120px;">
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="stations" checked> Stations</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="weather" checked> Weather</label>
-                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="starlink" checked> Starlink</label>
-                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="military" checked> Military</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="starlink"> Starlink</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-sat-group value="military"> Military</label>
                         </div>
                     </div>
                 </div>
@@ -1937,8 +1937,8 @@ ALPHA-3 | REAR"></textarea>
             try {
                 const saved = JSON.parse(localStorage.getItem('sat:selectedGroups') || 'null');
                 const sanitized = Array.isArray(saved) ? saved.filter(g => SUPPORTED_SAT_GROUPS.includes(String(g))) : [];
-                return sanitized.length ? sanitized : ['stations', 'weather', 'starlink'];
-            } catch (_) { return ['stations', 'weather', 'starlink']; }
+                return sanitized.length ? sanitized : ['stations', 'weather'];
+            } catch (_) { return ['stations', 'weather']; }
         })();
         let satMaxMarkers = (() => {
             const n = parseInt(localStorage.getItem('sat:maxMarkers') || '150', 10);
@@ -3828,6 +3828,7 @@ out body;
                                 });
                                 lastTileEntityIngestAt[tile.device_id] = now;
                                 entitiesIngested++;
+                                tileChanged = true;
                             }
                         }
                     }
@@ -3853,6 +3854,7 @@ out body;
                             if (changed) {
                                 hexTiles.rf[key] = next;
                                 rfChanged = true;
+                                tileChanged = true;
                             }
                         }
                     }
@@ -3884,6 +3886,7 @@ out body;
                             if (changed) {
                                 hexTiles.wifi[key] = next;
                                 wifiChanged = true;
+                                tileChanged = true;
                             }
                         }
                     }
@@ -5954,7 +5957,7 @@ out body;
         });
 
         let currentPrivacyMode = 'C';
-        let heatmapIntensity = 1.0;
+        let heatmapIntensity = 0.5;
 
         async function setPrivacyMode(mode) {
             currentPrivacyMode = mode;
