@@ -1909,6 +1909,7 @@ ALPHA-3 | REAR"></textarea>
         // Hex tile state keyed by H3 cell id
         // Tile data: keyed by "cellId:dimension" for lookup, value has lat/lon + stats
         const hexTiles = { rf: {}, wifi: {} };
+        const lastTileEntityIngestAt = {}; // device_id -> ms
 
         // Leaflet heatmap layers
         let rfHeatLayer = null;
@@ -3807,18 +3808,27 @@ out body;
 
                     // Entity synthesis from contributing node metadata
                     if (tile.device_id) {
+                        const now = Date.now();
+                        const prevAt = lastTileEntityIngestAt[tile.device_id] || 0;
                         const ll = tileToLatLng(cellId);
                         if (ll) {
                             const [lat, lon] = ll;
-                            ingestPLI({
-                                uid: `node-${tile.device_id}`,
-                                callsign: tile.device_id,
-                                type: (tile.source_type || 'handheld').toUpperCase(),
-                                affiliation: 'friendly',
-                                lat, lon,
-                                timestamp: Date.now(),
-                            });
-                            entitiesIngested++;
+                            // Only refresh entity from same tile every 15s unless moved tile.
+                            const key = `node-${tile.device_id}`;
+                            const existing = trackedEntities.find(e => e.uid === key);
+                            const moved = !existing || Math.abs((existing.lat || 0) - lat) > 1e-6 || Math.abs((existing.lon || 0) - lon) > 1e-6;
+                            if (moved || (now - prevAt) > 15000) {
+                                ingestPLI({
+                                    uid: key,
+                                    callsign: tile.device_id,
+                                    type: (tile.source_type || 'handheld').toUpperCase(),
+                                    affiliation: 'friendly',
+                                    lat, lon,
+                                    timestamp: now,
+                                });
+                                lastTileEntityIngestAt[tile.device_id] = now;
+                                entitiesIngested++;
+                            }
                         }
                     }
 
@@ -3827,7 +3837,8 @@ out body;
                         for (const agg of tile.rf) {
                             const dim = `${agg.freq_start_hz}-${agg.freq_end_hz}`;
                             const key = `${cellId}:${dim}`;
-                            hexTiles.rf[key] = {
+                            const prev = hexTiles.rf[key];
+                            const next = {
                                 ...agg,
                                 cellId,
                                 dimension: formatFreq(agg.freq_start_hz, agg.freq_end_hz),
@@ -3835,7 +3846,14 @@ out body;
                                 max_val: agg.max_power_dbm,
                                 updated_at: Math.floor(Date.now() / 1000)
                             };
-                            rfChanged = true;
+                            const changed = !prev ||
+                                prev.mean_val !== next.mean_val ||
+                                prev.max_val !== next.max_val ||
+                                prev.sample_count !== next.sample_count;
+                            if (changed) {
+                                hexTiles.rf[key] = next;
+                                rfChanged = true;
+                            }
                         }
                     }
 
@@ -3844,7 +3862,8 @@ out body;
                         for (const ch of tile.wifi.channel_hotness) {
                             const dim = `${ch.band}GHz Ch${ch.channel}`;
                             const key = `${cellId}:${ch.band}:${ch.channel}`;
-                            hexTiles.wifi[key] = {
+                            const prev = hexTiles.wifi[key];
+                            const next = {
                                 ...ch,
                                 cellId,
                                 dimension: dim,
@@ -3855,7 +3874,17 @@ out body;
                                 bssid: ch.bssid || ch.top_bssid || ch.ap_bssid || null,
                                 updated_at: Math.floor(Date.now() / 1000)
                             };
-                            wifiChanged = true;
+                            const changed = !prev ||
+                                prev.mean_val !== next.mean_val ||
+                                prev.max_val !== next.max_val ||
+                                prev.sample_count !== next.sample_count ||
+                                prev.confidence !== next.confidence ||
+                                prev.ssid !== next.ssid ||
+                                prev.bssid !== next.bssid;
+                            if (changed) {
+                                hexTiles.wifi[key] = next;
+                                wifiChanged = true;
+                            }
                         }
                     }
                 }
