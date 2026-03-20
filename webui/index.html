@@ -3494,6 +3494,10 @@ out body;
 
         let hubPollCursor = 0;
         let hubPoller = null;
+        let wifiPoller = null;
+        let eudPoller = null;
+        let wifiPollerStartTimeout = null;
+        let eudPollerStartTimeout = null;
         let hubRunning = false;
 
         let collectorRunning = false;
@@ -3602,32 +3606,51 @@ out body;
 
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
+            if (wifiPoller) clearInterval(wifiPoller);
+            if (eudPoller) clearInterval(eudPoller);
+            if (wifiPollerStartTimeout) clearTimeout(wifiPollerStartTimeout);
+            if (eudPollerStartTimeout) clearTimeout(eudPollerStartTimeout);
+
+            // Hub at t=0 every 5s
             hubPoller = setInterval(() => {
                 if (!hubPollInFlight) {
                     hubPollInFlight = true;
                     pollHub().catch(() => {}).finally(() => { hubPollInFlight = false; });
                 }
-                if (!wifiPollInFlight) {
-                    wifiPollInFlight = true;
-                    pollWifiScan().catch(() => {}).finally(() => { wifiPollInFlight = false; });
-                }
+            }, 5000);
+
+            // EUD at t=+1.25s every 5s
+            eudPollerStartTimeout = setTimeout(() => {
                 if (!eudPollInFlight) {
                     eudPollInFlight = true;
                     pollEudStatuses().catch(() => {}).finally(() => { eudPollInFlight = false; });
                 }
-            }, 5000);
+                eudPoller = setInterval(() => {
+                    if (!eudPollInFlight) {
+                        eudPollInFlight = true;
+                        pollEudStatuses().catch(() => {}).finally(() => { eudPollInFlight = false; });
+                    }
+                }, 5000);
+            }, 1250);
 
+            // Wi-Fi at t=+2.5s every 5s
+            wifiPollerStartTimeout = setTimeout(() => {
+                if (!wifiPollInFlight) {
+                    wifiPollInFlight = true;
+                    pollWifiScan().catch(() => {}).finally(() => { wifiPollInFlight = false; });
+                }
+                wifiPoller = setInterval(() => {
+                    if (!wifiPollInFlight) {
+                        wifiPollInFlight = true;
+                        pollWifiScan().catch(() => {}).finally(() => { wifiPollInFlight = false; });
+                    }
+                }, 5000);
+            }, 2500);
+
+            // Immediate first hub tick
             if (!hubPollInFlight) {
                 hubPollInFlight = true;
                 pollHub().catch(() => {}).finally(() => { hubPollInFlight = false; });
-            }
-            if (!wifiPollInFlight) {
-                wifiPollInFlight = true;
-                pollWifiScan().catch(() => {}).finally(() => { wifiPollInFlight = false; });
-            }
-            if (!eudPollInFlight) {
-                eudPollInFlight = true;
-                pollEudStatuses().catch(() => {}).finally(() => { eudPollInFlight = false; });
             }
         }
 
