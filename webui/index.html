@@ -5467,7 +5467,7 @@ out body;
                 trackedEntities[existing] = { ...trackedEntities[existing], ...pli, lastSeen: Date.now(), timestamp: pli.timestamp || trackedEntities[existing].timestamp || new Date().toISOString() };
             }
             renderEntities();
-            initSidebarMapControls();
+            renderSidebarEntities();
             updateEntityOnMap(trackedEntities.find(e => e.uid === pli.uid));
         }
 
@@ -6045,8 +6045,13 @@ out body;
                 });
             }
 
-            // Default privacy mode C per operator requirement
+            // Default startup preferences
             setPrivacyMode('C');
+            satSelectedGroups = ['stations', 'weather'];
+            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
+            heatmapIntensity = 0.5;
+            syncSidebarMapControls();
+            applySidebarSatGroups();
 
             // Initialize map immediately so GPS can show location
             setTimeout(() => {
