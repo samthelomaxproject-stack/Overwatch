@@ -2,6 +2,8 @@ use tauri::{Manager, Emitter, WebviewWindowBuilder, WebviewUrl, Url};
 use serde::Serialize;
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CStr;
 use std::os::raw::c_char;
 #[cfg(target_os = "macos")]
@@ -984,6 +986,8 @@ struct NativeWifiCache {
 
 #[cfg(target_os = "macos")]
 static NATIVE_WIFI_CACHE: Mutex<Option<NativeWifiCache>> = Mutex::new(None);
+#[cfg(target_os = "macos")]
+static NATIVE_WIFI_REFRESH_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 fn scan_wifi_native_for_ui(mode: sigint::wifi::PrivacyMode) -> Result<Vec<UiWifiNetwork>, String> {
@@ -1081,21 +1085,47 @@ fn get_wifi_scan_results() -> serde_json::Value {
     #[cfg(target_os = "macos")]
     {
         if mode == sigint::wifi::PrivacyMode::C {
-            // Throttle native CoreWLAN scans to reduce UI stalls/loading spinner.
+            // Non-blocking strategy:
+            // - Always return cache immediately when present.
+            // - Refresh CoreWLAN in background on TTL expiry.
             const NATIVE_WIFI_TTL_SECS: u64 = 20;
+
+            let mut cached_out: Option<(Vec<UiWifiNetwork>, &'static str)> = None;
             if let Ok(cache) = NATIVE_WIFI_CACHE.lock() {
                 if let Some(c) = &*cache {
-                    if c.mode == mode.as_str() && c.at.elapsed().as_secs() <= NATIVE_WIFI_TTL_SECS {
-                        return serde_json::json!({
-                            "mode": mode.as_str(),
-                            "count": c.networks.len(),
-                            "networks": c.networks,
-                            "source": "corewlan-native-cache"
+                    let stale = c.mode != mode.as_str() || c.at.elapsed().as_secs() > NATIVE_WIFI_TTL_SECS;
+                    let source = if stale { "corewlan-native-stale-cache" } else { "corewlan-native-cache" };
+                    cached_out = Some((c.networks.clone(), source));
+
+                    // Fire background refresh if stale and not already running.
+                    if stale && !NATIVE_WIFI_REFRESH_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+                        std::thread::spawn(|| {
+                            let mode = sigint::wifi::PrivacyMode::C;
+                            if let Ok(native) = scan_wifi_native_for_ui(mode) {
+                                if let Ok(mut cache) = NATIVE_WIFI_CACHE.lock() {
+                                    *cache = Some(NativeWifiCache {
+                                        at: Instant::now(),
+                                        mode: mode.as_str().to_string(),
+                                        networks: native,
+                                    });
+                                }
+                            }
+                            NATIVE_WIFI_REFRESH_IN_FLIGHT.store(false, Ordering::SeqCst);
                         });
                     }
                 }
             }
 
+            if let Some((networks, source)) = cached_out {
+                return serde_json::json!({
+                    "mode": mode.as_str(),
+                    "count": networks.len(),
+                    "networks": networks,
+                    "source": source
+                });
+            }
+
+            // Cold start: do one foreground fetch, then cache and return.
             if let Ok(native) = scan_wifi_native_for_ui(mode) {
                 if let Ok(mut cache) = NATIVE_WIFI_CACHE.lock() {
                     *cache = Some(NativeWifiCache {
@@ -1110,18 +1140,6 @@ fn get_wifi_scan_results() -> serde_json::Value {
                     "networks": native,
                     "source": "corewlan-native"
                 });
-            }
-
-            // Native scan failed: return last cached native sample if available.
-            if let Ok(cache) = NATIVE_WIFI_CACHE.lock() {
-                if let Some(c) = &*cache {
-                    return serde_json::json!({
-                        "mode": mode.as_str(),
-                        "count": c.networks.len(),
-                        "networks": c.networks,
-                        "source": "corewlan-native-stale-cache"
-                    });
-                }
             }
         }
     }
