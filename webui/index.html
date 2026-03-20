@@ -3596,16 +3596,39 @@ out body;
         let eudStatusNodes = [];
         let lastPrivacyEnforceTs = 0;
 
+        let hubPollInFlight = false;
+        let wifiPollInFlight = false;
+        let eudPollInFlight = false;
+
         function startHubPoller() {
             if (hubPoller) clearInterval(hubPoller);
             hubPoller = setInterval(() => {
-                pollHub();
-                pollWifiScan();
-                pollEudStatuses();
+                if (!hubPollInFlight) {
+                    hubPollInFlight = true;
+                    pollHub().catch(() => {}).finally(() => { hubPollInFlight = false; });
+                }
+                if (!wifiPollInFlight) {
+                    wifiPollInFlight = true;
+                    pollWifiScan().catch(() => {}).finally(() => { wifiPollInFlight = false; });
+                }
+                if (!eudPollInFlight) {
+                    eudPollInFlight = true;
+                    pollEudStatuses().catch(() => {}).finally(() => { eudPollInFlight = false; });
+                }
             }, 5000);
-            pollHub();
-            pollWifiScan();
-            pollEudStatuses();
+
+            if (!hubPollInFlight) {
+                hubPollInFlight = true;
+                pollHub().catch(() => {}).finally(() => { hubPollInFlight = false; });
+            }
+            if (!wifiPollInFlight) {
+                wifiPollInFlight = true;
+                pollWifiScan().catch(() => {}).finally(() => { wifiPollInFlight = false; });
+            }
+            if (!eudPollInFlight) {
+                eudPollInFlight = true;
+                pollEudStatuses().catch(() => {}).finally(() => { eudPollInFlight = false; });
+            }
         }
 
         async function pollEudStatuses() {
