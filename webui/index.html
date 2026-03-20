@@ -953,6 +953,30 @@ ALPHA-3 | REAR"></textarea>
             }
         }
 
+        
+        function forceStartupDefaults() {
+            // Hard startup defaults requested by operator
+            satSelectedGroups = ['stations', 'weather'];
+            heatmapIntensity = 0.5;
+            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
+
+            const heat = document.getElementById('sidebarHeatIntensity');
+            const heatLbl = document.getElementById('sidebarHeatIntensityLabel');
+            if (heat) heat.value = '0.5';
+            if (heatLbl) heatLbl.textContent = '0.5x';
+
+            document.querySelectorAll('[data-sidebar-sat-group]').forEach(inp => {
+                const v = inp.getAttribute('value');
+                inp.checked = (v === 'stations' || v === 'weather');
+            });
+
+            syncSidebarMapControls();
+            applySidebarSatGroups();
+            if (layerVisible.rf) updateHeatmap('rf');
+            if (layerVisible.wifi) updateHeatmap('wifi');
+            debugLog('Startup defaults applied: sat=[stations,weather], heat=0.5x');
+        }
+
         function initSidebarMapControls() {
             const mapSel = document.getElementById('sidebarMapType');
             if (mapSel) {
@@ -6047,11 +6071,6 @@ out body;
 
             // Default startup preferences
             setPrivacyMode('C');
-            satSelectedGroups = ['stations', 'weather'];
-            localStorage.setItem('sat:selectedGroups', JSON.stringify(satSelectedGroups));
-            heatmapIntensity = 0.5;
-            syncSidebarMapControls();
-            applySidebarSatGroups();
 
             // Initialize map immediately so GPS can show location
             setTimeout(() => {
