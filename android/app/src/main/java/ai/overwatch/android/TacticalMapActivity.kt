@@ -763,6 +763,8 @@ class TacticalMapActivity : AppCompatActivity() {
             } catch (_) { return ['stations','weather','starlink']; }
         })();
         let satLastDiag = { ok: false, group: '-', count: 0, at: 0, err: '' };
+        let satLastPushAt = 0;
+        const SAT_PUSH_INTERVAL_MS = 60000;
         let satMaxMarkers = (() => {
             const n = parseInt(localStorage.getItem('sat:maxMarkers') || '180', 10);
             return Number.isFinite(n) ? Math.max(20, Math.min(500, n)) : 180;
@@ -2366,6 +2368,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     out.push({ id: s.id, name: s.name, norad: s.norad, lat: p.lat, lon: p.lon, altKm: p.altKm, dimension: s.group });
                 });
                 renderSatellites(out);
+                await pushLocalSatcomToHub(out);
                 updateSatDiag();
             } catch (e) {
                 satLastDiag = { ok: false, group: satSelectedGroups[0] || '-', count: 0, at: Date.now(), err: e.message || String(e) };
@@ -2391,6 +2394,58 @@ class TacticalMapActivity : AppCompatActivity() {
             satMaxMarkers = Number.isFinite(n) ? Math.max(20, Math.min(500, n)) : 180;
             localStorage.setItem('sat:maxMarkers', String(satMaxMarkers));
             pollLocalSatcom(true);
+        }
+
+        async function pushLocalSatcomToHub(sats) {
+            try {
+                if (!Array.isArray(sats) || sats.length === 0) return;
+                const nowMs = Date.now();
+                if ((nowMs - satLastPushAt) < SAT_PUSH_INTERVAL_MS) return;
+
+                const hub = currentHub.endsWith('/') ? currentHub : currentHub + '/';
+                if (!hub.startsWith('http')) return;
+
+                const nowSec = Math.floor(nowMs / 1000);
+                const tiles = sats.map(s => {
+                    let tileId = null;
+                    if (window.h3 && window.h3.latLngToCell) {
+                        try { tileId = window.h3.latLngToCell(Number(s.lat), Number(s.lon), 6); } catch (_) {}
+                    }
+                    if (!tileId) {
+                        tileId = 'android_' + Math.round(Number(s.lat) * 10000) + '_' + Math.round(Number(s.lon) * 10000);
+                    }
+                    return {
+                        tile_id: tileId,
+                        time_bucket: Math.floor(nowSec / 60) * 60,
+                        sat: {
+                            name: String(s.name || ''),
+                            norad: String(s.norad || ''),
+                            alt_km: Number(s.altKm || 0),
+                            group: String(s.dimension || '')
+                        }
+                    };
+                }).slice(0, Math.min(120, satMaxMarkers));
+
+                if (!tiles.length) return;
+
+                const payload = {
+                    schema_version: 1,
+                    device_id: OWN_CALLSIGN,
+                    source_type: 'satellite',
+                    timestamp_utc: nowSec,
+                    tiles
+                };
+
+                const resp = await fetch(hub + 'api/push', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (resp.ok) satLastPushAt = nowMs;
+            } catch (e) {
+                console.log('SAT push failed:', e.message);
+            }
         }
 
         function renderSatellites(sats) {
