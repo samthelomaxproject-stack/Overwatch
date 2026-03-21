@@ -416,6 +416,20 @@ def get_shodan_events(
     return items
 
 
+def _fetch_shodan_api_info() -> Optional[Dict[str, object]]:
+    """Fetch live credit info from Shodan /api-info. Returns None on failure. Does NOT consume credits."""
+    key = _shodan_key()
+    if not key:
+        return None
+    try:
+        resp = requests.get(f"{SHODAN_API_BASE}/api-info", params={"key": key}, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
 def get_shodan_meta() -> Dict[str, object]:
     configured = bool(_shodan_key())
     usage = _get_usage_counts()
@@ -425,6 +439,33 @@ def get_shodan_meta() -> Dict[str, object]:
         last = conn.execute("SELECT MAX(updated_at) FROM shodan_findings WHERE region_key=?", (_default_region_key(),)).fetchone()[0]
         state_rows = conn.execute("SELECT region_key, category, last_discovery_at, ttl_sec, last_result_count, last_status, last_error FROM shodan_region_cache_state WHERE region_key=? ORDER BY last_discovery_at DESC LIMIT 50", (_default_region_key(),)).fetchall()
 
+    # Internal search budget (counts our discovery calls, not necessarily Shodan-deducted credits).
+    # Shodan only deducts query credits for filtered searches or page > 1.
+    # Our geo: queries may or may not consume credits depending on Shodan's filter classification.
+    search_budget = {
+        "note": "Internal app search budget — counts discovery API calls made, not actual Shodan query credits deducted",
+        "enforcement_enabled": _budget_enforced(),
+        "daily_search_limit": _daily_budget(),
+        "monthly_search_limit": _monthly_budget(),
+        "estimated_credit_cost_per_search": _query_cost_estimate(),
+        "searches_used_today": usage["today"],
+        "searches_used_month": usage["month"],
+        "searches_remaining_today": max(0, _daily_budget() - usage["today"]),
+        "searches_remaining_month": max(0, _monthly_budget() - usage["month"]),
+    }
+
+    # Live Shodan account credit info (cached for meta, does not consume credits).
+    shodan_account: Dict[str, object] = {"available": False}
+    api_info = _fetch_shodan_api_info()
+    if api_info:
+        shodan_account = {
+            "available": True,
+            "plan": api_info.get("plan"),
+            "shodan_query_credits_remaining": api_info.get("query_credits"),
+            "shodan_scan_credits_remaining": api_info.get("scan_credits"),
+            "unlocked_left": api_info.get("unlocked_left"),
+        }
+
     return {
         "configured": configured,
         "default_region_key": _default_region_key(),
@@ -433,16 +474,8 @@ def get_shodan_meta() -> Dict[str, object]:
         "counts_by_category": {r[0]: int(r[1]) for r in by_cat_rows},
         "scheduler_enabled": scheduler_enabled(),
         "cache_state": [dict(r) for r in state_rows],
-        "budget": {
-            "enabled": _budget_enforced(),
-            "daily_limit": _daily_budget(),
-            "monthly_limit": _monthly_budget(),
-            "query_cost_estimate": _query_cost_estimate(),
-            "used_today": usage["today"],
-            "used_month": usage["month"],
-            "remaining_today": max(0, _daily_budget() - usage["today"]),
-            "remaining_month": max(0, _monthly_budget() - usage["month"]),
-        },
+        "internal_search_budget": search_budget,
+        "shodan_account": shodan_account,
     }
 
 
