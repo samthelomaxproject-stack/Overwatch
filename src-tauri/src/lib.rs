@@ -10,7 +10,6 @@ use std::os::raw::c_char;
 use objc::{msg_send, sel, sel_impl};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 use serde_json::json;
