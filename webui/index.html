@@ -6046,8 +6046,12 @@ out body;
             renderSATCOM();
             renderZones();
 
+            // Wire sidebar map controls + startup defaults
+            initSidebarMapControls();
+            forceStartupDefaults();
+
             // IMMEDIATE GPS STATUS CHECK
-            if (tauriAvailable) {
+            if (checkTauriAvailable()) {
                 window.__TAURI__.core.invoke('check_location_permission').then(status => {
                     console.log('Immediate GPS status:', status);
 
