@@ -1161,6 +1161,10 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
 
     // Route
     let (status, body) = match (method, path) {
+        ("OPTIONS", _) => {
+            (200, r#"{}"#.to_string())
+        }
+
         ("GET", "/health") => {
             (200, r#"{"status":"ok"}"#.to_string())
         }
@@ -1426,7 +1430,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
     };
 
     let response = format!(
-        "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {len}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n{body}",
         len = body.len()
     );
     stream.write_all(response.as_bytes()).map_err(Error::Io)?;
