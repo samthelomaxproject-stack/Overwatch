@@ -737,7 +737,8 @@ impl HubDb {
     }
 
     pub fn inbox(&mut self, device_id: &str, after_id: u64, limit: u64) -> Result<Vec<MsgRow>, Error> {
-        let lim = limit.clamp(1, 200) as i64;
+        // Render limit for cached results — independent of discovery budget.
+    let lim = limit.clamp(1, 2000) as i64;
         let mut stmt = self.conn.prepare(
             "SELECT id, from_device_id, to_device_id, to_group_id, body, sent_at, delivered_at, read_at
              FROM messages
@@ -1042,7 +1043,8 @@ fn shodan_events_from_cache(path: &str, category_filter: Option<&str>, limit: us
     }
     sql.push_str(" ORDER BY datetime(updated_at) DESC LIMIT ?2");
 
-    let lim = limit.clamp(1, 200) as i64;
+    // Render limit for cached results — independent of discovery budget.
+    let lim = limit.clamp(1, 2000) as i64;
     let mut out = Vec::new();
 
     if let Some(cat) = category_filter {
@@ -1401,10 +1403,11 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
 
         ("GET", p) if p.starts_with("/api/shodan/events") => {
             let category = parse_query_param(p, "category");
+            // Render limit is independent of discovery budget — return all cached findings.
             let limit = parse_query_param(p, "limit")
                 .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(100)
-                .clamp(1, 200);
+                .unwrap_or(500)
+                .clamp(1, 2000);
 
             match resolve_shodan_db_path() {
                 Some(db_path) => match shodan_events_from_cache(&db_path, category.as_deref(), limit) {
