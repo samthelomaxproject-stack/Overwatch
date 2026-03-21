@@ -1085,7 +1085,7 @@ ALPHA-3 | REAR"></textarea>
             try {
                 const b = map.getBounds();
                 const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
-                const apiBase = (window.location.origin || '').replace(/:.*$/, ':8790');
+                const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8789')).replace(/\/$/, '');
                 const resp = await fetch(apiBase + '/api/shodan/events?bbox=' + encodeURIComponent(bbox) + '&limit=1000');
                 if (!resp.ok) return;
                 const payload = await resp.json();
