@@ -323,6 +323,8 @@ class TacticalMapActivity : AppCompatActivity() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Overwatch EUD Tactical Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <style>
         :root {
             --tac-friendly: #00c851;
@@ -692,6 +694,7 @@ class TacticalMapActivity : AppCompatActivity() {
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
     <script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
@@ -748,6 +751,7 @@ class TacticalMapActivity : AppCompatActivity() {
         let adsbMarkers = {};
         let conflictMarkers = {};
         let shodanMarkers = {};
+        let shodanClusterGroup = null;
         let lastConflictFetchAt = 0;
         let lastShodanFetchAt = 0;
         let is3DMode = false;
@@ -1605,13 +1609,17 @@ class TacticalMapActivity : AppCompatActivity() {
                 }
             });
 
-            Object.values(shodanMarkers).forEach(m => {
-                if (layerVisibility.shodan) {
-                    if (!map.hasLayer(m)) m.addTo(map);
-                } else {
-                    if (map.hasLayer(m)) map.removeLayer(m);
+            if (layerVisibility.shodan) {
+                if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
+                    shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
                 }
-            });
+                if (shodanClusterGroup && !map.hasLayer(shodanClusterGroup)) map.addLayer(shodanClusterGroup);
+                Object.values(shodanMarkers).forEach(m => { if (shodanClusterGroup && !shodanClusterGroup.hasLayer(m)) shodanClusterGroup.addLayer(m); });
+            } else {
+                if (shodanClusterGroup) shodanClusterGroup.clearLayers();
+                if (shodanClusterGroup && map.hasLayer(shodanClusterGroup)) map.removeLayer(shodanClusterGroup);
+                Object.values(shodanMarkers).forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+            }
 
             if (layerVisibility.conflict) {
                 pollConflictEvents(false);
@@ -1706,11 +1714,8 @@ class TacticalMapActivity : AppCompatActivity() {
             if (!force && (now - lastShodanFetchAt) < 30_000) return;
             lastShodanFetchAt = now;
             try {
-                const b = map.getBounds();
-                const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
                 const qs = new URLSearchParams();
-                qs.set('bbox', bbox);
-                qs.set('limit', '1000');
+                qs.set('limit', '200');
                 let resp = await fetch(currentHub + 'api/shodan/events?' + qs.toString());
                 if (!resp.ok) {
                     try {
@@ -1737,7 +1742,8 @@ class TacticalMapActivity : AppCompatActivity() {
                         + '<b>Org:</b> ' + (r.org || '-') + '<br>'
                         + '<b>ASN:</b> ' + (r.asn || '-') + '<br>'
                         + '<b>Product:</b> ' + (r.product || '-') + '<br>'
-                        + '<b>Category:</b> ' + (r.category || '-') + '</div>';
+                        + '<b>Category:</b> ' + (r.category || '-') + '<br>'
+                        + '<b>Source:</b> Shodan (Hub Cache)</div>';
                     let marker = shodanMarkers[key];
                     if (!marker) {
                         marker = L.marker([lat, lon], { icon });
@@ -1747,10 +1753,21 @@ class TacticalMapActivity : AppCompatActivity() {
                         marker.setIcon(icon);
                     }
                     marker.bindPopup(popup);
-                    if (layerVisibility.shodan && !map.hasLayer(marker)) marker.addTo(map);
+                    if (layerVisibility.shodan) {
+                        if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
+                            shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
+                        }
+                        if (shodanClusterGroup) {
+                            if (!map.hasLayer(shodanClusterGroup)) map.addLayer(shodanClusterGroup);
+                            if (!shodanClusterGroup.hasLayer(marker)) shodanClusterGroup.addLayer(marker);
+                        } else if (!map.hasLayer(marker)) {
+                            marker.addTo(map);
+                        }
+                    }
                 });
                 Object.keys(shodanMarkers).forEach(k => {
                     if (!seen.has(k)) {
+                        if (shodanClusterGroup && shodanClusterGroup.hasLayer(shodanMarkers[k])) shodanClusterGroup.removeLayer(shodanMarkers[k]);
                         if (map.hasLayer(shodanMarkers[k])) map.removeLayer(shodanMarkers[k]);
                         delete shodanMarkers[k];
                     }

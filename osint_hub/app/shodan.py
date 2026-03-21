@@ -1,7 +1,7 @@
 import hashlib
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import requests
 
@@ -16,6 +16,8 @@ CATEGORY_QUERIES = {
     "camera": "Hikvision OR Dahua OR Axis OR \"ip camera\"",
 }
 
+CATEGORY_PRIORITY = ["sdr", "adsb_receiver", "satcom", "camera"]
+
 
 def _env_bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default).lower()).lower() in ("1", "true", "yes", "on")
@@ -23,6 +25,14 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _today_key() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _month_prefix() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
 def _shodan_key() -> str:
@@ -37,40 +47,41 @@ def scheduler_interval_sec() -> int:
     return int(os.getenv("SHODAN_DISCOVERY_INTERVAL_SEC", "43200"))
 
 
-def _parse_bbox(bbox: Optional[str]) -> Optional[Tuple[float, float, float, float]]:
-    if not bbox:
-        return None
-    try:
-        min_lon, min_lat, max_lon, max_lat = [float(x.strip()) for x in bbox.split(",")]
-        return min_lon, min_lat, max_lon, max_lat
-    except Exception:
-        return None
+def _budget_enforced() -> bool:
+    return _env_bool("SHODAN_ENABLE_BUDGET_ENFORCEMENT", True)
 
 
-def _region_key_from_bbox(bbox: Optional[str]) -> str:
-    t = _parse_bbox(bbox)
-    if t is None:
-        return "global"
-    min_lon, min_lat, max_lon, max_lat = t
-    # coarse fixed tile key (~10-degree buckets) to minimize API churn
-    c_lon = (min_lon + max_lon) / 2.0
-    c_lat = (min_lat + max_lat) / 2.0
-    lon_bucket = int((c_lon + 180) // 10)
-    lat_bucket = int((c_lat + 90) // 10)
-    return f"tile10:{lat_bucket}:{lon_bucket}"
+def _daily_budget() -> int:
+    return int(os.getenv("SHODAN_MAX_QUERY_CREDITS_PER_DAY", "3"))
 
 
-def _build_geo_clause(bbox: Optional[str]) -> str:
-    t = _parse_bbox(bbox)
-    if t is None:
-        return ""
-    min_lon, min_lat, max_lon, max_lat = t
-    c_lat = (min_lat + max_lat) / 2.0
-    c_lon = (min_lon + max_lon) / 2.0
-    lat_span_km = abs(max_lat - min_lat) * 111.0
-    lon_span_km = abs(max_lon - min_lon) * 111.0
-    radius = max(20, min(600, int(max(lat_span_km, lon_span_km) / 2.0)))
-    return f" geo:{c_lat:.4f},{c_lon:.4f},{radius}"
+def _monthly_budget() -> int:
+    return int(os.getenv("SHODAN_MAX_QUERY_CREDITS_PER_MONTH", "90"))
+
+
+def _query_cost_estimate() -> int:
+    return int(os.getenv("SHODAN_QUERY_COST_ESTIMATE", "1"))
+
+
+def _default_region_key() -> str:
+    return os.getenv("SHODAN_DEFAULT_REGION_KEY", "US-TX-NORTH").strip() or "US-TX-NORTH"
+
+
+def _default_region_query_clause() -> str:
+    # Coarse static region for low-cost discovery; intentionally not viewport-driven.
+    return os.getenv("SHODAN_DEFAULT_REGION_QUERY", "geo:33.1500,-96.9000,220").strip()
+
+
+def _query_limit() -> int:
+    default_limit = int(os.getenv("SHODAN_DEFAULT_LIMIT", "100"))
+    default_limit = max(1, min(100, default_limit))
+    hard_cap = int(os.getenv("SHODAN_MAX_RESULTS_PER_QUERY", "200"))
+    hard_cap = max(1, min(200, hard_cap))
+    return min(default_limit, hard_cap)
+
+
+def _cache_ttl_sec() -> int:
+    return int(os.getenv("SHODAN_REGION_TTL_SEC", "43200"))
 
 
 def _normalize(match: dict, category: str, region_key: str, query: str) -> dict:
@@ -184,32 +195,115 @@ def _is_stale(region_key: str, category: str, ttl_sec: int) -> bool:
         return True
 
 
+def _get_usage_counts() -> Dict[str, int]:
+    today = _today_key()
+    month = _month_prefix()
+    with get_conn() as conn:
+        today_used = conn.execute(
+            "SELECT queries_used FROM shodan_credit_usage WHERE date=?",
+            (today,),
+        ).fetchone()
+        month_used = conn.execute(
+            "SELECT COALESCE(SUM(queries_used), 0) FROM shodan_credit_usage WHERE date LIKE ?",
+            (f"{month}%",),
+        ).fetchone()[0]
+    return {
+        "today": int(today_used[0]) if today_used else 0,
+        "month": int(month_used or 0),
+    }
+
+
+def _reserve_credit_or_block() -> Dict[str, object]:
+    if not _budget_enforced():
+        return {"ok": True, "reason": "budget_disabled"}
+
+    daily_limit = _daily_budget()
+    monthly_limit = _monthly_budget()
+    cost = _query_cost_estimate()
+    usage = _get_usage_counts()
+
+    if usage["today"] + cost > daily_limit:
+        return {
+            "ok": False,
+            "status": "budget_exceeded",
+            "message": "Shodan query skipped due to credit limits",
+            "scope": "daily",
+            "today": usage["today"],
+            "daily_limit": daily_limit,
+        }
+    if usage["month"] + cost > monthly_limit:
+        return {
+            "ok": False,
+            "status": "budget_exceeded",
+            "message": "Shodan query skipped due to credit limits",
+            "scope": "monthly",
+            "month": usage["month"],
+            "monthly_limit": monthly_limit,
+        }
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO shodan_credit_usage(date, queries_used)
+            VALUES (?, ?)
+            ON CONFLICT(date) DO UPDATE SET queries_used=queries_used + ?
+            """,
+            (_today_key(), cost, cost),
+        )
+        conn.commit()
+    return {"ok": True, "reason": "reserved"}
+
+
+def _record_query_run(query: str, region_key: str, category: str, limit_requested: int, result_count: int, started_at: str, status: str, error: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO shodan_query_runs (query, bbox, country, region_key, category, limit_requested, result_count, started_at, finished_at, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (query, "", "", region_key, category, limit_requested, result_count, started_at, _now_iso(), status, error),
+        )
+        conn.commit()
+
+
 def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] = None, force_refresh: bool = False) -> Dict[str, object]:
     key = _shodan_key()
     if not key:
         return {"ok": False, "reason": "not_configured", "fetched": 0}
 
-    max_per_query = int(os.getenv("SHODAN_MAX_RESULTS_PER_QUERY", "100"))
-    ttl_sec = int(os.getenv("SHODAN_REGION_TTL_SEC", "43200"))
+    ttl_sec = _cache_ttl_sec()
+    limit_per_query = _query_limit()  # hard-capped at <= 200 and defaults to 100
+    region_key = _default_region_key()
+    region_clause = _default_region_query_clause()
 
-    cats = categories or [c.strip() for c in os.getenv("SHODAN_DISCOVERY_CATEGORIES", "sdr,adsb_receiver,satcom,camera").split(",") if c.strip()]
-    cats = [c for c in cats if c in CATEGORY_QUERIES]
+    requested = categories or [c.strip() for c in os.getenv("SHODAN_DISCOVERY_CATEGORIES", "sdr,adsb_receiver,satcom,camera").split(",") if c.strip()]
+    requested_valid = [c for c in requested if c in CATEGORY_QUERIES]
+
+    cats: List[str] = []
+    for p in CATEGORY_PRIORITY:
+        if p in requested_valid:
+            cats.append(p)
+
     if not cats:
         return {"ok": False, "reason": "no_valid_categories", "fetched": 0}
 
-    region_key = _region_key_from_bbox(bbox)
-    geo_clause = _build_geo_clause(bbox)
-
     total = 0
+    queried_categories: List[str] = []
+    blocked = None
+
     for c in cats:
         if (not force_refresh) and (not _is_stale(region_key, c, ttl_sec)):
             continue
 
-        q = CATEGORY_QUERIES[c] + geo_clause
+        reserve = _reserve_credit_or_block()
+        if not reserve.get("ok"):
+            blocked = reserve
+            _record_region_state(region_key, c, ttl_sec, 0, "budget_exceeded", reserve.get("message", "budget limit"))
+            break
+
+        q = f"{CATEGORY_QUERIES[c]} {region_clause}".strip()
         started = _now_iso()
         status = "ok"
         err = ""
         collected: List[dict] = []
+
         try:
             resp = requests.get(
                 f"{SHODAN_API_BASE}/shodan/host/search",
@@ -219,24 +313,32 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
             if resp.status_code != 200:
                 raise RuntimeError(f"shodan_http_{resp.status_code}")
             payload = resp.json()
-            for m in (payload.get("matches") or [])[:max_per_query]:
+            for m in (payload.get("matches") or [])[:limit_per_query]:
                 collected.append(_normalize(m, c, region_key, q))
             _upsert(collected)
-            total += len(collected)
             _record_region_state(region_key, c, ttl_sec, len(collected), "ok", "")
+            total += len(collected)
+            queried_categories.append(c)
         except Exception as e:
             status = "error"
             err = str(e)
             _record_region_state(region_key, c, ttl_sec, 0, status, err)
 
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO shodan_query_runs (query, bbox, country, region_key, category, limit_requested, result_count, started_at, finished_at, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (q, bbox or "", "", region_key, c, max_per_query, len(collected), started, _now_iso(), status, err),
-            )
-            conn.commit()
+        _record_query_run(q, region_key, c, limit_per_query, len(collected), started, status, err)
 
-    return {"ok": True, "fetched": total, "region_key": region_key, "categories": cats}
+    result: Dict[str, object] = {
+        "ok": True,
+        "fetched": total,
+        "region_key": region_key,
+        "categories": cats,
+        "queried_categories": queried_categories,
+        "cache_only": False,
+    }
+    if blocked:
+        result["status"] = "budget_exceeded"
+        result["message"] = "Shodan query skipped due to credit limits"
+        result["budget"] = blocked
+    return result
 
 
 def get_shodan_events(
@@ -246,23 +348,17 @@ def get_shodan_events(
     limit: Optional[int] = None,
     country: Optional[str] = None,
 ) -> List[dict]:
+    # cache-first retrieval only; no Shodan API call from this function.
     max_visible = int(os.getenv("SHODAN_MAX_VISIBLE_RESULTS", "2000"))
-    lim = min(int(limit or os.getenv("SHODAN_DEFAULT_LIMIT", "500")), max_visible)
+    default_limit = int(os.getenv("SHODAN_DEFAULT_LIMIT", "100"))
+    lim = min(max(1, int(limit or default_limit)), max_visible)
 
-    where = ["1=1"]
-    vals: List[object] = []
+    where = ["region_key = ?"]
+    vals: List[object] = [_default_region_key()]
 
     if since:
         where.append("datetime(updated_at) > datetime(?)")
         vals.append(since)
-
-    t = _parse_bbox(bbox)
-    if t is not None:
-        min_lon, min_lat, max_lon, max_lat = t
-        where.append("lon BETWEEN ? AND ?")
-        vals.extend([min_lon, max_lon])
-        where.append("lat BETWEEN ? AND ?")
-        vals.extend([min_lat, max_lat])
 
     if country:
         where.append("(country_name=? OR country_code=?)")
@@ -314,37 +410,39 @@ def get_shodan_events(
             "shodan_url": r["shodan_url"],
             "query": r["query"],
             "region_key": r["region_key"],
-            "source": r["source"],
+            "source": "Shodan (Hub Cache)",
             "style": {"icon": "divIcon", "color": "#8b5cf6", "radius": 6},
-            "popup": {
-                "title": (r["product"] or "Shodan") + f" • {r['ip']}:{r['port']}",
-                "fields": {
-                    "category": r["category"],
-                    "org": r["org"],
-                    "isp": r["isp"],
-                    "last_seen": r["last_seen"],
-                    "location": f"{r['city'] or '-'}, {r['region_code'] or '-'}, {r['country_name'] or r['country_code'] or '-'}",
-                },
-                "sources": [{"name": "Shodan", "url": r["shodan_url"] or "https://www.shodan.io/"}],
-            },
         })
     return items
 
 
 def get_shodan_meta() -> Dict[str, object]:
     configured = bool(_shodan_key())
+    usage = _get_usage_counts()
     with get_conn() as conn:
-        total_geo = conn.execute("SELECT COUNT(*) FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL").fetchone()[0]
-        by_cat_rows = conn.execute("SELECT category, COUNT(*) as c FROM shodan_findings GROUP BY category").fetchall()
-        last = conn.execute("SELECT MAX(updated_at) FROM shodan_findings").fetchone()[0]
-        state_rows = conn.execute("SELECT region_key, category, last_discovery_at, ttl_sec, last_result_count, last_status, last_error FROM shodan_region_cache_state ORDER BY last_discovery_at DESC LIMIT 50").fetchall()
+        total_geo = conn.execute("SELECT COUNT(*) FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL AND region_key=?", (_default_region_key(),)).fetchone()[0]
+        by_cat_rows = conn.execute("SELECT category, COUNT(*) as c FROM shodan_findings WHERE region_key=? GROUP BY category", (_default_region_key(),)).fetchall()
+        last = conn.execute("SELECT MAX(updated_at) FROM shodan_findings WHERE region_key=?", (_default_region_key(),)).fetchone()[0]
+        state_rows = conn.execute("SELECT region_key, category, last_discovery_at, ttl_sec, last_result_count, last_status, last_error FROM shodan_region_cache_state WHERE region_key=? ORDER BY last_discovery_at DESC LIMIT 50", (_default_region_key(),)).fetchall()
+
     return {
         "configured": configured,
+        "default_region_key": _default_region_key(),
         "last_discovery_at": last,
         "total_geolocated_findings": int(total_geo or 0),
         "counts_by_category": {r[0]: int(r[1]) for r in by_cat_rows},
         "scheduler_enabled": scheduler_enabled(),
         "cache_state": [dict(r) for r in state_rows],
+        "budget": {
+            "enabled": _budget_enforced(),
+            "daily_limit": _daily_budget(),
+            "monthly_limit": _monthly_budget(),
+            "query_cost_estimate": _query_cost_estimate(),
+            "used_today": usage["today"],
+            "used_month": usage["month"],
+            "remaining_today": max(0, _daily_budget() - usage["today"]),
+            "remaining_month": max(0, _monthly_budget() - usage["month"]),
+        },
     }
 
 
@@ -354,15 +452,13 @@ def get_categories() -> List[str]:
 
 def seed_mock_findings() -> Dict[str, object]:
     now = _now_iso()
+    region_key = _default_region_key()
     base = [
         {"id": "mock-sdr-1", "category": "sdr", "ip": "198.51.100.10", "port": 8073, "product": "OpenWebRX", "lat": 33.1819, "lon": -96.8877, "city": "Frisco", "region_code": "TX"},
         {"id": "mock-sdr-2", "category": "sdr", "ip": "198.51.100.11", "port": 8073, "product": "KiwiSDR", "lat": 33.1750, "lon": -96.9000, "city": "Frisco", "region_code": "TX"},
         {"id": "mock-adsb-1", "category": "adsb_receiver", "ip": "198.51.100.20", "port": 30003, "product": "dump1090", "lat": 33.1702, "lon": -96.8801, "city": "Plano", "region_code": "TX"},
-        {"id": "mock-adsb-2", "category": "adsb_receiver", "ip": "198.51.100.21", "port": 80, "product": "tar1090", "lat": 33.1600, "lon": -96.8700, "city": "Plano", "region_code": "TX"},
         {"id": "mock-sat-1", "category": "satcom", "ip": "198.51.100.30", "port": 443, "product": "iDirect NMS", "lat": 33.1900, "lon": -96.8600, "city": "McKinney", "region_code": "TX"},
-        {"id": "mock-sat-2", "category": "satcom", "ip": "198.51.100.31", "port": 443, "product": "Hughes Gateway", "lat": 33.2000, "lon": -96.8450, "city": "McKinney", "region_code": "TX"},
         {"id": "mock-cam-1", "category": "camera", "ip": "198.51.100.40", "port": 554, "product": "Hikvision Camera", "lat": 33.1550, "lon": -96.9050, "city": "Frisco", "region_code": "TX"},
-        {"id": "mock-cam-2", "category": "camera", "ip": "198.51.100.41", "port": 80, "product": "Axis Cam UI", "lat": 33.1450, "lon": -96.9150, "city": "Frisco", "region_code": "TX"},
     ]
 
     with get_conn() as conn:
@@ -383,7 +479,7 @@ def seed_mock_findings() -> Dict[str, object]:
                     m["id"], m["ip"], m["port"], "tcp", "Mock Org", "Mock ISP", "AS65000", "", "",
                     m["product"], "", "", "mock,verification", "", m["category"], m["lat"], m["lon"],
                     "US", "United States", m["city"], m["region_code"], now, now,
-                    f"https://www.shodan.io/host/{m['ip']}", "mock seed", "mock_shodan", "tile10:12:8", now, now, 0,
+                    f"https://www.shodan.io/host/{m['ip']}", "mock seed", "mock_shodan", region_key, now, now, 0,
                 ),
             )
         conn.commit()

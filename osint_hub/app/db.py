@@ -100,6 +100,11 @@ CREATE TABLE IF NOT EXISTS shodan_query_runs (
   error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS shodan_credit_usage (
+  date TEXT PRIMARY KEY,
+  queries_used INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_shodan_updated ON shodan_findings(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shodan_category ON shodan_findings(category);
 CREATE INDEX IF NOT EXISTS idx_shodan_geo ON shodan_findings(lat, lon);

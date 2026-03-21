@@ -383,44 +383,25 @@ def meta():
 
 @app.get("/api/shodan/events")
 def shodan_events(
-    bbox: Optional[str] = None,
     category: Optional[str] = None,
     since: Optional[str] = None,
-    stale: Optional[int] = Query(None, ge=1, le=720),
     country: Optional[str] = None,
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(100, ge=1, le=200),
 ):
+    # Cache-first endpoint. Never triggers live Shodan API.
     cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
     configured = bool(os.getenv("SHODAN_API_KEY", "").strip())
-    if not configured:
-        return {
-            "items": [],
-            "meta": {
-                "source": "hub_shodan_cache",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "configured": False,
-                "stale": False,
-                "queued_refresh": False,
-                "region_keys": [],
-            },
-        }
 
-    queued = False
-    if stale is not None:
-        # stale hint triggers background refresh only; response remains cache-first.
-        queued = _queue_shodan_refresh(bbox=bbox, categories=cat_list or None, force=False)
-
-    items = get_shodan_events(bbox=bbox, categories=cat_list or None, since=since, country=country, limit=limit)
+    items = get_shodan_events(bbox=None, categories=cat_list or None, since=since, country=country, limit=limit)
     region_keys = sorted(list({str(i.get("region_key") or "") for i in items if i.get("region_key")}))
     return {
         "items": items,
         "meta": {
             "source": "hub_shodan_cache",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "configured": True,
-            "stale": False,
-            "queued_refresh": queued,
+            "configured": configured,
             "region_keys": region_keys,
+            "cache_only": True,
         },
     }
 
@@ -429,13 +410,12 @@ def shodan_events(
 def shodan_events_since(
     since: str,
     category: Optional[str] = None,
-    bbox: Optional[str] = None,
     country: Optional[str] = None,
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(100, ge=1, le=200),
 ):
     cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
-    items = get_shodan_events(bbox=bbox, categories=cat_list or None, since=since, country=country, limit=limit)
-    return {"items": items, "meta": {"source": "hub_shodan_cache", "generated_at": datetime.now(timezone.utc).isoformat()}}
+    items = get_shodan_events(bbox=None, categories=cat_list or None, since=since, country=country, limit=limit)
+    return {"items": items, "meta": {"source": "hub_shodan_cache", "generated_at": datetime.now(timezone.utc).isoformat(), "cache_only": True}}
 
 
 @app.get("/api/shodan/meta")
@@ -462,19 +442,23 @@ def shodan_ingest(
 
 @app.post("/api/shodan/refresh-region")
 def shodan_refresh_region(
-    bbox: Optional[str] = None,
     category: Optional[str] = None,
     force: bool = Query(False),
 ):
     cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]
-    queued = _queue_shodan_refresh(bbox=bbox, categories=cat_list or None, force=force)
+    result = discover_shodan(bbox=None, categories=cat_list or None, force_refresh=force)
+    if result.get("status") == "budget_exceeded":
+        return {
+            "status": "budget_exceeded",
+            "message": "Shodan query skipped due to credit limits",
+            "meta": result,
+        }
     return {
         "accepted": True,
-        "queued": queued,
         "force": force,
-        "bbox": bbox,
         "categories": cat_list,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "meta": result,
     }
 
 
