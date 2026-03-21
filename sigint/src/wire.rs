@@ -49,6 +49,8 @@ pub struct TileData {
     pub rf: Option<Vec<RfAggregate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wifi: Option<WifiData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sat: Option<Vec<SatAggregate>>,
 }
 
 impl TileData {
@@ -60,6 +62,7 @@ impl TileData {
             source_type: None,
             rf: None,
             wifi: None,
+            sat: None,
         }
     }
 }
@@ -91,6 +94,20 @@ pub struct ChannelHotness {
     pub count: u32,
     pub mean_rssi_dbm: f64,
     pub max_rssi_dbm: f64,
+    /// 0.0 – 1.0
+    pub confidence: f64,
+}
+
+/// Satellite aggregate for one tile/time bucket.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SatAggregate {
+    /// e.g. stations | weather | starlink | military | active
+    pub group: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub norad: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub count: u32,
     /// 0.0 – 1.0
     pub confidence: f64,
 }

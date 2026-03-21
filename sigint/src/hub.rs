@@ -283,6 +283,45 @@ impl HubDb {
                 }
             }
 
+            // Merge SAT observations (EUD-provided satellite detections)
+            if let Some(sats) = &tile.sat {
+                for s in sats {
+                    let group = s.group.trim().to_lowercase();
+                    if group.is_empty() { rejected += 1; continue; }
+                    let count = s.count.max(1);
+                    let conf = s.confidence.clamp(0.0, 1.0);
+
+                    let norad_part = s.norad.as_deref().unwrap_or("").trim().to_string();
+                    let name_part = s.name.as_deref().unwrap_or("").trim().to_lowercase().replace(' ', "_");
+                    let id_part = if !norad_part.is_empty() { norad_part } else if !name_part.is_empty() { name_part } else { "unknown".to_string() };
+                    let dim = format!("sat:{}:{}", group, id_part);
+
+                    tx.execute(
+                        r#"INSERT INTO merged_tiles
+                           (tile_id, time_bucket, sensor_type, dimension, mean_val, max_val,
+                            sample_count, source_count, confidence, updated_at, last_device_id, last_source_type)
+                           VALUES (?1, ?2, 'sat', ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10)
+                           ON CONFLICT(tile_id, time_bucket, sensor_type, dimension) DO UPDATE SET
+                             mean_val      = mean_val + excluded.mean_val,
+                             max_val       = MAX(max_val, excluded.max_val),
+                             sample_count  = sample_count + excluded.sample_count,
+                             source_count  = source_count + 1,
+                             confidence    = (confidence + excluded.confidence) / 2.0,
+                             updated_at    = excluded.updated_at,
+                             last_device_id = excluded.last_device_id,
+                             last_source_type = excluded.last_source_type"#,
+                        params![
+                            tile.tile_id, tile.time_bucket as i64, dim,
+                            count as f64, count as f64,
+                            count as i64, conf, now as i64,
+                            update.device_id, update.source_type
+                        ],
+                    )?;
+                    accepted += 1;
+                    tile_had_signal_data = true;
+                }
+            }
+
             // Always persist a lightweight PLI heartbeat row so clients can render
             // entity position even when there is no RF/Wi-Fi payload this cycle.
             // Position is encoded in tile_id; metadata uses last_device/source columns.
@@ -371,7 +410,7 @@ impl HubDb {
         let now_secs = now as f64 / 1000.0;
 
         // Build TileUpdate with time-decayed values
-        use crate::wire::{TileData, RfAggregate, WifiData, ChannelHotness};
+        use crate::wire::{TileData, RfAggregate, WifiData, ChannelHotness, SatAggregate};
         use crate::sanitize::{decay_factor, RF_DECAY_HALF_LIFE_SECS, WIFI_DECAY_HALF_LIFE_SECS};
         
         let mut tile_map: HashMap<(String, u64), TileData> = HashMap::new();
@@ -428,6 +467,21 @@ impl HubDb {
                                 .channel_hotness.push(ch);
                         }
                     }
+                }
+                "sat" => {
+                    // dimension = "sat:{group}:{id}"
+                    let rest = row.dimension.trim_start_matches("sat:");
+                    let mut parts = rest.splitn(2, ':');
+                    let group = parts.next().unwrap_or("active").to_string();
+                    let id = parts.next().unwrap_or("unknown").to_string();
+                    let sat = SatAggregate {
+                        group,
+                        norad: Some(id),
+                        name: None,
+                        count: row.sample_count.max(1),
+                        confidence: row.confidence.clamp(0.0, 1.0),
+                    };
+                    tile.sat.get_or_insert_with(Vec::new).push(sat);
                 }
                 _ => {}
             }

@@ -1961,8 +1961,10 @@ ALPHA-3 | REAR"></textarea>
         // ── SATELLITE OSINT layer ──────────────────────────────────────────────
         const SAT_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
         let satMarkers = {};
+        let eudSatMarkers = {};
         let satCatalog = [];
         let satIndexById = {};
+        let eudSatCache = {};
         let satUpdateTimer = null;
         let satOrbit2d = null;
         let satOrbit3d = null;
@@ -2362,7 +2364,10 @@ HUBBLE SPACE TELESCOPE
 
         function clearSatLayer() {
             Object.values(satMarkers).forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
+            Object.values(eudSatMarkers).forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
             satMarkers = {};
+            eudSatMarkers = {};
+            eudSatCache = {};
             if (satOrbit2d && map && map.hasLayer(satOrbit2d)) map.removeLayer(satOrbit2d);
             satOrbit2d = null;
             if (cesiumViewer) {
@@ -2372,6 +2377,41 @@ HUBBLE SPACE TELESCOPE
             satOrbit3d = null;
             cesiumSatEntities = {};
             updateSatPanel();
+        }
+
+        function renderEudSatLayer() {
+            if (!map) return;
+            const activeIds = new Set();
+            const now = Date.now();
+            Object.entries(eudSatCache).forEach(([id, s]) => {
+                if (!s || !Number.isFinite(s.lat) || !Number.isFinite(s.lon)) return;
+                if ((now - (s.updated_at || now)) > 10 * 60 * 1000) return; // 10 min stale timeout
+                activeIds.add(id);
+
+                const icon = L.divIcon({
+                    className: 'sat-marker sat-eud',
+                    html: '<div style="width:14px;height:14px;border-radius:3px;background:#fde047;border:2px solid #1f2937;box-shadow:0 0 8px rgba(253,224,71,0.8);"></div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+
+                if (!eudSatMarkers[id]) {
+                    eudSatMarkers[id] = L.marker([s.lat, s.lon], { icon, zIndexOffset: 1400, riseOnHover: true });
+                    eudSatMarkers[id].bindPopup(`<div style="min-width:220px;"><div style="font-weight:700;color:#fde047;">${s.name || 'EUD SAT'}</div><div style="font-size:12px;color:#94a3b8;">NORAD ${s.norad || 'n/a'} • ${s.group || 'active'} • EUD</div><div style="font-size:12px;color:#cbd5e1;">${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}</div></div>`);
+                } else {
+                    eudSatMarkers[id].setLatLng([s.lat, s.lon]);
+                }
+
+                if (layerVisible.sat && !map.hasLayer(eudSatMarkers[id])) eudSatMarkers[id].addTo(map);
+                if (!layerVisible.sat && map.hasLayer(eudSatMarkers[id])) map.removeLayer(eudSatMarkers[id]);
+            });
+
+            Object.keys(eudSatMarkers).forEach(id => {
+                if (!activeIds.has(id)) {
+                    if (map.hasLayer(eudSatMarkers[id])) map.removeLayer(eudSatMarkers[id]);
+                    delete eudSatMarkers[id];
+                }
+            });
         }
 
         async function renderSatLayer(force=false) {
@@ -3838,7 +3878,7 @@ out body;
                 debugLog('📊 ingestSigintDelta: no delta.tiles');
                 return;
             }
-            let rfChanged = false, wifiChanged = false;
+            let rfChanged = false, wifiChanged = false, satChanged = false;
             let entitiesIngested = 0;
 
             for (const update of delta.tiles) {
@@ -3927,12 +3967,41 @@ out body;
                             }
                         }
                     }
+
+                    // SAT (EUD-sourced tile observations)
+                    if (tile.sat && Array.isArray(tile.sat)) {
+                        const ll = tileToLatLng(cellId);
+                        if (ll) {
+                            const [lat, lon] = ll;
+                            for (const s of tile.sat) {
+                                const id = `${cellId}:${s.group || 'active'}:${s.norad || s.name || 'unknown'}`;
+                                const prev = eudSatCache[id];
+                                const next = {
+                                    id,
+                                    lat,
+                                    lon,
+                                    group: s.group || 'active',
+                                    norad: s.norad || null,
+                                    name: s.name || s.norad || 'EUD SAT',
+                                    confidence: s.confidence || 0.7,
+                                    count: s.count || 1,
+                                    updated_at: Date.now()
+                                };
+                                const changed = !prev || prev.lat !== next.lat || prev.lon !== next.lon || prev.count !== next.count;
+                                if (changed) {
+                                    eudSatCache[id] = next;
+                                    satChanged = true;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            // Update heatmaps if data changed and layer is visible
+            // Update layers if data changed and layer is visible
             if (rfChanged && layerVisible.rf) updateHeatmap('rf');
             if (wifiChanged && layerVisible.wifi) updateHeatmap('wifi');
+            if (satChanged) renderEudSatLayer();
             updateSigintStats();
 
             if (entitiesIngested > 0) {
