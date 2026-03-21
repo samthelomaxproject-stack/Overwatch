@@ -1009,6 +1009,131 @@ pub fn run_hub(config: HubConfig) -> Result<(), Error> {
     Ok(())
 }
 
+
+fn resolve_shodan_db_path() -> Option<String> {
+    if let Ok(v) = std::env::var("SHODAN_CACHE_DB_PATH") {
+        if !v.trim().is_empty() && std::path::Path::new(v.trim()).exists() {
+            return Some(v);
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = vec![
+        format!("{home}/.openclaw/workspace/Overwatch/osint_hub/conflict_events.db"),
+        format!("{home}/Overwatch/osint_hub/conflict_events.db"),
+        "./osint_hub/conflict_events.db".to_string(),
+        "../osint_hub/conflict_events.db".to_string(),
+    ];
+
+    for c in candidates {
+        if std::path::Path::new(&c).exists() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+fn shodan_events_from_cache(path: &str, category_filter: Option<&str>, limit: usize) -> Result<Vec<serde_json::Value>, String> {
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+
+    let mut sql = "SELECT id, category, ip, port, org, asn, product, lat, lon, city, country_name, country_code, region_key, updated_at                    FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL".to_string();
+    if category_filter.is_some() {
+        sql.push_str(" AND category = ?1");
+    }
+    sql.push_str(" ORDER BY datetime(updated_at) DESC LIMIT ?2");
+
+    let lim = limit.clamp(1, 200) as i64;
+    let mut out = Vec::new();
+
+    if let Some(cat) = category_filter {
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![cat, lim], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, String>(0)?,
+                "category": r.get::<_, String>(1).unwrap_or_default(),
+                "ip": r.get::<_, String>(2).unwrap_or_default(),
+                "port": r.get::<_, i64>(3).unwrap_or_default(),
+                "org": r.get::<_, String>(4).unwrap_or_default(),
+                "asn": r.get::<_, String>(5).unwrap_or_default(),
+                "product": r.get::<_, String>(6).unwrap_or_default(),
+                "lat": r.get::<_, f64>(7).unwrap_or_default(),
+                "lon": r.get::<_, f64>(8).unwrap_or_default(),
+                "city": r.get::<_, String>(9).unwrap_or_default(),
+                "country_name": r.get::<_, String>(10).unwrap_or_default(),
+                "country_code": r.get::<_, String>(11).unwrap_or_default(),
+                "region_key": r.get::<_, String>(12).unwrap_or_default(),
+                "updated_at": r.get::<_, String>(13).unwrap_or_default(),
+                "source": "Shodan (Hub Cache)"
+            }))
+        }).map_err(|e| e.to_string())?;
+
+        for row in rows {
+            out.push(row.map_err(|e| e.to_string())?);
+        }
+    } else {
+        let sql = "SELECT id, category, ip, port, org, asn, product, lat, lon, city, country_name, country_code, region_key, updated_at                    FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL                    ORDER BY datetime(updated_at) DESC LIMIT ?1";
+        let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![lim], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, String>(0)?,
+                "category": r.get::<_, String>(1).unwrap_or_default(),
+                "ip": r.get::<_, String>(2).unwrap_or_default(),
+                "port": r.get::<_, i64>(3).unwrap_or_default(),
+                "org": r.get::<_, String>(4).unwrap_or_default(),
+                "asn": r.get::<_, String>(5).unwrap_or_default(),
+                "product": r.get::<_, String>(6).unwrap_or_default(),
+                "lat": r.get::<_, f64>(7).unwrap_or_default(),
+                "lon": r.get::<_, f64>(8).unwrap_or_default(),
+                "city": r.get::<_, String>(9).unwrap_or_default(),
+                "country_name": r.get::<_, String>(10).unwrap_or_default(),
+                "country_code": r.get::<_, String>(11).unwrap_or_default(),
+                "region_key": r.get::<_, String>(12).unwrap_or_default(),
+                "updated_at": r.get::<_, String>(13).unwrap_or_default(),
+                "source": "Shodan (Hub Cache)"
+            }))
+        }).map_err(|e| e.to_string())?;
+
+        for row in rows {
+            out.push(row.map_err(|e| e.to_string())?);
+        }
+    }
+
+    Ok(out)
+}
+
+fn shodan_meta_from_cache(path: &str) -> Result<serde_json::Value, String> {
+    let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL", [], |r| r.get(0))
+        .unwrap_or(0);
+    let last: Option<String> = conn
+        .query_row("SELECT MAX(updated_at) FROM shodan_findings", [], |r| r.get(0))
+        .ok();
+
+    let mut by_cat = serde_json::Map::new();
+    let mut stmt = conn
+        .prepare("SELECT category, COUNT(*) FROM shodan_findings GROUP BY category")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0).unwrap_or_default(), r.get::<_, i64>(1).unwrap_or(0))))
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (cat, count) = row.map_err(|e| e.to_string())?;
+        if !cat.is_empty() {
+            by_cat.insert(cat, serde_json::json!(count));
+        }
+    }
+
+    Ok(serde_json::json!({
+        "configured": true,
+        "source": "hub_shodan_cache",
+        "last_discovery_at": last,
+        "total_geolocated_findings": total,
+        "counts_by_category": by_cat,
+        "cache_only": true
+    }))
+}
+
 fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Result<(), Error> {
     let mut reader = BufReader::new(stream.try_clone().map_err(Error::Io)?);
 
@@ -1257,6 +1382,43 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             match s.db.list_groups(device_id.as_deref()) {
                 Ok(groups) => (200, serde_json::to_string(&groups).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/shodan/meta") => {
+            match resolve_shodan_db_path() {
+                Some(db_path) => match shodan_meta_from_cache(&db_path) {
+                    Ok(meta) => (200, meta.to_string()),
+                    Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+                },
+                None => (200, serde_json::json!({"configured": false, "source": "hub_shodan_cache", "items": 0, "reason": "cache_db_not_found"}).to_string()),
+            }
+        }
+
+        ("GET", p) if p.starts_with("/api/shodan/events") => {
+            let category = parse_query_param(p, "category");
+            let limit = parse_query_param(p, "limit")
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(100)
+                .clamp(1, 200);
+
+            match resolve_shodan_db_path() {
+                Some(db_path) => match shodan_events_from_cache(&db_path, category.as_deref(), limit) {
+                    Ok(items) => {
+                        let region_keys: Vec<String> = items.iter()
+                            .filter_map(|i| i.get("region_key").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                            .collect();
+                        let meta = serde_json::json!({
+                            "source": "hub_shodan_cache",
+                            "configured": true,
+                            "cache_only": true,
+                            "region_keys": region_keys
+                        });
+                        (200, serde_json::json!({"items": items, "meta": meta}).to_string())
+                    }
+                    Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
+                },
+                None => (200, serde_json::json!({"items": [], "meta": {"source":"hub_shodan_cache","configured": false,"cache_only": true,"reason":"cache_db_not_found"}}).to_string()),
             }
         }
 
