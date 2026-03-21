@@ -35,8 +35,6 @@ _last_ingest_meta = {"at": None, "count": 0, "ok": None, "error": None}
 _ingest_thread_started = False
 _shodan_thread_started = False
 _last_shodan_meta = {"at": None, "fetched": 0, "ok": None, "error": None}
-_shodan_refresh_lock = threading.Lock()
-_shodan_refresh_inflight = set()
 
 
 @app.on_event("startup")
@@ -130,23 +128,6 @@ def _shodan_loop():
             pass
         time.sleep(max(30, scheduler_interval_sec()))
 
-
-def _queue_shodan_refresh(bbox: Optional[str], categories: Optional[List[str]], force: bool = False) -> bool:
-    key = f"{bbox or 'global'}|{','.join(sorted(categories or []))}|{int(force)}"
-    with _shodan_refresh_lock:
-        if key in _shodan_refresh_inflight:
-            return False
-        _shodan_refresh_inflight.add(key)
-
-    def _run():
-        try:
-            discover_shodan(bbox=bbox, categories=categories, force_refresh=force)
-        finally:
-            with _shodan_refresh_lock:
-                _shodan_refresh_inflight.discard(key)
-
-    threading.Thread(target=_run, daemon=True).start()
-    return True
 
 
 def upsert_events(events: List[dict]):
