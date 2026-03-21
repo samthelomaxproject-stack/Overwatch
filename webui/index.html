@@ -830,11 +830,20 @@ ALPHA-3 | REAR"></textarea>
 
             debugLog('Map initialized successfully');
 
+            let _shodanMoveTimer = null;
             map.on('moveend zoomend', () => {
                 scheduleCctvAutoRefresh();
                 // Recompute heatmap kernel at current zoom to avoid muddy low-zoom blending.
                 if (layerVisible.rf) updateHeatmap('rf');
                 if (layerVisible.wifi) updateHeatmap('wifi');
+                // Debounced Shodan cache refresh on map movement (hub cache only, no live Shodan calls).
+                if (layerVisible.shodan) {
+                    if (_shodanMoveTimer) clearTimeout(_shodanMoveTimer);
+                    _shodanMoveTimer = setTimeout(() => {
+                        lastShodanFetchAt = 0; // reset throttle so force=false is treated as fresh
+                        pollShodanMarkers(false).catch(() => {});
+                    }, 1500);
+                }
             });
 
             // If we have a location already, show it
