@@ -907,7 +907,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false, shodan: true };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false, shodan: false };
 
         function syncCctvUiState() {
             const cctvOn = !!layerVisible.cctv;
@@ -1091,11 +1091,14 @@ ALPHA-3 | REAR"></textarea>
                 const payload = await resp.json();
                 const rows = Array.isArray(payload?.items) ? payload.items : [];
                 const seen = new Set();
+                let shodanBounds = null;
                 rows.forEach(r => {
                     const key = String(r.id || (r.ip + ':' + r.port));
                     seen.add(key);
                     const lat = Number(r.lat), lon = Number(r.lon);
                     if (!isFinite(lat) || !isFinite(lon)) return;
+                    if (!shodanBounds) shodanBounds = L.latLngBounds([[lat, lon], [lat, lon]]);
+                    else shodanBounds.extend([lat, lon]);
                     const icon = L.divIcon({
                         className: 'shodan-icon',
                         html: '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;filter:drop-shadow(0 0 2px rgba(0,0,0,.7));">🛰️</div>',
@@ -1125,6 +1128,14 @@ ALPHA-3 | REAR"></textarea>
                         delete shodanMarkers[k];
                     }
                 });
+
+                if (force && layerVisible.shodan && shodanBounds && shodanBounds.isValid()) {
+                    const inView = map.getBounds().intersects(shodanBounds);
+                    if (!inView) {
+                        map.fitBounds(shodanBounds.pad(0.25));
+                        debugLog('🛰️ Centered map to Shodan marker area');
+                    }
+                }
             } catch (_) {}
         }
 
