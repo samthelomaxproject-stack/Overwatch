@@ -3852,7 +3852,6 @@ out body;
                                 });
                                 lastTileEntityIngestAt[tile.device_id] = now;
                                 entitiesIngested++;
-                                tileChanged = true;
                             }
                         }
                     }
@@ -3878,7 +3877,6 @@ out body;
                             if (changed) {
                                 hexTiles.rf[key] = next;
                                 rfChanged = true;
-                                tileChanged = true;
                             }
                         }
                     }
@@ -3910,7 +3908,6 @@ out body;
                             if (changed) {
                                 hexTiles.wifi[key] = next;
                                 wifiChanged = true;
-                                tileChanged = true;
                             }
                         }
                     }
