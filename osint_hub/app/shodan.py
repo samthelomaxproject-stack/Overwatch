@@ -1,7 +1,8 @@
 import hashlib
 import os
+import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
@@ -17,6 +18,10 @@ CATEGORY_QUERIES = {
 }
 
 CATEGORY_PRIORITY = ["sdr", "adsb_receiver", "satcom", "camera"]
+
+# Queries that use geo: filters are credit-consuming on Shodan.
+# Plain keyword-only queries on page 1 may be free.
+CREDIT_CONSUMING_PREFIXES = ("geo:", "country:", "city:", "net:", "org:", "port:")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -51,25 +56,22 @@ def _budget_enforced() -> bool:
     return _env_bool("SHODAN_ENABLE_BUDGET_ENFORCEMENT", True)
 
 
-def _daily_budget() -> int:
-    return int(os.getenv("SHODAN_MAX_QUERY_CREDITS_PER_DAY", "3"))
+# Credit event limits — only credit-consuming queries count against these.
+def _daily_credit_limit() -> int:
+    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_DAY", "10"))
 
 
-def _monthly_budget() -> int:
-    return int(os.getenv("SHODAN_MAX_QUERY_CREDITS_PER_MONTH", "90"))
+def _monthly_credit_limit() -> int:
+    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_MONTH", "90"))
 
 
-def _query_cost_estimate() -> int:
-    return int(os.getenv("SHODAN_QUERY_COST_ESTIMATE", "1"))
+# Safety throttle — prevents runaway discovery regardless of credit budget.
+def _min_seconds_between_runs() -> int:
+    return int(os.getenv("SHODAN_MIN_SECONDS_BETWEEN_DISCOVERY_RUNS", "300"))
 
 
-def _default_region_key() -> str:
-    return os.getenv("SHODAN_DEFAULT_REGION_KEY", "US-TX-NORTH").strip() or "US-TX-NORTH"
-
-
-def _default_region_query_clause() -> str:
-    # Coarse static region for low-cost discovery; intentionally not viewport-driven.
-    return os.getenv("SHODAN_DEFAULT_REGION_QUERY", "geo:33.1500,-96.9000,220").strip()
+def _max_runs_per_hour() -> int:
+    return int(os.getenv("SHODAN_MAX_DISCOVERY_RUNS_PER_HOUR", "6"))
 
 
 def _query_limit() -> int:
@@ -82,6 +84,15 @@ def _query_limit() -> int:
 
 def _cache_ttl_sec() -> int:
     return int(os.getenv("SHODAN_REGION_TTL_SEC", "43200"))
+
+
+def _query_uses_credits(query: str) -> bool:
+    """Estimate whether this query will consume Shodan query credits."""
+    q = query.lower()
+    for prefix in CREDIT_CONSUMING_PREFIXES:
+        if prefix in q:
+            return True
+    return False
 
 
 def _normalize(match: dict, category: str, region_key: str, query: str) -> dict:
@@ -195,7 +206,8 @@ def _is_stale(region_key: str, category: str, ttl_sec: int) -> bool:
         return True
 
 
-def _get_usage_counts() -> Dict[str, int]:
+def _get_credit_usage_counts() -> Dict[str, int]:
+    """Count credit-consuming discovery calls (not raw searches)."""
     today = _today_key()
     month = _month_prefix()
     with get_conn() as conn:
@@ -213,45 +225,105 @@ def _get_usage_counts() -> Dict[str, int]:
     }
 
 
-def _reserve_credit_or_block() -> Dict[str, object]:
-    if not _budget_enforced():
-        return {"ok": True, "reason": "budget_disabled"}
+def _get_recent_run_count(window_secs: int = 3600) -> int:
+    """Count discovery runs in recent window for throttle enforcement."""
+    cutoff = _now_iso()
+    try:
+        cutoff_dt = datetime.now(timezone.utc).timestamp() - window_secs
+        cutoff_iso = datetime.fromtimestamp(cutoff_dt, tz=timezone.utc).isoformat()
+    except Exception:
+        return 0
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM shodan_query_runs WHERE started_at > ?",
+            (cutoff_iso,),
+        ).fetchone()
+    return int(row[0]) if row else 0
 
-    daily_limit = _daily_budget()
-    monthly_limit = _monthly_budget()
-    cost = _query_cost_estimate()
-    usage = _get_usage_counts()
 
-    if usage["today"] + cost > daily_limit:
+def _get_last_run_time() -> Optional[float]:
+    """Return epoch seconds of most recent discovery run, or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT MAX(started_at) FROM shodan_query_runs",
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def _check_safety_throttle() -> Dict[str, object]:
+    """Check per-run throttle limits (independent of credit budget)."""
+    min_gap = _min_seconds_between_runs()
+    max_per_hour = _max_runs_per_hour()
+
+    last_run = _get_last_run_time()
+    if last_run is not None:
+        elapsed = time.time() - last_run
+        if elapsed < min_gap:
+            return {
+                "ok": False,
+                "reason": "throttle_min_gap",
+                "message": f"Discovery throttled: {int(min_gap - elapsed)}s until next run allowed",
+            }
+
+    recent_runs = _get_recent_run_count(window_secs=3600)
+    if recent_runs >= max_per_hour:
         return {
             "ok": False,
-            "status": "budget_exceeded",
-            "message": "Shodan query skipped due to credit limits",
-            "scope": "daily",
-            "today": usage["today"],
-            "daily_limit": daily_limit,
+            "reason": "throttle_hourly_limit",
+            "message": f"Discovery throttled: {recent_runs}/{max_per_hour} runs in last hour",
         }
-    if usage["month"] + cost > monthly_limit:
+
+    return {"ok": True}
+
+
+def _reserve_credit_event_or_block(query: str) -> Dict[str, object]:
+    """Reserve a credit event slot if this query is credit-consuming. Always allows non-credit queries."""
+    if not _query_uses_credits(query):
+        return {"ok": True, "reason": "non_credit_query", "credit_event": False}
+
+    if not _budget_enforced():
+        return {"ok": True, "reason": "budget_disabled", "credit_event": True}
+
+    daily_limit = _daily_credit_limit()
+    monthly_limit = _monthly_credit_limit()
+    usage = _get_credit_usage_counts()
+
+    if usage["today"] + 1 > daily_limit:
         return {
             "ok": False,
-            "status": "budget_exceeded",
-            "message": "Shodan query skipped due to credit limits",
+            "status": "credit_budget_exceeded",
+            "message": "Discovery skipped: daily credit event limit reached",
+            "scope": "daily",
+            "credit_events_used_today": usage["today"],
+            "daily_credit_event_limit": daily_limit,
+        }
+    if usage["month"] + 1 > monthly_limit:
+        return {
+            "ok": False,
+            "status": "credit_budget_exceeded",
+            "message": "Discovery skipped: monthly credit event limit reached",
             "scope": "monthly",
-            "month": usage["month"],
-            "monthly_limit": monthly_limit,
+            "credit_events_used_month": usage["month"],
+            "monthly_credit_event_limit": monthly_limit,
         }
 
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO shodan_credit_usage(date, queries_used)
-            VALUES (?, ?)
-            ON CONFLICT(date) DO UPDATE SET queries_used=queries_used + ?
+            VALUES (?, 1)
+            ON CONFLICT(date) DO UPDATE SET queries_used=queries_used + 1
             """,
-            (_today_key(), cost, cost),
+            (_today_key(),),
         )
         conn.commit()
-    return {"ok": True, "reason": "reserved"}
+    return {"ok": True, "reason": "reserved", "credit_event": True}
 
 
 def _record_query_run(query: str, region_key: str, category: str, limit_requested: int, result_count: int, started_at: str, status: str, error: str = ""):
@@ -263,15 +335,53 @@ def _record_query_run(query: str, region_key: str, category: str, limit_requeste
         conn.commit()
 
 
+def _region_key_from_bbox(bbox: Optional[str]) -> str:
+    """Generate a coarse region key from bbox for cache state tracking."""
+    if not bbox:
+        return "scheduler"
+    try:
+        parts = [float(x.strip()) for x in bbox.split(",")]
+        if len(parts) == 4:
+            min_lon, min_lat, max_lon, max_lat = parts
+            c_lat = (min_lat + max_lat) / 2.0
+            c_lon = (min_lon + max_lon) / 2.0
+            lat_bucket = int((c_lat + 90) // 5)
+            lon_bucket = int((c_lon + 180) // 5)
+            return f"tile5:{lat_bucket}:{lon_bucket}"
+    except Exception:
+        pass
+    return "bbox_custom"
+
+
+def _geo_clause_from_bbox(bbox: Optional[str]) -> str:
+    """Build a Shodan geo: clause from a bbox. Falls back to default region."""
+    if not bbox:
+        return os.getenv("SHODAN_DEFAULT_REGION_QUERY", "geo:33.1500,-96.9000,220").strip()
+    try:
+        parts = [float(x.strip()) for x in bbox.split(",")]
+        if len(parts) == 4:
+            min_lon, min_lat, max_lon, max_lat = parts
+            c_lat = (min_lat + max_lat) / 2.0
+            c_lon = (min_lon + max_lon) / 2.0
+            lat_span_km = abs(max_lat - min_lat) * 111.0
+            lon_span_km = abs(max_lon - min_lon) * 111.0 * abs(c_lat * 3.14159 / 180)
+            radius = max(30, min(400, int(max(lat_span_km, lon_span_km) / 2.0)))
+            return f"geo:{c_lat:.4f},{c_lon:.4f},{radius}"
+    except Exception:
+        pass
+    return os.getenv("SHODAN_DEFAULT_REGION_QUERY", "geo:33.1500,-96.9000,220").strip()
+
+
 def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] = None, force_refresh: bool = False) -> Dict[str, object]:
     key = _shodan_key()
     if not key:
         return {"ok": False, "reason": "not_configured", "fetched": 0}
 
     ttl_sec = _cache_ttl_sec()
-    limit_per_query = _query_limit()  # hard-capped at <= 200 and defaults to 100
-    region_key = _default_region_key()
-    region_clause = _default_region_query_clause()
+    limit_per_query = _query_limit()
+
+    region_key = _region_key_from_bbox(bbox)
+    geo_clause = _geo_clause_from_bbox(bbox)
 
     requested = categories or [c.strip() for c in os.getenv("SHODAN_DISCOVERY_CATEGORIES", "sdr,adsb_receiver,satcom,camera").split(",") if c.strip()]
     requested_valid = [c for c in requested if c in CATEGORY_QUERIES]
@@ -284,21 +394,32 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
     if not cats:
         return {"ok": False, "reason": "no_valid_categories", "fetched": 0}
 
+    # Safety throttle check (applies to all queries, credit-consuming or not).
+    throttle = _check_safety_throttle()
+    if not throttle.get("ok"):
+        return {"ok": False, "reason": throttle.get("reason", "throttled"), "message": throttle.get("message", ""), "fetched": 0}
+
     total = 0
     queried_categories: List[str] = []
+    credit_events_used = 0
     blocked = None
 
     for c in cats:
         if (not force_refresh) and (not _is_stale(region_key, c, ttl_sec)):
             continue
 
-        reserve = _reserve_credit_or_block()
-        if not reserve.get("ok"):
-            blocked = reserve
-            _record_region_state(region_key, c, ttl_sec, 0, "budget_exceeded", reserve.get("message", "budget limit"))
-            break
+        q = f"{CATEGORY_QUERIES[c]} {geo_clause}".strip()
+        uses_credits = _query_uses_credits(q)
 
-        q = f"{CATEGORY_QUERIES[c]} {region_clause}".strip()
+        # Credit budget gate — only for credit-consuming queries.
+        if uses_credits:
+            reserve = _reserve_credit_event_or_block(q)
+            if not reserve.get("ok"):
+                blocked = reserve
+                _record_region_state(region_key, c, ttl_sec, 0, "credit_budget_exceeded", reserve.get("message", "credit budget"))
+                break
+            credit_events_used += 1
+
         started = _now_iso()
         status = "ok"
         err = ""
@@ -332,12 +453,13 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
         "region_key": region_key,
         "categories": cats,
         "queried_categories": queried_categories,
+        "credit_events_used": credit_events_used,
         "cache_only": False,
     }
     if blocked:
-        result["status"] = "budget_exceeded"
-        result["message"] = "Shodan query skipped due to credit limits"
-        result["budget"] = blocked
+        result["status"] = "credit_budget_exceeded"
+        result["message"] = "Discovery skipped: credit event budget reached"
+        result["budget_detail"] = blocked
     return result
 
 
@@ -348,13 +470,26 @@ def get_shodan_events(
     limit: Optional[int] = None,
     country: Optional[str] = None,
 ) -> List[dict]:
-    # cache-first retrieval only; no Shodan API call from this function.
+    # Cache-first; no Shodan API call. No region lock — returns all cached findings matching filters.
     max_visible = int(os.getenv("SHODAN_MAX_VISIBLE_RESULTS", "2000"))
-    default_limit = int(os.getenv("SHODAN_DEFAULT_LIMIT", "100"))
+    default_limit = int(os.getenv("SHODAN_DEFAULT_LIMIT", "500"))
     lim = min(max(1, int(limit or default_limit)), max_visible)
 
-    where = ["region_key = ?"]
-    vals: List[object] = [_default_region_key()]
+    where = ["lat IS NOT NULL", "lon IS NOT NULL"]
+    vals: List[object] = []
+
+    # bbox filter — spatial query on cached findings (no region_key lock).
+    if bbox:
+        try:
+            parts = [float(x.strip()) for x in bbox.split(",")]
+            if len(parts) == 4:
+                min_lon, min_lat, max_lon, max_lat = parts
+                where.append("lon BETWEEN ? AND ?")
+                vals.extend([min_lon, max_lon])
+                where.append("lat BETWEEN ? AND ?")
+                vals.extend([min_lat, max_lat])
+        except Exception:
+            pass
 
     if since:
         where.append("datetime(updated_at) > datetime(?)")
@@ -383,8 +518,6 @@ def get_shodan_events(
 
     items = []
     for r in rows:
-        if r["lat"] is None or r["lon"] is None:
-            continue
         items.append({
             "id": r["id"],
             "type": "shodan",
@@ -417,7 +550,7 @@ def get_shodan_events(
 
 
 def _fetch_shodan_api_info() -> Optional[Dict[str, object]]:
-    """Fetch live credit info from Shodan /api-info. Returns None on failure. Does NOT consume credits."""
+    """Fetch live credit info from /api-info. Does NOT consume credits."""
     key = _shodan_key()
     if not key:
         return None
@@ -432,29 +565,29 @@ def _fetch_shodan_api_info() -> Optional[Dict[str, object]]:
 
 def get_shodan_meta() -> Dict[str, object]:
     configured = bool(_shodan_key())
-    usage = _get_usage_counts()
-    with get_conn() as conn:
-        total_geo = conn.execute("SELECT COUNT(*) FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL AND region_key=?", (_default_region_key(),)).fetchone()[0]
-        by_cat_rows = conn.execute("SELECT category, COUNT(*) as c FROM shodan_findings WHERE region_key=? GROUP BY category", (_default_region_key(),)).fetchall()
-        last = conn.execute("SELECT MAX(updated_at) FROM shodan_findings WHERE region_key=?", (_default_region_key(),)).fetchone()[0]
-        state_rows = conn.execute("SELECT region_key, category, last_discovery_at, ttl_sec, last_result_count, last_status, last_error FROM shodan_region_cache_state WHERE region_key=? ORDER BY last_discovery_at DESC LIMIT 50", (_default_region_key(),)).fetchall()
+    usage = _get_credit_usage_counts()
 
-    # Internal search budget (counts our discovery calls, not necessarily Shodan-deducted credits).
-    # Shodan only deducts query credits for filtered searches or page > 1.
-    # Our geo: queries may or may not consume credits depending on Shodan's filter classification.
-    search_budget = {
-        "note": "Internal app search budget — counts discovery API calls made, not actual Shodan query credits deducted",
+    with get_conn() as conn:
+        total_geo = conn.execute("SELECT COUNT(*) FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL").fetchone()[0]
+        by_cat_rows = conn.execute("SELECT category, COUNT(*) as c FROM shodan_findings GROUP BY category").fetchall()
+        last = conn.execute("SELECT MAX(updated_at) FROM shodan_findings").fetchone()[0]
+        state_rows = conn.execute("SELECT region_key, category, last_discovery_at, ttl_sec, last_result_count, last_status, last_error FROM shodan_region_cache_state ORDER BY last_discovery_at DESC LIMIT 50").fetchall()
+
+    credit_budget = {
+        "note": "Tracks credit-consuming discovery calls (queries with geo:/filter). Non-credit queries are throttle-gated only.",
         "enforcement_enabled": _budget_enforced(),
-        "daily_search_limit": _daily_budget(),
-        "monthly_search_limit": _monthly_budget(),
-        "estimated_credit_cost_per_search": _query_cost_estimate(),
-        "searches_used_today": usage["today"],
-        "searches_used_month": usage["month"],
-        "searches_remaining_today": max(0, _daily_budget() - usage["today"]),
-        "searches_remaining_month": max(0, _monthly_budget() - usage["month"]),
+        "daily_credit_event_limit": _daily_credit_limit(),
+        "monthly_credit_event_limit": _monthly_credit_limit(),
+        "credit_events_used_today": usage["today"],
+        "credit_events_used_month": usage["month"],
+        "credit_events_remaining_today": max(0, _daily_credit_limit() - usage["today"]),
+        "credit_events_remaining_month": max(0, _monthly_credit_limit() - usage["month"]),
+        "safety_throttle": {
+            "min_seconds_between_runs": _min_seconds_between_runs(),
+            "max_runs_per_hour": _max_runs_per_hour(),
+        },
     }
 
-    # Live Shodan account credit info (cached for meta, does not consume credits).
     shodan_account: Dict[str, object] = {"available": False}
     api_info = _fetch_shodan_api_info()
     if api_info:
@@ -468,13 +601,12 @@ def get_shodan_meta() -> Dict[str, object]:
 
     return {
         "configured": configured,
-        "default_region_key": _default_region_key(),
         "last_discovery_at": last,
         "total_geolocated_findings": int(total_geo or 0),
         "counts_by_category": {r[0]: int(r[1]) for r in by_cat_rows},
         "scheduler_enabled": scheduler_enabled(),
         "cache_state": [dict(r) for r in state_rows],
-        "internal_search_budget": search_budget,
+        "internal_credit_budget": credit_budget,
         "shodan_account": shodan_account,
     }
 
@@ -485,7 +617,6 @@ def get_categories() -> List[str]:
 
 def seed_mock_findings() -> Dict[str, object]:
     now = _now_iso()
-    region_key = _default_region_key()
     base = [
         {"id": "mock-sdr-1", "category": "sdr", "ip": "198.51.100.10", "port": 8073, "product": "OpenWebRX", "lat": 33.1819, "lon": -96.8877, "city": "Frisco", "region_code": "TX"},
         {"id": "mock-sdr-2", "category": "sdr", "ip": "198.51.100.11", "port": 8073, "product": "KiwiSDR", "lat": 33.1750, "lon": -96.9000, "city": "Frisco", "region_code": "TX"},
@@ -493,7 +624,6 @@ def seed_mock_findings() -> Dict[str, object]:
         {"id": "mock-sat-1", "category": "satcom", "ip": "198.51.100.30", "port": 443, "product": "iDirect NMS", "lat": 33.1900, "lon": -96.8600, "city": "McKinney", "region_code": "TX"},
         {"id": "mock-cam-1", "category": "camera", "ip": "198.51.100.40", "port": 554, "product": "Hikvision Camera", "lat": 33.1550, "lon": -96.9050, "city": "Frisco", "region_code": "TX"},
     ]
-
     with get_conn() as conn:
         for m in base:
             conn.execute(
@@ -512,7 +642,7 @@ def seed_mock_findings() -> Dict[str, object]:
                     m["id"], m["ip"], m["port"], "tcp", "Mock Org", "Mock ISP", "AS65000", "", "",
                     m["product"], "", "", "mock,verification", "", m["category"], m["lat"], m["lon"],
                     "US", "United States", m["city"], m["region_code"], now, now,
-                    f"https://www.shodan.io/host/{m['ip']}", "mock seed", "mock_shodan", region_key, now, now, 0,
+                    f"https://www.shodan.io/host/{m['ip']}", "mock seed", "mock_shodan", "mock", now, now, 0,
                 ),
             )
         conn.commit()
