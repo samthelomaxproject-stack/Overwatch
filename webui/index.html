@@ -907,7 +907,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Layer visibility state (mirrors button active state)
-        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false, shodan: false };
+        const layerVisible = { units: true, zones: true, adsb: false, ais: false, rf: false, wifi: false, sat: false, cctv: false, conflict: false, shodan: true };
 
         function syncCctvUiState() {
             const cctvOn = !!layerVisible.cctv;
