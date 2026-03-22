@@ -1189,7 +1189,8 @@ ALPHA-3 | REAR"></textarea>
                     debugLog('Shodan ingest failed: ' + (err?.message || err));
                 });
         }
-            layerVisible[layer] = (typeof forceState === 'boolean') ? forceState : !layerVisible[layer];
+
+        function toggleLayer(layer, forceState = null) {
             if (typeof event !== 'undefined' && event?.target?.classList) {
                 event.target.classList.toggle('active', layerVisible[layer]);
             }
