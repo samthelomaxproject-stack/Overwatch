@@ -390,7 +390,7 @@
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="sat"> Satellites</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="cctv"> Cams</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="conflict"> Conflict</label>
-                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="shodan"> Shodan</label>
+                            <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="shodan"> Shodan <button type="button" id="btnShodanManual" style="margin-left:6px;padding:2px 6px;font-size:10px;" title="Search Shodan for current view" disabled>🔍</button></label>
                         </div>
                         <div style="margin-top:4px;font-size:0.625rem;color:var(--text-muted);font-family:var(--font-mono);">Scroll list for additional overlays</div>
 
@@ -747,6 +747,7 @@ ALPHA-3 | REAR"></textarea>
         const conflictFilters = { windowRange: '1d', country: '', eventTypes: '', dateFrom: '', dateTo: '' };
         let shodanMarkers = {};
         let lastShodanFetchAt = 0;
+        let shodanManualBtn = null;
 
         // Map styles
         const mapStyles = {
@@ -844,6 +845,7 @@ ALPHA-3 | REAR"></textarea>
                         pollShodanMarkers(false).catch(() => {});
                     }, 1500);
                 }
+                updateShodanManualBtn();
             });
 
             // If we have a location already, show it
@@ -1037,6 +1039,12 @@ ALPHA-3 | REAR"></textarea>
             }
             applySidebarSatGroups();
             syncSidebarMapControls();
+            // Shodan manual search button
+            shodanManualBtn = document.getElementById('btnShodanManual');
+            if (shodanManualBtn) {
+                shodanManualBtn.addEventListener('click', manualShodanSearch);
+            }
+            updateShodanManualBtn();
         }
 
         function syncConflictDateInputs() {
@@ -1088,8 +1096,8 @@ ALPHA-3 | REAR"></textarea>
         }
 
         // Zoom thresholds for Shodan layer activation.
-        const SHODAN_MIN_ZOOM_DISPLAY = -9;
-        const SHODAN_MIN_ZOOM_DISCOVERY = -9;
+        const SHODAN_MIN_ZOOM_DISPLAY = 11;
+        const SHODAN_MIN_ZOOM_DISCOVERY = 12;
 
         function clearShodanMarkers() {
             Object.keys(shodanMarkers).forEach(k => {
@@ -1142,7 +1150,45 @@ ALPHA-3 | REAR"></textarea>
             } catch (_) {}
         }
 
-        function toggleLayer(layer, forceState = null) {
+        function updateShodanManualBtn() {
+            if (!shodanManualBtn) return;
+            const zoom = map ? map.getZoom() : 0;
+            const enabled = layerVisible.shodan && zoom >= SHODAN_MIN_ZOOM_DISCOVERY;
+            shodanManualBtn.disabled = !enabled;
+            shodanManualBtn.title = enabled ? 'Search Shodan for current view' : (layerVisible.shodan ? `Zoom in to level ${SHODAN_MIN_ZOOM_DISCOVERY} to search` : 'Enable Shodan layer to search');
+        }
+
+        function manualShodanSearch() {
+            if (!layerVisible.shodan) {
+                debugLog('⚠️ Enable Shodan layer to search');
+                return;
+            }
+            const zoom = map.getZoom();
+            if (zoom < SHODAN_MIN_ZOOM_DISCOVERY) {
+                debugLog(`⚠️ Zoom in to level ${SHODAN_MIN_ZOOM_DISCOVERY}+ to search Shodan`);
+                return;
+            }
+            const b = map.getBounds();
+            const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
+            const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8789')).replace(/\/$/, '');
+            fetch(`${apiBase}/api/shodan/ingest?bbox=${encodeURIComponent(bbox)}&force=false`, { method: 'POST' })
+                .then(async resp => {
+                    if (!resp.ok) {
+                        const txt = await resp.text();
+                        throw new Error(`HTTP ${resp.status}: ${txt}`);
+                    }
+                    return resp.json();
+                })
+                .then(result => {
+                    debugLog('🛰️ Shodan ingest result: ' + JSON.stringify(result));
+                    // Force refresh cached markers
+                    lastShodanFetchAt = 0;
+                    return pollShodanMarkers(true);
+                })
+                .catch(err => {
+                    debugLog('Shodan ingest failed: ' + (err?.message || err));
+                });
+        }
             layerVisible[layer] = (typeof forceState === 'boolean') ? forceState : !layerVisible[layer];
             if (typeof event !== 'undefined' && event?.target?.classList) {
                 event.target.classList.toggle('active', layerVisible[layer]);
@@ -1229,6 +1275,7 @@ ALPHA-3 | REAR"></textarea>
                 if (layerVisible.shodan) {
                     pollShodanMarkers(true).catch(() => {});
                 }
+                updateShodanManualBtn();
             }
             syncSidebarMapControls();
         }

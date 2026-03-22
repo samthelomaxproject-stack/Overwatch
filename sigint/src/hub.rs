@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
+use ureq;
 use crate::{Error, wire::{TileUpdate, TileData}};
 use crate::sync::{AckResult, TileDelta};
 use crate::sanitize::{sanitize_rf, sanitize_wifi, RateLimiter};
@@ -1426,6 +1427,23 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
                     Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
                 },
                 None => (200, serde_json::json!({"items": [], "meta": {"source":"hub_shodan_cache","configured": false,"cache_only": true,"reason":"cache_db_not_found"}}).to_string()),
+            }
+        }
+
+        ("POST", p) if p.starts_with("/api/shodan/ingest") => {
+            // Forward to Python sidecar (port 8790)
+            let sidecar_url = format!("http://127.0.0.1:8790{}", p);
+            match ureq::post(&sidecar_url).call() {
+                Ok(mut resp) => {
+                    let status = resp.status();
+                    match resp.into_string() {
+                        Ok(body) => (status, body),
+                        Err(_) => (500, r#"{"error":"invalid_response_from_sidecar"}"#.to_string()),
+                    }
+                }
+                Err(e) => {
+                    (503, format!("{{\"error\":\"sidecar_unavailable\",\"detail\":\"{}\"}}", e))
+                }
             }
         }
 
