@@ -58,7 +58,7 @@ def _budget_enforced() -> bool:
 
 # Credit event limits — only credit-consuming queries count against these.
 def _daily_credit_limit() -> int:
-    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_DAY", "10"))
+    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_DAY", "3"))
 
 
 def _monthly_credit_limit() -> int:
@@ -393,11 +393,6 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
 
     if not cats:
         return {"ok": False, "reason": "no_valid_categories", "fetched": 0}
-
-    # Safety throttle check (applies to all queries, credit-consuming or not).
-    throttle = _check_safety_throttle()
-    if not throttle.get("ok"):
-        return {"ok": False, "reason": throttle.get("reason", "throttled"), "message": throttle.get("message", ""), "fetched": 0}
 
     total = 0
     queried_categories: List[str] = []
