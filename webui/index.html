@@ -1191,6 +1191,7 @@ ALPHA-3 | REAR"></textarea>
         }
 
         function toggleLayer(layer, forceState = null) {
+            layerVisible[layer] = (typeof forceState === 'boolean') ? forceState : !layerVisible[layer];
             if (typeof event !== 'undefined' && event?.target?.classList) {
                 event.target.classList.toggle('active', layerVisible[layer]);
             }
