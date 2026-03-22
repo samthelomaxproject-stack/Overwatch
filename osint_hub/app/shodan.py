@@ -568,6 +568,7 @@ def get_shodan_meta() -> Dict[str, object]:
     usage = _get_credit_usage_counts()
 
     with get_conn() as conn:
+        total_cached = conn.execute("SELECT COUNT(*) FROM shodan_findings").fetchone()[0]
         total_geo = conn.execute("SELECT COUNT(*) FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL").fetchone()[0]
         by_cat_rows = conn.execute("SELECT category, COUNT(*) as c FROM shodan_findings GROUP BY category").fetchall()
         last = conn.execute("SELECT MAX(updated_at) FROM shodan_findings").fetchone()[0]
@@ -601,13 +602,22 @@ def get_shodan_meta() -> Dict[str, object]:
 
     return {
         "configured": configured,
-        "last_discovery_at": last,
+        "last_discovery_time": last,
+        "last_discovery_at": last,  # alias for backward compatibility
+        "total_cached_findings": int(total_cached or 0),
         "total_geolocated_findings": int(total_geo or 0),
         "counts_by_category": {r[0]: int(r[1]) for r in by_cat_rows},
         "scheduler_enabled": scheduler_enabled(),
         "cache_state": [dict(r) for r in state_rows],
         "internal_credit_budget": credit_budget,
         "shodan_account": shodan_account,
+        "zoom_thresholds": {
+            "min_zoom_display": int(os.getenv("SHODAN_MIN_ZOOM_DISPLAY", "11")),
+            "min_zoom_discovery": int(os.getenv("SHODAN_MIN_ZOOM_DISCOVERY", "12")),
+            "note": "Frontend enforces these thresholds. Below min_zoom_display: markers cleared. Below min_zoom_discovery: cache not refreshed.",
+        },
+        "region_lock": False,
+        "cache_only_serving": True,
     }
 
 
