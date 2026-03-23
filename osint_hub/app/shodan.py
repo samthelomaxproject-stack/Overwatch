@@ -17,6 +17,14 @@ CATEGORY_QUERIES = {
     "camera": "Hikvision OR Dahua OR Axis OR \"ip camera\"",
 }
 
+# Fallback queries for 500 errors - simpler, single-term queries
+CATEGORY_FALLBACK_QUERIES = {
+    "sdr": "OpenWebRX",
+    "adsb_receiver": "dump1090",
+    "satcom": "VSAT",
+    "camera": "Hikvision",
+}
+
 CATEGORY_PRIORITY = ["sdr", "adsb_receiver", "satcom", "camera"]
 
 # Queries that use geo: filters are credit-consuming on Shodan.
@@ -58,11 +66,12 @@ def _budget_enforced() -> bool:
 
 # Credit event limits — only credit-consuming queries count against these.
 def _daily_credit_limit() -> int:
-    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_DAY", "3"))
+    # Daily limit disabled — only monthly Shodan quota applies
+    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_DAY", "99999"))
 
 
 def _monthly_credit_limit() -> int:
-    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_MONTH", "90"))
+    return int(os.getenv("SHODAN_MAX_CREDIT_EVENTS_PER_MONTH", "100"))
 
 
 # Safety throttle — prevents runaway discovery regardless of credit budget.
@@ -76,9 +85,9 @@ def _max_runs_per_hour() -> int:
 
 def _query_limit() -> int:
     default_limit = int(os.getenv("SHODAN_DEFAULT_LIMIT", "100"))
-    default_limit = max(1, min(100, default_limit))
+    default_limit = max(1, default_limit)  # No upper cap
     hard_cap = int(os.getenv("SHODAN_MAX_RESULTS_PER_QUERY", "200"))
-    hard_cap = max(1, min(200, hard_cap))
+    hard_cap = max(1, hard_cap)  # No upper cap
     return min(default_limit, hard_cap)
 
 
@@ -136,11 +145,23 @@ def _normalize(match: dict, category: str, region_key: str, query: str) -> dict:
     }
 
 
-def _upsert(rows: List[dict]):
+def _upsert(rows: List[dict]) -> Dict[str, int]:
+    """Insert or update Shodan findings. Returns counts of inserted and updated rows."""
     if not rows:
-        return
+        return {"inserted": 0, "updated": 0}
+    
+    inserted = 0
+    updated = 0
+    
     with get_conn() as conn:
         for r in rows:
+            # Check if row exists
+            existing = conn.execute("SELECT id FROM shodan_findings WHERE id=?", (r["id"],)).fetchone()
+            if existing:
+                updated += 1
+            else:
+                inserted += 1
+                
             conn.execute(
                 """
                 INSERT INTO shodan_findings (
@@ -171,6 +192,8 @@ def _upsert(rows: List[dict]):
                 ),
             )
         conn.commit()
+    
+    return {"inserted": inserted, "updated": updated}
 
 
 def _record_region_state(region_key: str, category: str, ttl_sec: int, result_count: int, status: str, error: str = ""):
@@ -353,8 +376,13 @@ def _region_key_from_bbox(bbox: Optional[str]) -> str:
     return "bbox_custom"
 
 
-def _geo_clause_from_bbox(bbox: Optional[str]) -> str:
-    """Build a Shodan geo: clause from a bbox. Falls back to default region."""
+def _geo_clause_from_bbox(bbox: Optional[str], manual_search: bool = False) -> str:
+    """Build a Shodan geo: clause from a bbox. Falls back to default region.
+    
+    Args:
+        bbox: Bounding box "min_lon,min_lat,max_lon,max_lat"
+        manual_search: If True, use wider radius for manual force-search
+    """
     if not bbox:
         return os.getenv("SHODAN_DEFAULT_REGION_QUERY", "geo:33.1500,-96.9000,220").strip()
     try:
@@ -363,9 +391,16 @@ def _geo_clause_from_bbox(bbox: Optional[str]) -> str:
             min_lon, min_lat, max_lon, max_lat = parts
             c_lat = (min_lat + max_lat) / 2.0
             c_lon = (min_lon + max_lon) / 2.0
-            lat_span_km = abs(max_lat - min_lat) * 111.0
-            lon_span_km = abs(max_lon - min_lon) * 111.0 * abs(c_lat * 3.14159 / 180)
-            radius = max(30, min(400, int(max(lat_span_km, lon_span_km) / 2.0)))
+            
+            if manual_search:
+                # Use configured manual search radius (default 75km for better coverage)
+                radius = int(os.getenv("SHODAN_MANUAL_SEARCH_RADIUS_KM", "75"))
+            else:
+                # Calculate radius from bbox for auto-refresh
+                lat_span_km = abs(max_lat - min_lat) * 111.0
+                lon_span_km = abs(max_lon - min_lon) * 111.0 * abs(c_lat * 3.14159 / 180)
+                radius = max(30, min(400, int(max(lat_span_km, lon_span_km) / 2.0)))
+            
             return f"geo:{c_lat:.4f},{c_lon:.4f},{radius}"
     except Exception:
         pass
@@ -381,7 +416,8 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
     limit_per_query = _query_limit()
 
     region_key = _region_key_from_bbox(bbox)
-    geo_clause = _geo_clause_from_bbox(bbox)
+    # Use wider radius for manual force-search
+    geo_clause = _geo_clause_from_bbox(bbox, manual_search=force_refresh)
 
     requested = categories or [c.strip() for c in os.getenv("SHODAN_DISCOVERY_CATEGORIES", "sdr,adsb_receiver,satcom,camera").split(",") if c.strip()]
     requested_valid = [c for c in requested if c in CATEGORY_QUERIES]
@@ -396,8 +432,11 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
 
     total = 0
     queried_categories: List[str] = []
+    failed_categories: List[str] = []
     credit_events_used = 0
     blocked = None
+    inserted_count = 0
+    updated_count = 0
 
     for c in cats:
         if (not force_refresh) and (not _is_stale(region_key, c, ttl_sec)):
@@ -420,6 +459,7 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
         err = ""
         collected: List[dict] = []
 
+        # Try primary query
         try:
             resp = requests.get(
                 f"{SHODAN_API_BASE}/shodan/host/search",
@@ -431,16 +471,51 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
             payload = resp.json()
             for m in (payload.get("matches") or [])[:limit_per_query]:
                 collected.append(_normalize(m, c, region_key, q))
-            _upsert(collected)
-            _record_region_state(region_key, c, ttl_sec, len(collected), "ok", "")
-            total += len(collected)
-            queried_categories.append(c)
         except Exception as e:
             status = "error"
             err = str(e)
+            
+            # Fallback for HTTP 500 errors: try simpler query once
+            if "shodan_http_500" in err and c in CATEGORY_FALLBACK_QUERIES:
+                fallback_q = f"{CATEGORY_FALLBACK_QUERIES[c]} {geo_clause}".strip()
+                try:
+                    resp = requests.get(
+                        f"{SHODAN_API_BASE}/shodan/host/search",
+                        params={"key": key, "query": fallback_q, "page": 1, "minify": "true"},
+                        timeout=30,
+                    )
+                    if resp.status_code == 200:
+                        payload = resp.json()
+                        for m in (payload.get("matches") or [])[:limit_per_query]:
+                            collected.append(_normalize(m, c, region_key, fallback_q))
+                        status = "ok_fallback"
+                        err = f"Primary query failed, fallback succeeded: {fallback_q}"
+                        _record_query_run(fallback_q, region_key, c, limit_per_query, len(collected), started, status, err)
+                except Exception as fallback_err:
+                    err += f"; fallback also failed: {fallback_err}"
+
+        # Write results to DB
+        if collected:
+            counts = _upsert(collected)
+            inserted_count += counts.get("inserted", 0)
+            updated_count += counts.get("updated", 0)
+            _record_region_state(region_key, c, ttl_sec, len(collected), status, err if status != "ok" else "")
+            total += len(collected)
+            queried_categories.append(c)
+        else:
             _record_region_state(region_key, c, ttl_sec, 0, status, err)
+            if status == "error":
+                failed_categories.append(c)
 
         _record_query_run(q, region_key, c, limit_per_query, len(collected), started, status, err)
+
+    # Extract radius from geo_clause for reporting
+    radius_km = 0
+    if "geo:" in geo_clause:
+        try:
+            radius_km = int(geo_clause.split(",")[-1])
+        except:
+            pass
 
     result: Dict[str, object] = {
         "ok": True,
@@ -448,8 +523,13 @@ def discover_shodan(bbox: Optional[str] = None, categories: Optional[List[str]] 
         "region_key": region_key,
         "categories": cats,
         "queried_categories": queried_categories,
+        "failed_categories": failed_categories,
         "credit_events_used": credit_events_used,
         "cache_only": False,
+        "inserted_count": inserted_count,
+        "updated_count": updated_count,
+        "search_radius_km": radius_km,
+        "manual_search": force_refresh,
     }
     if blocked:
         result["status"] = "credit_budget_exceeded"

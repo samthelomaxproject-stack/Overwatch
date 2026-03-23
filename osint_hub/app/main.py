@@ -8,6 +8,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
 from .acled import fetch_acled
+
+load_dotenv()  # Load from .env in current directory (bundled)
+
+# Also load user-specific overrides if present (e.g., SHODAN_API_KEY)
+# This allows secrets to persist across app updates without modifying the bundle.
+user_env = os.path.expanduser("~/.config/overwatch/.env")
+if os.path.exists(user_env):
+    load_dotenv(user_env, override=True)
 from .db import get_conn, init_db
 from .shodan import (
     discover_shodan,
@@ -367,7 +375,7 @@ def shodan_events(
     category: Optional[str] = None,
     since: Optional[str] = None,
     country: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=100000),
 ):
     # Cache-first endpoint. Never triggers live Shodan API.
     cat_list = [c.strip() for c in (category or "").split(",") if c.strip()]

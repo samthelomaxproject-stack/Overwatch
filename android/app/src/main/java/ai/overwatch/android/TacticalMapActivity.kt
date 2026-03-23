@@ -1734,7 +1734,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (!isFinite(lat) || !isFinite(lon)) return;
                     const key = String(r.id || (r.ip + ':' + r.port));
                     seen.add(key);
-                    const html = '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;line-height:1;filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">👁️</div>';
+                    const html = '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 3px rgba(0,0,0,0.8));"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="12" rx="10" ry="6" fill="#E1251B" stroke="#000" stroke-width="0.5"/><circle cx="12" cy="12" r="3.5" fill="#000"/><circle cx="12" cy="12" r="1.5" fill="#fff"/></svg></div>';
                     const icon = L.divIcon({ html, className: 'shodan-icon', iconSize: [18,18], iconAnchor: [9,9] });
                     const popup = '<div style="min-width:220px;">'
                         + '<b>Shodan ' + (r.ip || '-') + ':' + (r.port || '-') + '</b><br>'

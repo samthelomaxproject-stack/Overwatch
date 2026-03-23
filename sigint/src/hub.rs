@@ -936,7 +936,9 @@ pub fn get_node_statuses(db_path: &str, stale_after_secs: u64) -> Result<Vec<Nod
 
     let mut stmt = conn.prepare(
         "SELECT device_id, COALESCE(source_type,'unknown'), COALESCE(last_seen,0)
-         FROM node_registry ORDER BY last_seen DESC LIMIT 50"
+         FROM node_registry
+         WHERE source_type IN ('handheld', 'node', 'desktop')
+         ORDER BY last_seen DESC LIMIT 50"
     )?;
 
     let rows = stmt.query_map([], |r| {
@@ -1020,7 +1022,9 @@ fn resolve_shodan_db_path() -> Option<String> {
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
+    // Check persistent user config first, then fallback to legacy locations
     let candidates = vec![
+        format!("{home}/.config/overwatch/conflict_events.db"),
         format!("{home}/.openclaw/workspace/Overwatch/osint_hub/conflict_events.db"),
         format!("{home}/Overwatch/osint_hub/conflict_events.db"),
         "./osint_hub/conflict_events.db".to_string(),
@@ -1408,7 +1412,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             let limit = parse_query_param(p, "limit")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(500)
-                .clamp(1, 2000);
+                .clamp(1, 100000);
 
             match resolve_shodan_db_path() {
                 Some(db_path) => match shodan_events_from_cache(&db_path, category.as_deref(), limit) {

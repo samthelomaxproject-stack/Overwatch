@@ -21,6 +21,9 @@ pub mod meshtastic_proto {
 
 mod meshtastic;
 mod rtl_sdr_test;
+mod sidecar_management;
+
+use sidecar_management::{start_sidecar, stop_sidecar, sidecar_status};
 
 // Location state shared between threads
 #[derive(Clone, Copy, Default, Debug)]
@@ -1387,6 +1390,9 @@ fn stop_rtl_sdr() -> Result<String, String> {
 
     tauri::Builder::default()
         .setup(move |app| {
+            // Auto-start the OSINT sidecar (Shodan ingest service)
+            let _ = sidecar_management::start_sidecar();
+
             #[cfg(target_os = "macos")]
             {
                 let app_handle = app.handle().clone();
@@ -1437,6 +1443,9 @@ fn stop_rtl_sdr() -> Result<String, String> {
             start_hub,
             stop_hub,
             hub_status,
+            start_sidecar,
+            stop_sidecar,
+            sidecar_status,
             start_collector,
             start_sweeper,
             set_privacy_mode,

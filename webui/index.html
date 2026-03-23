@@ -1133,7 +1133,7 @@ ALPHA-3 | REAR"></textarea>
                     if (!isFinite(lat) || !isFinite(lon)) return;
                     const icon = L.divIcon({
                         className: 'shodan-icon',
-                        html: '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;filter:drop-shadow(0 0 2px rgba(0,0,0,.7));">👁️</div>',
+                        html: '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 3px rgba(0,0,0,0.8));"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="12" rx="10" ry="6" fill="#E1251B" stroke="#000" stroke-width="0.5"/><circle cx="12" cy="12" r="3.5" fill="#000"/><circle cx="12" cy="12" r="1.5" fill="#fff"/></svg></div>',
                         iconSize: [18,18], iconAnchor: [9,9]
                     });
                     const popup = '<div style="min-width:220px;">' + '<b>Shodan: ' + (r.ip || '-') + ':' + (r.port || '-') + '</b><br>' + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>' + '<b>Org:</b> ' + (r.org || '-') + '<br>' + '<b>ASN:</b> ' + (r.asn || '-') + '<br>' + '<b>Product:</b> ' + (r.product || '-') + '<br>' + '<b>Category:</b> ' + (r.category || '-') + '<br>' + '<b>Source:</b> Shodan (Hub Cache)</div>';

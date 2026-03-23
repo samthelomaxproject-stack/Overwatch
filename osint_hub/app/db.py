@@ -2,7 +2,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-DB_PATH = os.getenv("DB_PATH", "./conflict_events.db")
+DB_PATH = os.getenv("DB_PATH", os.path.expanduser("~/.config/overwatch/conflict_events.db"))
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS conflict_events (
