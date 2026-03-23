@@ -32,3 +32,5 @@ meshtastic_bridge.py
 
 # Node
 node_modules/
+osint_hub/venv/
+osint_hub/conflict_events.db.old
