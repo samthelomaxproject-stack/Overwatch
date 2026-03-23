@@ -1116,10 +1116,12 @@ ALPHA-3 | REAR"></textarea>
             if (!force && (now - lastShodanFetchAt) < 30000) return;
             lastShodanFetchAt = now;
             try {
-                const b = map.getBounds();
-                const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
                 const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8789')).replace(/\/$/, '');
-                const resp = await fetch(apiBase + '/api/shodan/events?bbox=' + encodeURIComponent(bbox) + '&limit=2000');
+                
+                // Always fetch ALL globally collected results - no bbox filter
+                // Build up intelligence picture over time across all searched regions
+                const url = apiBase + '/api/shodan/events?limit=10000';
+                const resp = await fetch(url);
                 if (!resp.ok) return;
                 const payload = await resp.json();
                 const rows = Array.isArray(payload?.items) ? payload.items : [];
@@ -1131,7 +1133,7 @@ ALPHA-3 | REAR"></textarea>
                     if (!isFinite(lat) || !isFinite(lon)) return;
                     const icon = L.divIcon({
                         className: 'shodan-icon',
-                        html: '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;filter:drop-shadow(0 0 2px rgba(0,0,0,.7));">&#128752;&#65039;</div>',
+                        html: '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;filter:drop-shadow(0 0 2px rgba(0,0,0,.7));">👁️</div>',
                         iconSize: [18,18], iconAnchor: [9,9]
                     });
                     const popup = '<div style="min-width:220px;">' + '<b>Shodan: ' + (r.ip || '-') + ':' + (r.port || '-') + '</b><br>' + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>' + '<b>Org:</b> ' + (r.org || '-') + '<br>' + '<b>ASN:</b> ' + (r.asn || '-') + '<br>' + '<b>Product:</b> ' + (r.product || '-') + '<br>' + '<b>Category:</b> ' + (r.category || '-') + '<br>' + '<b>Source:</b> Shodan (Hub Cache)</div>';
@@ -1168,10 +1170,23 @@ ALPHA-3 | REAR"></textarea>
                 debugLog(`⚠️ Zoom in to level ${SHODAN_MIN_ZOOM_DISCOVERY}+ to search Shodan`);
                 return;
             }
+            
+            // Confirmation dialog for force search
+            const forceSearch = confirm(
+                '🔍 Force Shodan Search?\n\n' +
+                'This will query the Shodan API directly and may consume query credits.\n\n' +
+                '• Cached results: Free\n' +
+                '• Fresh API search: May use query credits\n\n' +
+                'Continue with fresh search?'
+            );
+            
             const b = map.getBounds();
             const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
             const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8789')).replace(/\/$/, '');
-            fetch(`${apiBase}/api/shodan/ingest?bbox=${encodeURIComponent(bbox)}&force=false`, { method: 'POST' })
+            
+            debugLog(forceSearch ? '🛰️ Requesting FORCE Shodan ingest...' : '🛰️ Requesting cached Shodan results...');
+            
+            fetch(`${apiBase}/api/shodan/ingest?bbox=${encodeURIComponent(bbox)}&force=${forceSearch}`, { method: 'POST' })
                 .then(async resp => {
                     if (!resp.ok) {
                         const txt = await resp.text();

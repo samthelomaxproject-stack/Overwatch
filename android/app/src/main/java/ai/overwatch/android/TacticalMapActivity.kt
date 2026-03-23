@@ -1734,7 +1734,7 @@ class TacticalMapActivity : AppCompatActivity() {
                     if (!isFinite(lat) || !isFinite(lon)) return;
                     const key = String(r.id || (r.ip + ':' + r.port));
                     seen.add(key);
-                    const html = '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;line-height:1;filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">🛰️</div>';
+                    const html = '<div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:#8b5cf6;font-size:16px;line-height:1;filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));">👁️</div>';
                     const icon = L.divIcon({ html, className: 'shodan-icon', iconSize: [18,18], iconAnchor: [9,9] });
                     const popup = '<div style="min-width:220px;">'
                         + '<b>Shodan ' + (r.ip || '-') + ':' + (r.port || '-') + '</b><br>'
@@ -2357,23 +2357,70 @@ class TacticalMapActivity : AppCompatActivity() {
             } catch (_) { return null; }
         }
 
+        async function fetchSatellitesFromHub() {
+            // Fallback: get satellite positions from hub if local TLE fetch fails
+            try {
+                const hub = currentHub.endsWith('/') ? currentHub : currentHub + '/';
+                if (!hub.startsWith('http')) return [];
+                
+                const resp = await fetch(hub + 'api/cop?max_age_sec=300');
+                if (!resp.ok) return [];
+                
+                const data = await resp.json();
+                const sats = Array.isArray(data.satellites) ? data.satellites : [];
+                return sats.filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lon))
+                    .map(s => ({
+                        id: s.norad || s.name || 'sat-' + Math.random().toString(36).slice(2),
+                        name: s.name || 'Unknown',
+                        norad: s.norad || '',
+                        lat: s.lat,
+                        lon: s.lon,
+                        altKm: s.altKm || 0,
+                        dimension: s.dimension || 'hub'
+                    }));
+            } catch (e) {
+                console.log('Hub satellite fallback failed:', e.message);
+                return [];
+            }
+        }
+
         async function pollLocalSatcom(force=false) {
             try {
                 if (!layerVisibility.sat) return;
                 const ok = await ensureSatelliteJs();
                 if (!ok) {
                     document.getElementById('status').textContent = 'SAT error: satellite.js unavailable';
+                    // Try hub fallback
+                    const hubSats = await fetchSatellitesFromHub();
+                    if (hubSats.length > 0) {
+                        renderSatellites(hubSats);
+                        document.getElementById('status').textContent = 'SAT: Using hub data (' + hubSats.length + ')';
+                    }
                     return;
                 }
                 let all = [];
+                let failedGroups = [];
                 for (const g of satSelectedGroups) {
                     try {
                         const items = await fetchSatGroup(g, force);
                         all = all.concat(items);
                     } catch (e) {
                         console.log('SAT fetch failed', g, e.message);
+                        failedGroups.push(g);
                     }
                 }
+                
+                // If all groups failed, try hub fallback
+                if (all.length === 0 && failedGroups.length > 0) {
+                    const hubSats = await fetchSatellitesFromHub();
+                    if (hubSats.length > 0) {
+                        renderSatellites(hubSats);
+                        satLastDiag = { ok: true, group: 'hub-fallback', count: hubSats.length, at: Date.now(), err: '' };
+                        updateSatDiag();
+                        return;
+                    }
+                }
+                
                 const dedup = new Map();
                 all.forEach(s => dedup.set(s.norad || s.id, s));
                 const localSats = Array.from(dedup.values());
@@ -2391,6 +2438,11 @@ class TacticalMapActivity : AppCompatActivity() {
                 satLastDiag = { ok: false, group: satSelectedGroups[0] || '-', count: 0, at: Date.now(), err: e.message || String(e) };
                 updateSatDiag();
                 console.log('Local satcom poll error:', e.message);
+                // Final fallback attempt
+                const hubSats = await fetchSatellitesFromHub();
+                if (hubSats.length > 0) {
+                    renderSatellites(hubSats);
+                }
             }
         }
 
