@@ -6359,6 +6359,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('btnRefreshConflict');
     if (btn) {
         btn.addEventListener('click', async () => {
+            if (!window.conflictModule) {
+                debugLog('⚠️ Conflict module not initialized. Enable Conflict layer first.');
+                btn.textContent = '⚠️ Enable Layer';
+                setTimeout(() => { btn.textContent = '🔄 Refresh Events'; }, 2000);
+                return;
+            }
+            
             btn.disabled = true;
             btn.textContent = '⏳ Fetching...';
             
@@ -6370,21 +6377,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (refreshRes.ok) {
                     const data = await refreshRes.json();
                     totalNew = data.total_new || 0;
+                    console.log(`Conflict refresh: ${totalNew} new events ingested`);
+                } else {
+                    throw new Error(`Refresh API returned ${refreshRes.status}`);
                 }
+                
+                // Reload the conflict layer to show new events
+                await window.conflictModule.load();
+                console.log('Conflict layer reloaded after refresh');
                 
                 btn.textContent = totalNew > 0 ? `✓ ${totalNew}` : '✓ OK';
                 setTimeout(() => {
                     btn.textContent = '🔄 Refresh Events';
                     btn.disabled = false;
                 }, 2000);
-                
-                if (window.conflictModule) {
-                    // Force reload regardless of visibility
-                    await window.conflictModule.load();
-                    console.log('Conflict layer reloaded after refresh');
-                } else {
-                    console.warn('Conflict module not initialized - toggle Conflict layer on first');
-                }
             } catch (e) {
                 btn.textContent = '✗ ERR';
                 console.error('Conflict refresh error:', e);
