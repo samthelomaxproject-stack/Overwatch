@@ -765,6 +765,7 @@ ALPHA-3 | REAR"></textarea>
         let conflictModule = null;
         const conflictFilters = { windowRange: '1d', country: '', eventTypes: '', dateFrom: '', dateTo: '' };
         let shodanMarkers = {};
+        let shodanClusterGroup = null;
         let shodanCategoryEnabled = {
             sdr: true,
             adsb_receiver: true,
@@ -1143,6 +1144,8 @@ ALPHA-3 | REAR"></textarea>
         const SHODAN_MIN_ZOOM_DISCOVERY = 9;
 
         function clearShodanMarkers() {
+            if (shodanClusterGroup) shodanClusterGroup.clearLayers();
+            if (shodanClusterGroup && map.hasLayer(shodanClusterGroup)) map.removeLayer(shodanClusterGroup);
             Object.keys(shodanMarkers).forEach(k => {
                 if (map.hasLayer(shodanMarkers[k])) map.removeLayer(shodanMarkers[k]);
                 delete shodanMarkers[k];
@@ -1150,21 +1153,12 @@ ALPHA-3 | REAR"></textarea>
         }
 
         async function pollShodanMarkers(force=false) {
-            const zoom = map ? map.getZoom() : 0;
-            console.log(`pollShodanMarkers: zoom=${zoom}, force=${force}, SHODAN_MIN_ZOOM_DISPLAY=${SHODAN_MIN_ZOOM_DISPLAY}`);
-            
-            // Zoom gate: clear markers below display threshold.
-            if (zoom < SHODAN_MIN_ZOOM_DISPLAY) { clearShodanMarkers(); return; }
-            // Skip cache refresh below discovery threshold; existing markers still visible.
-            if (!force && zoom < SHODAN_MIN_ZOOM_DISCOVERY) return;
             const now = Date.now();
             if (!force && (now - lastShodanFetchAt) < 30000) return;
             lastShodanFetchAt = now;
             try {
                 const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8790')).replace(/\/$/, '');
                 
-                // Always fetch ALL globally collected results - no bbox filter
-                // Build up intelligence picture over time across all searched regions
                 const selectedCats = Object.keys(shodanCategoryEnabled).filter(k => shodanCategoryEnabled[k]);
                 const categoryParam = selectedCats.length > 0 ? `&category=${selectedCats.join(',')}` : '';
                 const url = apiBase + '/api/shodan/events?limit=10000' + categoryParam;
@@ -1179,26 +1173,47 @@ ALPHA-3 | REAR"></textarea>
                 console.log(`Shodan: Received ${rows.length} results`);
                 const seen = new Set();
                 rows.forEach(r => {
+                    const lat = Number(r.lat);
+                    const lon = Number(r.lon);
+                    if (!isFinite(lat) || !isFinite(lon)) return;
                     const key = String(r.id || (r.ip + ':' + r.port));
                     seen.add(key);
-                    const lat = Number(r.lat), lon = Number(r.lon);
-                    if (!isFinite(lat) || !isFinite(lon)) return;
-                    const icon = L.divIcon({
-                        className: 'shodan-icon',
-                        html: '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 3px rgba(0,0,0,0.8));"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="12" rx="10" ry="6" fill="#E1251B" stroke="#000" stroke-width="0.5"/><circle cx="12" cy="12" r="3.5" fill="#000"/><circle cx="12" cy="12" r="1.5" fill="#fff"/></svg></div>',
-                        iconSize: [18,18], iconAnchor: [9,9]
-                    });
+                    const html = '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 3px rgba(0,0,0,0.8));"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="12" rx="10" ry="6" fill="#E1251B" stroke="#000" stroke-width="0.5"/><circle cx="12" cy="12" r="3.5" fill="#000"/><circle cx="12" cy="12" r="1.5" fill="#fff"/></svg></div>';
+                    const icon = L.divIcon({ html, className: 'shodan-icon', iconSize: [18,18], iconAnchor: [9,9] });
                     const ipPort = (r.ip || '-') + ':' + (r.port || '-');
                     const ipLink = r.ip ? `<a href="http://${ipPort}" target="_blank" rel="noopener" style="color:var(--accent-cyan);text-decoration:none;">${ipPort}</a>` : ipPort;
-                    const popup = '<div style="min-width:220px;">' + '<b>Shodan: ' + ipLink + '</b><br>' + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>' + '<b>Org:</b> ' + (r.org || '-') + '<br>' + '<b>ASN:</b> ' + (r.asn || '-') + '<br>' + '<b>Product:</b> ' + (r.product || '-') + '<br>' + '<b>Category:</b> ' + (r.category || '-') + '<br>' + '<b>Source:</b> Shodan (Hub Cache)</div>';
-                    let m = shodanMarkers[key];
-                    if (!m) { m = L.marker([lat, lon], { icon }); shodanMarkers[key] = m; }
-                    else { m.setLatLng([lat, lon]); m.setIcon(icon); }
-                    m.bindPopup(popup);
-                    if (layerVisible.shodan && !map.hasLayer(m)) m.addTo(map);
+                    const popup = '<div style="min-width:220px;">'
+                        + '<b>Shodan: ' + ipLink + '</b><br>'
+                        + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>'
+                        + '<b>Org:</b> ' + (r.org || '-') + '<br>'
+                        + '<b>ASN:</b> ' + (r.asn || '-') + '<br>'
+                        + '<b>Product:</b> ' + (r.product || '-') + '<br>'
+                        + '<b>Category:</b> ' + (r.category || '-') + '<br>'
+                        + '<b>Source:</b> Shodan (Hub Cache)</div>';
+                    let marker = shodanMarkers[key];
+                    if (!marker) {
+                        marker = L.marker([lat, lon], { icon });
+                        shodanMarkers[key] = marker;
+                    } else {
+                        marker.setLatLng([lat, lon]);
+                        marker.setIcon(icon);
+                    }
+                    marker.bindPopup(popup);
+                    if (layerVisible.shodan) {
+                        if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
+                            shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
+                        }
+                        if (shodanClusterGroup) {
+                            if (!map.hasLayer(shodanClusterGroup)) map.addLayer(shodanClusterGroup);
+                            if (!shodanClusterGroup.hasLayer(marker)) shodanClusterGroup.addLayer(marker);
+                        } else if (!map.hasLayer(marker)) {
+                            marker.addTo(map);
+                        }
+                    }
                 });
                 Object.keys(shodanMarkers).forEach(k => {
                     if (!seen.has(k)) {
+                        if (shodanClusterGroup && shodanClusterGroup.hasLayer(shodanMarkers[k])) shodanClusterGroup.removeLayer(shodanMarkers[k]);
                         if (map.hasLayer(shodanMarkers[k])) map.removeLayer(shodanMarkers[k]);
                         delete shodanMarkers[k];
                     }
@@ -1338,30 +1353,21 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (layer === 'shodan') {
-                alert(`Shodan layer toggled ${layerVisible.shodan ? 'ON' : 'OFF'}\nMarkers in cache: ${Object.keys(shodanMarkers).length}`);
-                
-                const statusEl = document.getElementById('shodanStatus');
-                if (statusEl) statusEl.textContent = layerVisible.shodan ? '🔴' : '●';
-                
                 debugLog(`🛰️ Shodan layer toggled ${layerVisible.shodan ? 'ON' : 'OFF'}`);
-                Object.values(shodanMarkers).forEach(m => {
-                    if (layerVisible.shodan) {
-                        if (!map.hasLayer(m)) m.addTo(map);
-                    } else {
-                        if (map.hasLayer(m)) map.removeLayer(m);
-                    }
-                });
+                
                 if (layerVisible.shodan) {
-                    if (statusEl) statusEl.textContent = '⏳';
-                    alert('About to call pollShodanMarkers...');
-                    pollShodanMarkers(true).then((result) => {
-                        alert(`Shodan poll completed. Markers now: ${Object.keys(shodanMarkers).length}`);
-                        if (statusEl) statusEl.textContent = '🟢';
-                        setTimeout(() => { if (statusEl) statusEl.textContent = '●'; }, 3000);
-                    }).catch((err) => {
-                        alert(`Shodan poll FAILED: ${err.message || err}`);
-                        if (statusEl) statusEl.textContent = '🔴';
+                    if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
+                        shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
+                    }
+                    if (shodanClusterGroup && !map.hasLayer(shodanClusterGroup)) map.addLayer(shodanClusterGroup);
+                    Object.values(shodanMarkers).forEach(m => { 
+                        if (shodanClusterGroup && !shodanClusterGroup.hasLayer(m)) shodanClusterGroup.addLayer(m); 
                     });
+                    pollShodanMarkers(true).catch(() => {});
+                } else {
+                    if (shodanClusterGroup) shodanClusterGroup.clearLayers();
+                    if (shodanClusterGroup && map.hasLayer(shodanClusterGroup)) map.removeLayer(shodanClusterGroup);
+                    Object.values(shodanMarkers).forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
                 }
                 updateShodanManualBtn();
             }
@@ -6398,3 +6404,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 </script>
+</body>
+</html>
