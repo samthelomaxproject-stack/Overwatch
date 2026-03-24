@@ -45,16 +45,35 @@ window.initConflictModule = async function initConflictModule(map, options = {})
         const url = `${apiBase || 'http://127.0.0.1:8790'}/api/conflict/events?window=${state.windowRange}&limit=500`;
         console.log(`Conflict fetch URL: ${url}`);
         const conflictRes = await fetch(url);
+        console.log(`Conflict fetch status: ${conflictRes.status}, ok: ${conflictRes.ok}`);
+        
         if (conflictRes.ok) {
-          const data = await conflictRes.json();
+          const rawText = await conflictRes.text();
+          console.log('Conflict raw response (first 200 chars):', rawText.substring(0, 200));
+          
+          let data;
+          try {
+            data = JSON.parse(rawText);
+            console.log('Conflict parsed JSON keys:', Object.keys(data));
+            console.log('Conflict data.items type:', Array.isArray(data.items) ? 'array' : typeof data.items);
+          } catch (parseErr) {
+            console.error('JSON parse error:', parseErr);
+            throw new Error(`JSON parse failed: ${parseErr.message}`);
+          }
+          
           conflictEvents = data.items || [];
           console.log(`Conflict: ${conflictEvents.length} events loaded`);
+          if (conflictEvents.length > 0) {
+            console.log('First event sample:', conflictEvents[0]);
+          }
         } else {
-          console.error(`Conflict API error: ${conflictRes.status}`);
+          const errorText = await conflictRes.text();
+          console.error(`Conflict API error: ${conflictRes.status}, body:`, errorText);
           throw new Error(`API returned ${conflictRes.status}`);
         }
       } catch (e) {
         console.error('Conflict events fetch error:', e);
+        console.error('Error stack:', e.stack);
         throw e;
       }
 
