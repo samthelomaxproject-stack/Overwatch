@@ -51,6 +51,10 @@ window.initConflictModule = async function initConflictModule(map, options = {})
         throw e;
       }
 
+      // Ensure layer is on map before adding markers
+      if (!map.hasLayer(markerLayer)) {
+        map.addLayer(markerLayer);
+      }
       markerLayer.clearLayers();
     
     console.log(`Conflict: Rendering ${conflictEvents.length} events`);
