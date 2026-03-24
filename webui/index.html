@@ -1365,7 +1365,11 @@ ALPHA-3 | REAR"></textarea>
                             if (conflictModule) {
                                 conflictModule.setFilters(conflictFilters);
                                 conflictModule.setVisible(true);
-                                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict load failed: ' + (e?.message || e)));
+                                conflictModule.refreshIfVisible(true).catch(e => {
+                                    console.error('Conflict initial load error:', e);
+                                    console.error('Stack:', e.stack);
+                                    debugLog('Conflict load failed: ' + (e?.message || e));
+                                });
                             }
                         })
                         .catch(e => {
@@ -1377,7 +1381,11 @@ ALPHA-3 | REAR"></textarea>
                     conflictModule.setVisible(!!layerVisible.conflict);
                     if (layerVisible.conflict) {
                         conflictModule.setFilters(conflictFilters);
-                        conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict load failed: ' + (e?.message || e)));
+                        conflictModule.refreshIfVisible(true).catch(e => {
+                            console.error('Conflict toggle load error:', e);
+                            console.error('Stack:', e.stack);
+                            debugLog('Conflict load failed: ' + (e?.message || e));
+                        });
                     }
                 }
             }
