@@ -5,7 +5,7 @@ window.initConflictModule = async function initConflictModule(map, options = {})
   if (!window.L || !map) return null;
 
   const apiBase = (options.apiBase || '').replace(/\/$/, '');
-  const markerLayer = (window.L.markerClusterGroup ? L.markerClusterGroup() : L.layerGroup());
+  const markerLayer = (window.L.markerClusterGroup ? window.L.markerClusterGroup() : window.L.layerGroup());
   map.addLayer(markerLayer);
 
   const state = {
