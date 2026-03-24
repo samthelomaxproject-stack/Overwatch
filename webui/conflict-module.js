@@ -3,10 +3,9 @@
 
 window.initConflictModule = async function initConflictModule(map, options = {}) {
   if (!window.L || !map) return null;
-  console.log('Conflict module init: map=', !!map, 'map._leaflet_id=', map._leaflet_id);
 
   const apiBase = (options.apiBase || '').replace(/\/$/, '');
-  const markerLayer = (window.L.markerClusterGroup ? window.L.markerClusterGroup() : window.L.layerGroup());
+  const markerLayer = (window.L.markerClusterGroup ? L.markerClusterGroup() : L.layerGroup());
   map.addLayer(markerLayer);
 
   const state = {
@@ -39,112 +38,73 @@ window.initConflictModule = async function initConflictModule(map, options = {})
         const url = `${apiBase || 'http://127.0.0.1:8790'}/api/conflict/events?window=${state.windowRange}&limit=500`;
         console.log(`Conflict fetch URL: ${url}`);
         const conflictRes = await fetch(url);
-        console.log(`Conflict fetch status: ${conflictRes.status}, ok: ${conflictRes.ok}`);
-        
         if (conflictRes.ok) {
-          const rawText = await conflictRes.text();
-          console.log('Conflict raw response (first 200 chars):', rawText.substring(0, 200));
-          
-          let data;
-          try {
-            data = JSON.parse(rawText);
-            console.log('Conflict parsed JSON keys:', Object.keys(data));
-            console.log('Conflict data.items type:', Array.isArray(data.items) ? 'array' : typeof data.items);
-          } catch (parseErr) {
-            console.error('JSON parse error:', parseErr);
-            throw new Error(`JSON parse failed: ${parseErr.message}`);
-          }
-          
+          const data = await conflictRes.json();
           conflictEvents = data.items || [];
           console.log(`Conflict: ${conflictEvents.length} events loaded`);
-          if (conflictEvents.length > 0) {
-            console.log('First event sample:', conflictEvents[0]);
-          }
         } else {
-          const errorText = await conflictRes.text();
-          console.error(`Conflict API error: ${conflictRes.status}, body:`, errorText);
-          throw new Error(`API returned ${conflictRes.status}`);
+          console.error(`Conflict API error: ${conflictRes.status}`);
         }
       } catch (e) {
-        console.error('Conflict events fetch error:', e);
-        console.error('Error stack:', e.stack);
-        throw e;
+        console.error('Conflict events unavailable:', e);
       }
 
-      // Ensure layer is on map before adding markers
-      if (!map.hasLayer(markerLayer)) {
-        map.addLayer(markerLayer);
-      }
       markerLayer.clearLayers();
     
     console.log(`Conflict: Rendering ${conflictEvents.length} events`);
-    console.log('Leaflet available:', !!window.L, 'L.circleMarker:', !!window.L?.circleMarker);
     
     // Render conflict events
     let rendered = 0;
     for (const ev of conflictEvents) {
-      try {
-        if (!ev.lat || !ev.lon) {
-          console.log(`Skipping event (no coords): ${ev.title}`);
-          continue;
-        }
-        
-        const colorMap = {
-          conflict: '#ef4444',
-          protest: '#f59e0b',
-          strike: '#eab308',
-          military_activity: '#7c2d12',
-          disaster: '#b91c1c',
-          security_incident: '#dc2626',
-          other: '#6b7280'
-        };
-        
-        const color = colorMap[ev.event_type] || '#6b7280';
-        const m = window.L.circleMarker([ev.lat, ev.lon], {
-          radius: 7,
-          color,
-          fillColor: color,
-          fillOpacity: 0.6,
-          weight: 2,
-        });
-        
-        const published = ev.published_at ? new Date(ev.published_at).toLocaleString() : 'Unknown';
-        
-        m.bindPopup(`
-          <div style="min-width:280px">
-            <b>${ev.title || 'Untitled'}</b><br/>
-            <small style="color:#94a3b8;">${ev.event_type || 'other'} • ${ev.location || 'Unknown location'}</small><br/><br/>
-            <b>Summary:</b> ${ev.summary || 'N/A'}<br/>
-            <b>Source:</b> ${ev.source_name || ev.source_type || 'Unknown'}<br/>
-            <b>Published:</b> ${published}<br/>
-            ${ev.source_url ? `<a href="${ev.source_url}" target="_blank" rel="noopener" style="color:#00d4ff;">View Source →</a>` : ''}
-          </div>
-        `);
-        
-        markerLayer.addLayer(m);
-        rendered++;
-      } catch (err) {
-        console.error('Error rendering event:', ev, err);
+      if (!ev.lat || !ev.lon) {
+        console.log(`Skipping event (no coords): ${ev.title}`);
+        continue;
       }
+      
+      const colorMap = {
+        conflict: '#ef4444',
+        protest: '#f59e0b',
+        strike: '#eab308',
+        military_activity: '#7c2d12',
+        disaster: '#b91c1c',
+        security_incident: '#dc2626',
+        other: '#6b7280'
+      };
+      
+      const color = colorMap[ev.event_type] || '#6b7280';
+      const m = L.circleMarker([ev.lat, ev.lon], {
+        radius: 7,
+        color,
+        fillColor: color,
+        fillOpacity: 0.6,
+        weight: 2,
+      });
+      
+      const published = ev.published_at ? new Date(ev.published_at).toLocaleString() : 'Unknown';
+      
+      m.bindPopup(`
+        <div style="min-width:280px">
+          <b>${ev.title}</b><br/>
+          <small style="color:#94a3b8;">${ev.event_type || 'other'} • ${ev.location || 'Unknown location'}</small><br/><br/>
+          <b>Summary:</b> ${ev.summary || 'N/A'}<br/>
+          <b>Source:</b> ${ev.source_name || ev.source_type}<br/>
+          <b>Published:</b> ${published}<br/>
+          ${ev.source_url ? `<a href="${ev.source_url}" target="_blank" rel="noopener" style="color:#00d4ff;">View Source →</a>` : ''}
+        </div>
+      `);
+      
+      markerLayer.addLayer(m);
+      rendered++;
     }
     
     console.log(`Conflict: ${rendered} markers added to layer`);
     state.lastLoadedAt = Date.now();
-    } catch (err) {
-      console.error('Conflict load error:', err);
-      console.error('Error stack:', err.stack);
-      throw err; // Rethrow original error instead of wrapping it
-    }
   }
 
-  async function setVisible(v) {
+  function setVisible(v) {
     state.visible = !!v;
     if (state.visible) {
       if (!map.hasLayer(markerLayer)) map.addLayer(markerLayer);
-      // Trigger initial load when layer is enabled
-      if (state.lastLoadedAt === 0) {
-        await load();
-      }
     } else if (map.hasLayer(markerLayer)) {
       map.removeLayer(markerLayer);
     }
@@ -157,9 +117,8 @@ window.initConflictModule = async function initConflictModule(map, options = {})
   }
 
   async function loadMeta() {
-    const url = `${apiBase || 'http://127.0.0.1:8790'}/api/conflict/meta`;
-    console.log('Loading conflict meta from:', url);
-    const res = await fetch(url);
+    const u = new URL((apiBase ? apiBase : '') + '/api/meta', window.location.origin).toString();
+    const res = await fetch(u);
     if (!res.ok) throw new Error(`Conflict meta API error: ${res.status}`);
     return await res.json();
   }
@@ -172,6 +131,13 @@ window.initConflictModule = async function initConflictModule(map, options = {})
       if (typeof filters.eventTypes === 'string') state.eventTypes = filters.eventTypes;
       if (typeof filters.dateFrom === 'string') state.dateFrom = filters.dateFrom;
       if (typeof filters.dateTo === 'string') state.dateTo = filters.dateTo;
+    },
+    refreshIfVisible,
+    load,
+    loadMeta,
+  };
+};
+lters.dateTo;
     },
     refreshIfVisible,
     load,
