@@ -15,6 +15,11 @@ CATEGORY_QUERIES = {
     "adsb_receiver": "dump1090 OR tar1090 OR \"port:30003\"",
     "satcom": "VSAT OR iDirect OR Hughes OR Inmarsat OR Viasat OR BGAN",
     "camera": "Hikvision OR Dahua OR Axis OR \"ip camera\"",
+    "repeater": "repeater OR \"amateur radio\" OR DMR OR \"AllStar node\"",
+    "routers": "MikroTik OR Ubiquiti OR EdgeRouter OR OpenWRT",
+    "wireless": "airFiber OR \"wireless bridge\" OR \"point-to-point wireless\"",
+    "ics": "SCADA OR Modbus OR \"Siemens PLC\" OR BACnet",
+    "remote_access": "VNC OR RDP OR TeamViewer",
 }
 
 # Fallback queries for 500 errors - simpler, single-term queries
@@ -23,9 +28,14 @@ CATEGORY_FALLBACK_QUERIES = {
     "adsb_receiver": "dump1090",
     "satcom": "VSAT",
     "camera": "Hikvision",
+    "repeater": "repeater",
+    "routers": "MikroTik",
+    "wireless": "airFiber",
+    "ics": "SCADA",
+    "remote_access": "VNC",
 }
 
-CATEGORY_PRIORITY = ["sdr", "adsb_receiver", "satcom", "camera"]
+CATEGORY_PRIORITY = ["sdr", "adsb_receiver", "satcom", "camera", "repeater", "routers", "wireless", "ics", "remote_access"]
 
 # Queries that use geo: filters are credit-consuming on Shodan.
 # Plain keyword-only queries on page 1 may be free.

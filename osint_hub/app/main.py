@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
 from .acled import fetch_acled
+from . import events, rss_ingest, gdelt_ingest
+from . import conflict_events, conflict_ingest
 
 load_dotenv()  # Load from .env in current directory (bundled)
 
@@ -49,6 +51,7 @@ _last_shodan_meta = {"at": None, "fetched": 0, "ok": None, "error": None}
 def startup():
     global _ingest_thread_started, _shodan_thread_started
     init_db()
+    events.init_events_db()
     if AUTO_INGEST_ENABLED and not _ingest_thread_started:
         t = threading.Thread(target=_ingest_loop, daemon=True)
         t.start()
@@ -474,3 +477,113 @@ def shodan_mock_seed():
 def shodan_mock_clear():
     # cleanup helper to remove only mock records.
     return clear_mock_findings()
+
+
+# ========== OSINT Events Endpoints ==========
+
+@app.get("/api/osint/events")
+def osint_events_get(
+    limit: int = Query(100, ge=1, le=10000),
+    since: Optional[str] = None,
+    event_type: Optional[str] = None,
+    min_confidence: float = Query(0.0, ge=0.0, le=1.0),
+    bbox: Optional[str] = None
+):
+    """Get normalized OSINT events from RSS/GDELT sources."""
+    items = events.get_events(
+        limit=limit,
+        since=since,
+        event_type=event_type,
+        min_confidence=min_confidence,
+        bbox=bbox
+    )
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/osint/events/meta")
+def osint_events_meta():
+    """Get OSINT events metadata and statistics."""
+    return events.get_events_meta()
+
+
+@app.post("/api/osint/ingest/rss")
+def osint_ingest_rss():
+    """Manually trigger RSS feed ingestion."""
+    return rss_ingest.ingest_all_rss_feeds()
+
+
+@app.post("/api/osint/ingest/gdelt")
+def osint_ingest_gdelt(
+    hours_back: int = Query(24, ge=1, le=168),
+    max_results: int = Query(100, ge=1, le=500)
+):
+    """Manually trigger GDELT ingestion."""
+    return gdelt_ingest.ingest_gdelt(hours_back=hours_back, max_results=max_results)
+
+
+@app.post("/api/osint/ingest/all")
+def osint_ingest_all():
+    """Trigger both RSS and GDELT ingestion."""
+    rss_result = rss_ingest.ingest_all_rss_feeds()
+    gdelt_result = gdelt_ingest.ingest_gdelt()
+    
+    return {
+        "ok": True,
+        "rss": rss_result,
+        "gdelt": gdelt_result,
+        "total_new": rss_result.get("total_new", 0) + gdelt_result.get("new", 0)
+    }
+
+
+# ========== Conflict Events Endpoints ==========
+
+@app.post("/api/conflict/refresh")
+def conflict_refresh():
+    """Manually refresh all conflict events (RSS + GDELT)."""
+    return conflict_ingest.refresh_all_conflict_events()
+
+
+@app.get("/api/conflict/events")
+def conflict_events_get(window: str = Query("week", pattern="^(day|week|month)$"), limit: int = Query(500, ge=1, le=2000)):
+    """Get conflict events for time window."""
+    events_list = conflict_events.get_events(window=window, limit=limit)
+    return {"items": events_list, "count": len(events_list), "window": window}
+
+
+@app.get("/api/conflict/feeds")
+def conflict_feeds_list():
+    """List all RSS feeds."""
+    return {"feeds": conflict_events.list_feeds()}
+
+
+@app.post("/api/conflict/feeds")
+def conflict_feeds_create(name: str, url: str, category: str = "general"):
+    """Add new RSS feed."""
+    return conflict_events.add_feed(name, url, category)
+
+
+@app.patch("/api/conflict/feeds/{feed_id}")
+def conflict_feeds_update(feed_id: int, enabled: Optional[bool] = None, name: Optional[str] = None):
+    """Update feed settings."""
+    success = conflict_events.update_feed(feed_id, enabled=enabled, name=name)
+    if not success:
+        raise HTTPException(404, "Feed not found")
+    return {"ok": True}
+
+
+@app.delete("/api/conflict/feeds/{feed_id}")
+def conflict_feeds_delete(feed_id: int):
+    """Delete feed."""
+    success = conflict_events.delete_feed(feed_id)
+    return {"ok": success}
+
+
+@app.post("/api/conflict/feeds/{feed_id}/test")
+def conflict_feeds_test(feed_id: int):
+    """Test fetch a single feed."""
+    feeds = conflict_events.list_feeds()
+    feed = next((f for f in feeds if f["id"] == feed_id), None)
+    if not feed:
+        raise HTTPException(404, "Feed not found")
+    
+    return conflict_ingest.ingest_rss_feed(feed["id"], feed["name"], feed["url"])

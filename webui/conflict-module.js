@@ -10,11 +10,7 @@ window.initConflictModule = async function initConflictModule(map, options = {})
 
   const state = {
     visible: false,
-    windowRange: '1d',
-    country: '',
-    eventTypes: '',
-    dateFrom: '',
-    dateTo: '',
+    windowRange: 'week',  // day, week, month
     lastLoadedAt: 0,
   };
 
@@ -33,37 +29,75 @@ window.initConflictModule = async function initConflictModule(map, options = {})
   }
 
   async function load() {
-    const res = await fetch(buildUrl());
-    if (!res.ok) throw new Error(`Conflict API error: ${res.status}`);
-    const events = await res.json();
+    try {
+      console.log(`Conflict load: fetching window=${state.windowRange}, apiBase=${apiBase}`);
+      
+      // Fetch conflict events (RSS/GDELT) from new persistent storage
+      let conflictEvents = [];
+      try {
+        const url = `${apiBase || 'http://127.0.0.1:8790'}/api/conflict/events?window=${state.windowRange}&limit=500`;
+        console.log(`Conflict fetch URL: ${url}`);
+        const conflictRes = await fetch(url);
+        if (conflictRes.ok) {
+          const data = await conflictRes.json();
+          conflictEvents = data.items || [];
+          console.log(`Conflict: ${conflictEvents.length} events loaded`);
+        } else {
+          console.error(`Conflict API error: ${conflictRes.status}`);
+        }
+      } catch (e) {
+        console.error('Conflict events unavailable:', e);
+      }
 
-    markerLayer.clearLayers();
-    for (const ev of events) {
-      if (!ev.latitude || !ev.longitude) continue;
-      const fatal = Number(ev.fatalities || 0);
-      const color = fatal >= 10 ? '#ef4444' : '#f59e0b';
-      const m = L.circleMarker([ev.latitude, ev.longitude], {
-        radius: Math.max(5, Math.min(14, 4 + (fatal * 0.15))),
+      markerLayer.clearLayers();
+    
+    console.log(`Conflict: Rendering ${conflictEvents.length} events`);
+    
+    // Render conflict events
+    let rendered = 0;
+    for (const ev of conflictEvents) {
+      if (!ev.lat || !ev.lon) {
+        console.log(`Skipping event (no coords): ${ev.title}`);
+        continue;
+      }
+      
+      const colorMap = {
+        conflict: '#ef4444',
+        protest: '#f59e0b',
+        strike: '#eab308',
+        military_activity: '#7c2d12',
+        disaster: '#b91c1c',
+        security_incident: '#dc2626',
+        other: '#6b7280'
+      };
+      
+      const color = colorMap[ev.event_type] || '#6b7280';
+      const m = L.circleMarker([ev.lat, ev.lon], {
+        radius: 7,
         color,
-        weight: 1,
+        fillColor: color,
+        fillOpacity: 0.6,
+        weight: 2,
       });
-
-      const sourceItems = (ev.sources || []).map(s => `<li>${s.url ? `<a href="${s.url}" target="_blank" rel="noopener">${s.name}</a>` : s.name}</li>`).join('')
-        || '<li>No direct links available</li>';
-
+      
+      const published = ev.published_at ? new Date(ev.published_at).toLocaleString() : 'Unknown';
+      
       m.bindPopup(`
         <div style="min-width:280px">
-          <b>${ev.event_type || 'Conflict event'}</b><br/>
-          <small>${ev.event_date || ''} • ${ev.location || ''}, ${ev.country || ''}</small><br/><br/>
-          <b>Actors:</b> ${ev.actor1 || 'N/A'} ${ev.actor2 ? ' vs ' + ev.actor2 : ''}<br/>
-          <b>Fatalities:</b> ${ev.fatalities ?? 'Unknown'}<br/>
-          <b>Notes:</b> ${ev.notes || 'N/A'}<br/>
-          <b>Sources:</b><ul>${sourceItems}</ul>
+          <b>${ev.title}</b><br/>
+          <small style="color:#94a3b8;">${ev.event_type || 'other'} • ${ev.location || 'Unknown location'}</small><br/><br/>
+          <b>Summary:</b> ${ev.summary || 'N/A'}<br/>
+          <b>Source:</b> ${ev.source_name || ev.source_type}<br/>
+          <b>Published:</b> ${published}<br/>
+          ${ev.source_url ? `<a href="${ev.source_url}" target="_blank" rel="noopener" style="color:#00d4ff;">View Source →</a>` : ''}
         </div>
       `);
-
+      
       markerLayer.addLayer(m);
+      rendered++;
     }
+    
+    console.log(`Conflict: ${rendered} markers added to layer`);
     state.lastLoadedAt = Date.now();
   }
 
@@ -97,6 +131,13 @@ window.initConflictModule = async function initConflictModule(map, options = {})
       if (typeof filters.eventTypes === 'string') state.eventTypes = filters.eventTypes;
       if (typeof filters.dateFrom === 'string') state.dateFrom = filters.dateFrom;
       if (typeof filters.dateTo === 'string') state.dateTo = filters.dateTo;
+    },
+    refreshIfVisible,
+    load,
+    loadMeta,
+  };
+};
+lters.dateTo;
     },
     refreshIfVisible,
     load,

@@ -369,11 +369,12 @@
 
                         <label class="tac-label" style="display:block; margin-bottom: 4px;">Conflict Window</label>
                         <select id="sidebarConflictWindow" class="tac-input" style="width:100%; margin-bottom: var(--space-sm);">
-                            <option value="7d">Week</option>
-                            <option value="1d">Day</option>
-                            <option value="30d">Month</option>
-                            <option value="custom">Custom</option>
+                            <option value="week" selected>Week</option>
+                            <option value="day">Day</option>
+                            <option value="month">Month</option>
                         </select>
+                        
+                        <button type="button" id="btnRefreshConflict" style="width:100%;padding:6px;margin-bottom:var(--space-sm);font-size:11px;background:rgba(0,212,255,0.2);border:1px solid var(--accent-cyan);color:var(--accent-cyan);border-radius:4px;cursor:pointer;">🔄 Refresh Events</button>
 
 
                         <label class="tac-label" style="display:block; margin-bottom: 4px;">Heatmap Intensity</label>
@@ -391,6 +392,22 @@
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="cctv"> Cams</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="conflict"> Conflict</label>
                             <label class="tac-check-row"><input type="checkbox" data-sidebar-layer="shodan"> Shodan <button type="button" id="btnShodanManual" style="margin-left:6px;padding:2px 6px;font-size:10px;" title="Search Shodan for current view" disabled>🔍</button></label>
+                            <div style="margin-left:20px;font-size:11px;color:#94a3b8;">
+                                <div style="margin-bottom:4px;color:#cbd5e1;font-weight:600;">📡 RF / COMMS</div>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="sdr" checked> SDR</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="adsb_receiver" checked> ADS-B Receivers</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="satcom" checked> Satcom</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="repeater"> Amateur Radio</label>
+                                <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🌐 NETWORK</div>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="routers"> Routers</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="wireless"> Wireless Bridges</label>
+                                <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🎥 SURVEILLANCE</div>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="camera" checked> Cameras</label>
+                                <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🏭 CRITICAL INFRA</div>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="ics"> ICS / SCADA</label>
+                                <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🧠 ACCESS</div>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="remote_access"> Remote Access</label>
+                            </div>
                         </div>
                         <div style="margin-top:4px;font-size:0.625rem;color:var(--text-muted);font-family:var(--font-mono);">Scroll list for additional overlays</div>
 
@@ -735,6 +752,8 @@ ALPHA-3 | REAR"></textarea>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="conflict-module.js"></script>
     <script>
+        alert('JavaScript loaded! Version: 23:25');
+        
         // State
         let map = null;
         let myLocationMarker = null;
@@ -746,6 +765,17 @@ ALPHA-3 | REAR"></textarea>
         let conflictModule = null;
         const conflictFilters = { windowRange: '1d', country: '', eventTypes: '', dateFrom: '', dateTo: '' };
         let shodanMarkers = {};
+        let shodanCategoryEnabled = {
+            sdr: true,
+            adsb_receiver: true,
+            satcom: true,
+            camera: true,
+            repeater: false,
+            routers: false,
+            wireless: false,
+            ics: false,
+            remote_access: false
+        };
         let lastShodanFetchAt = 0;
         let shodanManualBtn = null;
 
@@ -1021,7 +1051,20 @@ ALPHA-3 | REAR"></textarea>
                 inp.addEventListener('change', () => {
                     const layer = inp.getAttribute('data-sidebar-layer');
                     if (!layer) return;
+                    alert(`Checkbox changed: layer=${layer}, checked=${inp.checked}`);
                     toggleLayer(layer, !!inp.checked);
+                });
+            });
+            
+            document.querySelectorAll('[data-shodan-cat]').forEach(inp => {
+                inp.addEventListener('change', () => {
+                    const cat = inp.getAttribute('data-shodan-cat');
+                    if (cat && shodanCategoryEnabled.hasOwnProperty(cat)) {
+                        shodanCategoryEnabled[cat] = inp.checked;
+                        if (layerVisible.shodan) {
+                            pollShodanMarkers(true).catch(() => {});
+                        }
+                    }
                 });
             });
             document.querySelectorAll('[data-sidebar-sat-group]').forEach(inp => {
@@ -1108,6 +1151,8 @@ ALPHA-3 | REAR"></textarea>
 
         async function pollShodanMarkers(force=false) {
             const zoom = map ? map.getZoom() : 0;
+            console.log(`pollShodanMarkers: zoom=${zoom}, force=${force}, SHODAN_MIN_ZOOM_DISPLAY=${SHODAN_MIN_ZOOM_DISPLAY}`);
+            
             // Zoom gate: clear markers below display threshold.
             if (zoom < SHODAN_MIN_ZOOM_DISPLAY) { clearShodanMarkers(); return; }
             // Skip cache refresh below discovery threshold; existing markers still visible.
@@ -1116,15 +1161,22 @@ ALPHA-3 | REAR"></textarea>
             if (!force && (now - lastShodanFetchAt) < 30000) return;
             lastShodanFetchAt = now;
             try {
-                const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8789')).replace(/\/$/, '');
+                const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8790')).replace(/\/$/, '');
                 
                 // Always fetch ALL globally collected results - no bbox filter
                 // Build up intelligence picture over time across all searched regions
-                const url = apiBase + '/api/shodan/events?limit=10000';
+                const selectedCats = Object.keys(shodanCategoryEnabled).filter(k => shodanCategoryEnabled[k]);
+                const categoryParam = selectedCats.length > 0 ? `&category=${selectedCats.join(',')}` : '';
+                const url = apiBase + '/api/shodan/events?limit=10000' + categoryParam;
+                console.log(`Shodan fetch: ${url}, categories: ${selectedCats.join(',')}`);
                 const resp = await fetch(url);
-                if (!resp.ok) return;
+                if (!resp.ok) {
+                    console.error(`Shodan API error: ${resp.status}`);
+                    return;
+                }
                 const payload = await resp.json();
                 const rows = Array.isArray(payload?.items) ? payload.items : [];
+                console.log(`Shodan: Received ${rows.length} results`);
                 const seen = new Set();
                 rows.forEach(r => {
                     const key = String(r.id || (r.ip + ':' + r.port));
@@ -1136,7 +1188,9 @@ ALPHA-3 | REAR"></textarea>
                         html: '<div style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 0 3px rgba(0,0,0,0.8));"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="12" rx="10" ry="6" fill="#E1251B" stroke="#000" stroke-width="0.5"/><circle cx="12" cy="12" r="3.5" fill="#000"/><circle cx="12" cy="12" r="1.5" fill="#fff"/></svg></div>',
                         iconSize: [18,18], iconAnchor: [9,9]
                     });
-                    const popup = '<div style="min-width:220px;">' + '<b>Shodan: ' + (r.ip || '-') + ':' + (r.port || '-') + '</b><br>' + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>' + '<b>Org:</b> ' + (r.org || '-') + '<br>' + '<b>ASN:</b> ' + (r.asn || '-') + '<br>' + '<b>Product:</b> ' + (r.product || '-') + '<br>' + '<b>Category:</b> ' + (r.category || '-') + '<br>' + '<b>Source:</b> Shodan (Hub Cache)</div>';
+                    const ipPort = (r.ip || '-') + ':' + (r.port || '-');
+                    const ipLink = r.ip ? `<a href="http://${ipPort}" target="_blank" rel="noopener" style="color:var(--accent-cyan);text-decoration:none;">${ipPort}</a>` : ipPort;
+                    const popup = '<div style="min-width:220px;">' + '<b>Shodan: ' + ipLink + '</b><br>' + '<span style="font-size:11px;color:#94a3b8;">' + (r.city || '-') + ', ' + (r.country_name || r.country_code || '-') + '</span><br>' + '<b>Org:</b> ' + (r.org || '-') + '<br>' + '<b>ASN:</b> ' + (r.asn || '-') + '<br>' + '<b>Product:</b> ' + (r.product || '-') + '<br>' + '<b>Category:</b> ' + (r.category || '-') + '<br>' + '<b>Source:</b> Shodan (Hub Cache)</div>';
                     let m = shodanMarkers[key];
                     if (!m) { m = L.marker([lat, lon], { icon }); shodanMarkers[key] = m; }
                     else { m.setLatLng([lat, lon]); m.setIcon(icon); }
@@ -1182,11 +1236,14 @@ ALPHA-3 | REAR"></textarea>
             
             const b = map.getBounds();
             const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
-            const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8789')).replace(/\/$/, '');
+            const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8790')).replace(/\/$/, '');
+            
+            const selectedCats = Object.keys(shodanCategoryEnabled).filter(k => shodanCategoryEnabled[k]);
+            const categoryParam = selectedCats.length > 0 ? `&category=${selectedCats.join(',')}` : '';
             
             debugLog(forceSearch ? '🛰️ Requesting FORCE Shodan ingest...' : '🛰️ Requesting cached Shodan results...');
             
-            fetch(`${apiBase}/api/shodan/ingest?bbox=${encodeURIComponent(bbox)}&force=${forceSearch}`, { method: 'POST' })
+            fetch(`${apiBase}/api/shodan/ingest?bbox=${encodeURIComponent(bbox)}${categoryParam}&force=${forceSearch}`, { method: 'POST' })
                 .then(async resp => {
                     if (!resp.ok) {
                         const txt = await resp.text();
@@ -1281,6 +1338,11 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (layer === 'shodan') {
+                alert(`Shodan layer toggled ${layerVisible.shodan ? 'ON' : 'OFF'}\nMarkers in cache: ${Object.keys(shodanMarkers).length}`);
+                
+                const statusEl = document.getElementById('shodanStatus');
+                if (statusEl) statusEl.textContent = layerVisible.shodan ? '🔴' : '●';
+                
                 debugLog(`🛰️ Shodan layer toggled ${layerVisible.shodan ? 'ON' : 'OFF'}`);
                 Object.values(shodanMarkers).forEach(m => {
                     if (layerVisible.shodan) {
@@ -1290,7 +1352,16 @@ ALPHA-3 | REAR"></textarea>
                     }
                 });
                 if (layerVisible.shodan) {
-                    pollShodanMarkers(true).catch(() => {});
+                    if (statusEl) statusEl.textContent = '⏳';
+                    alert('About to call pollShodanMarkers...');
+                    pollShodanMarkers(true).then((result) => {
+                        alert(`Shodan poll completed. Markers now: ${Object.keys(shodanMarkers).length}`);
+                        if (statusEl) statusEl.textContent = '🟢';
+                        setTimeout(() => { if (statusEl) statusEl.textContent = '●'; }, 3000);
+                    }).catch((err) => {
+                        alert(`Shodan poll FAILED: ${err.message || err}`);
+                        if (statusEl) statusEl.textContent = '🔴';
+                    });
                 }
                 updateShodanManualBtn();
             }
@@ -3928,8 +3999,12 @@ out body;
         async function pollHub() {
             if (!window.__TAURI__) return; // Only in Tauri context
             try {
+                const retentionSelect = document.getElementById('heatmapRetention');
+                const maxAge = retentionSelect ? parseInt(retentionSelect.value) : 604800;
+                
                 const result = await window.__TAURI__.core.invoke('get_sigint_delta', {
-                    cursor: hubPollCursor
+                    cursor: hubPollCursor,
+                    maxAgeSecs: maxAge
                 });
                 if (result && result.tiles) {
                     // Debug: log tile counts
@@ -6260,6 +6335,20 @@ out body;
             debugLog('App initialized, waiting for Tauri...');
 
             console.log('Overwatch v0.2.0 - Tactical UI Loaded');
+            
+            // Debug: Force Shodan poll after 5 seconds
+            setTimeout(() => {
+                console.log('DEBUG: Force polling Shodan markers...');
+                if (typeof pollShodanMarkers === 'function') {
+                    pollShodanMarkers(true).then(() => {
+                        console.log('DEBUG: Shodan poll completed');
+                    }).catch(e => {
+                        console.error('DEBUG: Shodan poll failed:', e);
+                    });
+                } else {
+                    console.error('DEBUG: pollShodanMarkers function not found');
+                }
+            }, 5000);
         } catch (e) {
             console.error('Initialization error:', e);
             alert('Error initializing Overwatch. Please restart the app.');
@@ -6267,3 +6356,45 @@ out body;
     </script>
 </body>
 </html>
+<script>
+// Conflict refresh button handler
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('btnRefreshConflict');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            btn.textContent = '⏳ Fetching...';
+            
+            try {
+                const apiBase = 'http://127.0.0.1:8790';
+                const refreshRes = await fetch(`${apiBase}/api/conflict/refresh`, { method: 'POST' });
+                
+                let totalNew = 0;
+                if (refreshRes.ok) {
+                    const data = await refreshRes.json();
+                    totalNew = data.total_new || 0;
+                }
+                
+                btn.textContent = totalNew > 0 ? `✓ ${totalNew}` : '✓ OK';
+                setTimeout(() => {
+                    btn.textContent = '🔄 Refresh Events';
+                    btn.disabled = false;
+                }, 2000);
+                
+                if (window.conflictModule?.refreshIfVisible) {
+                    await window.conflictModule.refreshIfVisible(true);
+                }
+            } catch (e) {
+                btn.textContent = '✗ ERR';
+                console.error('Conflict refresh error:', e);
+                setTimeout(() => {
+                    btn.textContent = '🔄 Refresh Events';
+                    btn.disabled = false;
+                }, 2000);
+            }
+        });
+    } else {
+        console.warn('btnRefreshConflict button not found');
+    }
+});
+</script>

@@ -1249,8 +1249,9 @@ fn start_sweeper() -> Result<String, String> {
 /// Returns merged tile data since the given cursor timestamp.
 /// JS polls this every 5 seconds when hub is running.
 #[tauri::command]
-fn get_sigint_delta(cursor: u64) -> serde_json::Value {
-    let url = format!("http://127.0.0.1:8789/api/delta?device_id=overwatch-ui&cursor={cursor}");
+fn get_sigint_delta(cursor: u64, max_age_secs: Option<u64>) -> serde_json::Value {
+    let max_age = max_age_secs.unwrap_or(604800); // Default 1 week
+    let url = format!("http://127.0.0.1:8789/api/delta?device_id=overwatch-ui&cursor={cursor}&max_age_secs={max_age}");
     match ureq::get(&url).call() {
         Ok(resp) => {
             let body = resp.into_string().unwrap_or_default();

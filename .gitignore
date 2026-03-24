@@ -34,3 +34,8 @@ meshtastic_bridge.py
 node_modules/
 osint_hub/venv/
 osint_hub/conflict_events.db.old
+
+# Python venv and temp files
+osint_hub/venv/
+osint_hub/conflict_events.db.old
+osint_hub/conflict_events.db

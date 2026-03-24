@@ -367,16 +367,18 @@ impl HubDb {
 
     /// Return tiles updated since cursor_ts for a given device.
     /// Values are time-decayed before sending so renderers show fading heat.
-    pub fn get_delta(&self, _device_id: &str, cursor_ts: u64) -> Result<TileDelta, Error> {
+    pub fn get_delta(&self, _device_id: &str, cursor_ts: u64, max_age_secs: u64) -> Result<TileDelta, Error> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let cutoff = (now as i64).saturating_sub(max_age_secs as i64);
+        
         let mut stmt = self.conn.prepare(
             r#"SELECT tile_id, time_bucket, sensor_type, dimension,
                       mean_val, max_val, sample_count, confidence, updated_at,
                       last_device_id, last_source_type
-               FROM merged_tiles WHERE updated_at > ?1
+               FROM merged_tiles WHERE updated_at > ?1 AND updated_at >= ?2
                ORDER BY updated_at ASC LIMIT 1000"#,
         )?;
 
@@ -390,7 +392,7 @@ impl HubDb {
             last_source_type: Option<String>,
         }
 
-        let rows = stmt.query_map(params![cursor_ts as i64], |r| {
+        let rows = stmt.query_map(params![cursor_ts as i64, cutoff], |r| {
             Ok(Row {
                 tile_id:      r.get(0)?,
                 time_bucket:  r.get::<_, i64>(1)? as u64,
@@ -1197,10 +1199,13 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             let cursor = parse_query_param(p, "cursor")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0u64);
+            let max_age = parse_query_param(p, "max_age_secs")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(604800u64);  // Default 1 week
             let device_id = parse_query_param(p, "device_id").unwrap_or_default();
 
             let s = state.lock().unwrap();
-            match s.db.get_delta(&device_id, cursor) {
+            match s.db.get_delta(&device_id, cursor, max_age) {
                 Ok(delta) => (200, serde_json::to_string(&delta).unwrap()),
                 Err(e) => (500, format!(r#"{{"error":"{e}"}}"#)),
             }
@@ -1234,7 +1239,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
         ("GET", p) if p.starts_with("/api/pli") => {
             let max_age = parse_query_param(p, "max_age_secs")
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(3600u64);
+                .unwrap_or(2592000u64);  // 30 days default
             let s = state.lock().unwrap();
             match s.db.get_pli_points(max_age) {
                 Ok(points) => (200, serde_json::to_string(&points).unwrap()),
@@ -1485,7 +1490,7 @@ mod tests {
     #[test]
     fn schema_creates_tables() {
         let db = make_db();
-        let delta = db.get_delta("test", 0).unwrap();
+        let delta = db.get_delta("test", 0, 604800).unwrap();
         assert!(delta.tiles.is_empty() || delta.tiles[0].tiles.is_empty());
     }
 
@@ -1545,7 +1550,7 @@ mod tests {
         update.tiles = vec![tile];
         db.merge_update(&update).unwrap();
 
-        let delta = db.get_delta("node-001", 0).unwrap();
+        let delta = db.get_delta("node-001", 0, 604800).unwrap();
         assert!(!delta.tiles.is_empty());
         assert!(delta.cursor > 0);
     }
