@@ -888,7 +888,15 @@ ALPHA-3 | REAR"></textarea>
 
             // Conflict module init (OSINT events)
             if (window.initConflictModule && !conflictModule) {
-                const apiBase = (window.location.origin || '').replace(/:.*$/, ':8790');
+                // Derive Conflict API base from hub URL (8789 → 8790)
+                let apiBase = 'http://127.0.0.1:8790';
+                try {
+                    const hubBase = new URL(hubUrl || 'http://localhost:8789');
+                    apiBase = `${hubBase.protocol}//${hubBase.hostname}:8790`;
+                } catch (e) {
+                    console.warn('Failed to parse hubUrl, using fallback:', apiBase);
+                }
+                console.log('Conflict module apiBase:', apiBase);
                 initConflictModule(map, { apiBase })
                     .then(async (mod) => {
                         conflictModule = mod;
@@ -1356,7 +1364,15 @@ ALPHA-3 | REAR"></textarea>
                     }
                     
                     console.log('🔄 Initializing conflict module...');
-                    const apiBase = 'http://127.0.0.1:8790';
+                    // Derive from hub URL
+                    let apiBase = 'http://127.0.0.1:8790';
+                    try {
+                        const hubBase = new URL(hubUrl || 'http://localhost:8789');
+                        apiBase = `${hubBase.protocol}//${hubBase.hostname}:8790`;
+                    } catch (e) {
+                        console.warn('Failed to parse hubUrl, using fallback:', apiBase);
+                    }
+                    console.log('Conflict module apiBase (on-demand):', apiBase);
                     initConflictModule(map, { apiBase })
                         .then(async (mod) => {
                             conflictModule = mod;
