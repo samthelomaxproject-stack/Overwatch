@@ -1041,22 +1041,20 @@ fn resolve_shodan_db_path() -> Option<String> {
     None
 }
 
-fn shodan_events_from_cache(path: &str, category_filter: Option<&str>, limit: usize) -> Result<Vec<serde_json::Value>, String> {
+fn shodan_events_from_cache(path: &str, category_filter: Option<&str>, _limit: usize) -> Result<Vec<serde_json::Value>, String> {
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
 
     let mut sql = "SELECT id, category, ip, port, org, asn, product, lat, lon, city, country_name, country_code, region_key, updated_at                    FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL".to_string();
     if category_filter.is_some() {
         sql.push_str(" AND category = ?1");
     }
-    sql.push_str(" ORDER BY datetime(updated_at) DESC LIMIT ?2");
+    sql.push_str(" ORDER BY datetime(updated_at) DESC");
 
-    // Render limit for cached results — independent of discovery budget.
-    let lim = limit.clamp(1, 2000) as i64;
     let mut out = Vec::new();
 
     if let Some(cat) = category_filter {
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![cat, lim], |r| {
+        let rows = stmt.query_map(params![cat], |r| {
             Ok(serde_json::json!({
                 "id": r.get::<_, String>(0)?,
                 "category": r.get::<_, String>(1).unwrap_or_default(),
@@ -1080,9 +1078,9 @@ fn shodan_events_from_cache(path: &str, category_filter: Option<&str>, limit: us
             out.push(row.map_err(|e| e.to_string())?);
         }
     } else {
-        let sql = "SELECT id, category, ip, port, org, asn, product, lat, lon, city, country_name, country_code, region_key, updated_at                    FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL                    ORDER BY datetime(updated_at) DESC LIMIT ?1";
+        let sql = "SELECT id, category, ip, port, org, asn, product, lat, lon, city, country_name, country_code, region_key, updated_at                    FROM shodan_findings WHERE lat IS NOT NULL AND lon IS NOT NULL                    ORDER BY datetime(updated_at) DESC";
         let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![lim], |r| {
+        let rows = stmt.query_map([], |r| {
             Ok(serde_json::json!({
                 "id": r.get::<_, String>(0)?,
                 "category": r.get::<_, String>(1).unwrap_or_default(),
@@ -1413,14 +1411,9 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
 
         ("GET", p) if p.starts_with("/api/shodan/events") => {
             let category = parse_query_param(p, "category");
-            // Render limit is independent of discovery budget — return all cached findings.
-            let limit = parse_query_param(p, "limit")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(100000)
-                .clamp(1, 100000);
-
+            // Return all cached findings - no limits
             match resolve_shodan_db_path() {
-                Some(db_path) => match shodan_events_from_cache(&db_path, category.as_deref(), limit) {
+                Some(db_path) => match shodan_events_from_cache(&db_path, category.as_deref(), 0) {
                     Ok(items) => {
                         let region_keys: Vec<String> = items.iter()
                             .filter_map(|i| i.get("region_key").and_then(|v| v.as_str()).map(|s| s.to_string()))
