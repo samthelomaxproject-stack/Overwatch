@@ -1337,12 +1337,34 @@ ALPHA-3 | REAR"></textarea>
                 }
             }
 
-            if (layer === 'conflict' && conflictModule) {
+            if (layer === 'conflict') {
                 debugLog(`🌍 Conflict layer toggled ${layerVisible.conflict ? 'ON' : 'OFF'}`);
-                conflictModule.setVisible(!!layerVisible.conflict);
-                if (layerVisible.conflict) {
-                    conflictModule.setFilters(conflictFilters);
-                    conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict load failed: ' + (e?.message || e)));
+                
+                // Initialize module on first toggle if not already created
+                if (!conflictModule && layerVisible.conflict && window.initConflictModule && map) {
+                    const apiBase = 'http://127.0.0.1:8790';
+                    initConflictModule(map, { apiBase })
+                        .then(async (mod) => {
+                            conflictModule = mod;
+                            window.conflictModule = mod;
+                            console.log('✅ Conflict module initialized on toggle');
+                            if (conflictModule) {
+                                conflictModule.setFilters(conflictFilters);
+                                conflictModule.setVisible(true);
+                                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict load failed: ' + (e?.message || e)));
+                            }
+                        })
+                        .catch(e => {
+                            console.error('❌ Conflict module init failed:', e);
+                            debugLog('Conflict module init failed: ' + (e?.message || e));
+                        });
+                } else if (conflictModule) {
+                    // Module already exists, just toggle visibility
+                    conflictModule.setVisible(!!layerVisible.conflict);
+                    if (layerVisible.conflict) {
+                        conflictModule.setFilters(conflictFilters);
+                        conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict load failed: ' + (e?.message || e)));
+                    }
                 }
             }
 
