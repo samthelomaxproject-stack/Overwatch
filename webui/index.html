@@ -6378,12 +6378,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.disabled = false;
                 }, 2000);
                 
-                if (window.conflictModule?.refreshIfVisible) {
-                    await window.conflictModule.refreshIfVisible(true);
+                if (window.conflictModule) {
+                    // Force reload regardless of visibility
+                    await window.conflictModule.load();
+                    console.log('Conflict layer reloaded after refresh');
+                } else {
+                    console.warn('Conflict module not initialized - toggle Conflict layer on first');
                 }
             } catch (e) {
                 btn.textContent = '✗ ERR';
                 console.error('Conflict refresh error:', e);
+                console.error('Error stack:', e.stack);
+                debugLog(`Conflict refresh failed: ${e.message || e}`);
                 setTimeout(() => {
                     btn.textContent = '🔄 Refresh Events';
                     btn.disabled = false;
