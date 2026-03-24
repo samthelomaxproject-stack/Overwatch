@@ -44,9 +44,11 @@ window.initConflictModule = async function initConflictModule(map, options = {})
           console.log(`Conflict: ${conflictEvents.length} events loaded`);
         } else {
           console.error(`Conflict API error: ${conflictRes.status}`);
+          throw new Error(`API returned ${conflictRes.status}`);
         }
       } catch (e) {
-        console.error('Conflict events unavailable:', e);
+        console.error('Conflict events fetch error:', e);
+        throw e;
       }
 
       markerLayer.clearLayers();
@@ -99,6 +101,10 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     
     console.log(`Conflict: ${rendered} markers added to layer`);
     state.lastLoadedAt = Date.now();
+    } catch (err) {
+      console.error('Conflict load error:', err);
+      throw new Error(`Load failed: ${err.message || err}`);
+    }
   }
 
   function setVisible(v) {
