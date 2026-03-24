@@ -62,45 +62,49 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     // Render conflict events
     let rendered = 0;
     for (const ev of conflictEvents) {
-      if (!ev.lat || !ev.lon) {
-        console.log(`Skipping event (no coords): ${ev.title}`);
-        continue;
+      try {
+        if (!ev.lat || !ev.lon) {
+          console.log(`Skipping event (no coords): ${ev.title}`);
+          continue;
+        }
+        
+        const colorMap = {
+          conflict: '#ef4444',
+          protest: '#f59e0b',
+          strike: '#eab308',
+          military_activity: '#7c2d12',
+          disaster: '#b91c1c',
+          security_incident: '#dc2626',
+          other: '#6b7280'
+        };
+        
+        const color = colorMap[ev.event_type] || '#6b7280';
+        const m = L.circleMarker([ev.lat, ev.lon], {
+          radius: 7,
+          color,
+          fillColor: color,
+          fillOpacity: 0.6,
+          weight: 2,
+        });
+        
+        const published = ev.published_at ? new Date(ev.published_at).toLocaleString() : 'Unknown';
+        
+        m.bindPopup(`
+          <div style="min-width:280px">
+            <b>${ev.title || 'Untitled'}</b><br/>
+            <small style="color:#94a3b8;">${ev.event_type || 'other'} • ${ev.location || 'Unknown location'}</small><br/><br/>
+            <b>Summary:</b> ${ev.summary || 'N/A'}<br/>
+            <b>Source:</b> ${ev.source_name || ev.source_type || 'Unknown'}<br/>
+            <b>Published:</b> ${published}<br/>
+            ${ev.source_url ? `<a href="${ev.source_url}" target="_blank" rel="noopener" style="color:#00d4ff;">View Source →</a>` : ''}
+          </div>
+        `);
+        
+        markerLayer.addLayer(m);
+        rendered++;
+      } catch (err) {
+        console.error('Error rendering event:', ev, err);
       }
-      
-      const colorMap = {
-        conflict: '#ef4444',
-        protest: '#f59e0b',
-        strike: '#eab308',
-        military_activity: '#7c2d12',
-        disaster: '#b91c1c',
-        security_incident: '#dc2626',
-        other: '#6b7280'
-      };
-      
-      const color = colorMap[ev.event_type] || '#6b7280';
-      const m = L.circleMarker([ev.lat, ev.lon], {
-        radius: 7,
-        color,
-        fillColor: color,
-        fillOpacity: 0.6,
-        weight: 2,
-      });
-      
-      const published = ev.published_at ? new Date(ev.published_at).toLocaleString() : 'Unknown';
-      
-      m.bindPopup(`
-        <div style="min-width:280px">
-          <b>${ev.title}</b><br/>
-          <small style="color:#94a3b8;">${ev.event_type || 'other'} • ${ev.location || 'Unknown location'}</small><br/><br/>
-          <b>Summary:</b> ${ev.summary || 'N/A'}<br/>
-          <b>Source:</b> ${ev.source_name || ev.source_type}<br/>
-          <b>Published:</b> ${published}<br/>
-          ${ev.source_url ? `<a href="${ev.source_url}" target="_blank" rel="noopener" style="color:#00d4ff;">View Source →</a>` : ''}
-        </div>
-      `);
-      
-      markerLayer.addLayer(m);
-      rendered++;
     }
     
     console.log(`Conflict: ${rendered} markers added to layer`);
