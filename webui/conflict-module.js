@@ -103,7 +103,8 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     state.lastLoadedAt = Date.now();
     } catch (err) {
       console.error('Conflict load error:', err);
-      throw new Error(`Load failed: ${err.message || err}`);
+      console.error('Error stack:', err.stack);
+      throw err; // Rethrow original error instead of wrapping it
     }
   }
 
