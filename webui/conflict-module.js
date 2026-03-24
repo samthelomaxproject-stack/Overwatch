@@ -7,40 +7,33 @@ window.initConflictModule = function(map, opts) {
 
   async function load() {
     const url = `${base}/api/conflict/events?window=week`;
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const json = await res.json();
-      const items = json.items || json || [];
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const json = await res.json();
+    const items = json.items || json || [];
+    
+    layer.clearLayers();
+    markers = {};
+    
+    items.forEach(ev => {
+      const lat = Number(ev.lat || ev.latitude);
+      const lon = Number(ev.lon || ev.longitude);
+      if (!isFinite(lat) || !isFinite(lon)) return;
       
-      layer.clearLayers();
-      markers = {};
-      
-      items.forEach(ev => {
-        const lat = Number(ev.lat || ev.latitude);
-        const lon = Number(ev.lon || ev.longitude);
-        if (!isFinite(lat) || !isFinite(lon)) return;
-        
-        const m = window.L.circleMarker([lat, lon], {
-          radius: 6,
-          color: '#ef4444',
-          fillColor: '#ef4444',
-          fillOpacity: 0.6,
-          weight: 2
-        });
-        
-        m.bindPopup(`<b>${ev.title || 'Event'}</b><br>${ev.location || ''}`);
-        layer.addLayer(m);
-        markers[ev.id || Math.random()] = m;
-      });
-    } catch(e) {}
+      const m = window.L.marker([lat, lon]);
+      m.bindPopup(`<b>${ev.title || 'Event'}</b><br>${ev.location || ''}`);
+      layer.addLayer(m);
+      markers[ev.id || Math.random()] = m;
+    });
+    
+    if (visible && !map.hasLayer(layer)) map.addLayer(layer);
   }
 
-  function setVisible(v) {
+  async function setVisible(v) {
     visible = !!v;
     if (visible) {
+      await load();
       if (!map.hasLayer(layer)) map.addLayer(layer);
-      if (Object.keys(markers).length === 0) load();
     } else {
       if (map.hasLayer(layer)) map.removeLayer(layer);
     }
