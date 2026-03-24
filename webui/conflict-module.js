@@ -65,10 +65,11 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     state.lastLoadedAt = Date.now();
   }
 
-  function setVisible(v) {
+  async function setVisible(v) {
     state.visible = !!v;
     if (state.visible) {
       if (!map.hasLayer(markerLayer)) map.addLayer(markerLayer);
+      if (state.lastLoadedAt === 0) await load();
     } else if (map.hasLayer(markerLayer)) {
       map.removeLayer(markerLayer);
     }
