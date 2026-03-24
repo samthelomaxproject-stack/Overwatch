@@ -3,6 +3,7 @@
 
 window.initConflictModule = async function initConflictModule(map, options = {}) {
   if (!window.L || !map) return null;
+  console.log('Conflict module init: map=', !!map, 'map._leaflet_id=', map._leaflet_id);
 
   const apiBase = (options.apiBase || '').replace(/\/$/, '');
   const markerLayer = (window.L.markerClusterGroup ? window.L.markerClusterGroup() : window.L.layerGroup());
@@ -80,7 +81,7 @@ window.initConflictModule = async function initConflictModule(map, options = {})
         };
         
         const color = colorMap[ev.event_type] || '#6b7280';
-        const m = L.circleMarker([ev.lat, ev.lon], {
+        const m = window.L.circleMarker([ev.lat, ev.lon], {
           radius: 7,
           color,
           fillColor: color,
