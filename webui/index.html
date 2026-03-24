@@ -1144,8 +1144,6 @@ ALPHA-3 | REAR"></textarea>
         const SHODAN_MIN_ZOOM_DISCOVERY = 9;
 
         function clearShodanMarkers() {
-            if (shodanClusterGroup) shodanClusterGroup.clearLayers();
-            if (shodanClusterGroup && map.hasLayer(shodanClusterGroup)) map.removeLayer(shodanClusterGroup);
             Object.keys(shodanMarkers).forEach(k => {
                 if (map.hasLayer(shodanMarkers[k])) map.removeLayer(shodanMarkers[k]);
                 delete shodanMarkers[k];
@@ -1158,11 +1156,8 @@ ALPHA-3 | REAR"></textarea>
             lastShodanFetchAt = now;
             try {
                 const apiBase = (hubUrl || 'http://127.0.0.1:8789').replace(/\/$/, '');
-                
-                const selectedCats = Object.keys(shodanCategoryEnabled).filter(k => shodanCategoryEnabled[k]);
-                const categoryParam = selectedCats.length > 0 ? `&category=${selectedCats.join(',')}` : '';
-                const url = apiBase + '/api/shodan/events?limit=10000' + categoryParam;
-                console.log(`Shodan fetch: ${url}, categories: ${selectedCats.join(',')}`);
+                const url = apiBase + '/api/shodan/events';
+                console.log(`Shodan fetch: ${url}`);
                 const resp = await fetch(url);
                 if (!resp.ok) {
                     console.error(`Shodan API error: ${resp.status}`);
@@ -1199,21 +1194,13 @@ ALPHA-3 | REAR"></textarea>
                         marker.setIcon(icon);
                     }
                     marker.bindPopup(popup);
-                    if (layerVisible.shodan) {
-                        if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
-                            shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
-                        }
-                        if (shodanClusterGroup) {
-                            if (!map.hasLayer(shodanClusterGroup)) map.addLayer(shodanClusterGroup);
-                            if (!shodanClusterGroup.hasLayer(marker)) shodanClusterGroup.addLayer(marker);
-                        } else if (!map.hasLayer(marker)) {
-                            marker.addTo(map);
-                        }
+                    // Always add to map directly if layer is visible - no clustering
+                    if (layerVisible.shodan && !map.hasLayer(marker)) {
+                        marker.addTo(map);
                     }
                 });
                 Object.keys(shodanMarkers).forEach(k => {
                     if (!seen.has(k)) {
-                        if (shodanClusterGroup && shodanClusterGroup.hasLayer(shodanMarkers[k])) shodanClusterGroup.removeLayer(shodanMarkers[k]);
                         if (map.hasLayer(shodanMarkers[k])) map.removeLayer(shodanMarkers[k]);
                         delete shodanMarkers[k];
                     }
@@ -1356,27 +1343,22 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (layer === 'shodan') {
-                console.log(`Shodan toggle: ON=${layerVisible.shodan}, L.markerClusterGroup=${!!L?.markerClusterGroup}, markers=${Object.keys(shodanMarkers).length}`);
+                console.log(`Shodan toggle: ON=${layerVisible.shodan}, markers=${Object.keys(shodanMarkers).length}`);
                 debugLog(`🛰️ Shodan layer toggled ${layerVisible.shodan ? 'ON' : 'OFF'}`);
                 
                 if (layerVisible.shodan) {
-                    if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
-                        shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
-                        console.log('Created Shodan cluster group:', shodanClusterGroup);
-                    }
-                    if (shodanClusterGroup && !map.hasLayer(shodanClusterGroup)) {
-                        map.addLayer(shodanClusterGroup);
-                        console.log('Added cluster group to map');
-                    }
+                    // Show existing markers
                     Object.values(shodanMarkers).forEach(m => { 
-                        if (shodanClusterGroup && !shodanClusterGroup.hasLayer(m)) shodanClusterGroup.addLayer(m); 
+                        if (!map.hasLayer(m)) m.addTo(map);
                     });
+                    // Fetch fresh data
                     console.log('Calling pollShodanMarkers(true)...');
                     pollShodanMarkers(true).catch(err => console.error('Poll failed:', err));
                 } else {
-                    if (shodanClusterGroup) shodanClusterGroup.clearLayers();
-                    if (shodanClusterGroup && map.hasLayer(shodanClusterGroup)) map.removeLayer(shodanClusterGroup);
-                    Object.values(shodanMarkers).forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+                    // Hide all markers
+                    Object.values(shodanMarkers).forEach(m => { 
+                        if (map.hasLayer(m)) map.removeLayer(m);
+                    });
                 }
                 updateShodanManualBtn();
             }
