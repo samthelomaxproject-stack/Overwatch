@@ -15,6 +15,7 @@ window.initConflictModule = function(map, opts) {
     layer.clearLayers();
     markers = {};
     
+    let created = 0;
     items.forEach(ev => {
       const lat = Number(ev.lat || ev.latitude);
       const lon = Number(ev.lon || ev.longitude);
@@ -24,6 +25,7 @@ window.initConflictModule = function(map, opts) {
       m.bindPopup(`<b>${ev.title || 'Event'}</b><br>${ev.location || ''}`);
       layer.addLayer(m);
       markers[ev.id || Math.random()] = m;
+      created++;
     });
     
     if (visible && !map.hasLayer(layer)) map.addLayer(layer);
@@ -43,6 +45,7 @@ window.initConflictModule = function(map, opts) {
     setVisible,
     setFilters() {},
     refreshIfVisible(force) { if (visible || force) return load(); },
-    load
+    load,
+    loadMeta() { return Promise.resolve({}); }
   };
 };
