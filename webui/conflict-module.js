@@ -143,10 +143,3 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     loadMeta,
   };
 };
-lters.dateTo;
-    },
-    refreshIfVisible,
-    load,
-    loadMeta,
-  };
-};
