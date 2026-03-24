@@ -8,12 +8,6 @@ window.initConflictModule = async function initConflictModule(map, options = {})
   const apiBase = (options.apiBase || '').replace(/\/$/, '');
   const markerLayer = (window.L.markerClusterGroup ? window.L.markerClusterGroup() : window.L.layerGroup());
   map.addLayer(markerLayer);
-  
-  // TEST: Add hardcoded marker to verify render pipeline
-  const testMarker = window.L.circleMarker([33.18, -96.88], { radius: 10, color: '#00ff00', fillColor: '#00ff00', fillOpacity: 0.8 });
-  testMarker.bindPopup('<b>TEST MARKER</b><br>If you see this, the render pipeline works');
-  markerLayer.addLayer(testMarker);
-  console.log('✅ Test marker added to conflict layer');
 
   const state = {
     visible: false,
@@ -143,10 +137,14 @@ window.initConflictModule = async function initConflictModule(map, options = {})
     }
   }
 
-  function setVisible(v) {
+  async function setVisible(v) {
     state.visible = !!v;
     if (state.visible) {
       if (!map.hasLayer(markerLayer)) map.addLayer(markerLayer);
+      // Trigger initial load when layer is enabled
+      if (state.lastLoadedAt === 0) {
+        await load();
+      }
     } else if (map.hasLayer(markerLayer)) {
       map.removeLayer(markerLayer);
     }
@@ -159,8 +157,9 @@ window.initConflictModule = async function initConflictModule(map, options = {})
   }
 
   async function loadMeta() {
-    const u = new URL((apiBase ? apiBase : '') + '/api/meta', window.location.origin).toString();
-    const res = await fetch(u);
+    const url = `${apiBase || 'http://127.0.0.1:8790'}/api/conflict/meta`;
+    console.log('Loading conflict meta from:', url);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`Conflict meta API error: ${res.status}`);
     return await res.json();
   }
