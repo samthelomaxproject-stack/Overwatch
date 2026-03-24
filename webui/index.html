@@ -891,6 +891,7 @@ ALPHA-3 | REAR"></textarea>
                 initConflictModule(map, { apiBase })
                     .then(async (mod) => {
                         conflictModule = mod;
+                        window.conflictModule = mod;
                         if (conflictModule) {
                             conflictModule.setFilters(conflictFilters);
                             conflictModule.setVisible(!!layerVisible.conflict);
