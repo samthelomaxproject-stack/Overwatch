@@ -397,16 +397,16 @@
                                 <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="sdr" checked> SDR</label>
                                 <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="adsb_receiver" checked> ADS-B Receivers</label>
                                 <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="satcom" checked> Satcom</label>
-                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="repeater"> Amateur Radio</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="repeater" checked> Amateur Radio</label>
                                 <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🌐 NETWORK</div>
-                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="routers"> Routers</label>
-                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="wireless"> Wireless Bridges</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="routers" checked> Routers</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="wireless" checked> Wireless Bridges</label>
                                 <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🎥 SURVEILLANCE</div>
                                 <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="camera" checked> Cameras</label>
                                 <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🏭 CRITICAL INFRA</div>
-                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="ics"> ICS / SCADA</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="ics" checked> ICS / SCADA</label>
                                 <div style="margin:8px 0 4px 0;color:#cbd5e1;font-weight:600;">🧠 ACCESS</div>
-                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="remote_access"> Remote Access</label>
+                                <label class="tac-check-row" style="padding-left:12px;"><input type="checkbox" data-shodan-cat="remote_access" checked> Remote Access</label>
                             </div>
                         </div>
                         <div style="margin-top:4px;font-size:0.625rem;color:var(--text-muted);font-family:var(--font-mono);">Scroll list for additional overlays</div>
@@ -1157,7 +1157,7 @@ ALPHA-3 | REAR"></textarea>
             if (!force && (now - lastShodanFetchAt) < 30000) return;
             lastShodanFetchAt = now;
             try {
-                const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8790')).replace(/\/$/, '');
+                const apiBase = (hubUrl || 'http://127.0.0.1:8789').replace(/\/$/, '');
                 
                 const selectedCats = Object.keys(shodanCategoryEnabled).filter(k => shodanCategoryEnabled[k]);
                 const categoryParam = selectedCats.length > 0 ? `&category=${selectedCats.join(',')}` : '';
@@ -1218,7 +1218,10 @@ ALPHA-3 | REAR"></textarea>
                         delete shodanMarkers[k];
                     }
                 });
-            } catch (_) {}
+                console.log(`Shodan: Processed ${Object.keys(shodanMarkers).length} total markers, clusterGroup=${!!shodanClusterGroup}, layerVisible=${layerVisible.shodan}`);
+            } catch (err) {
+                console.error('Shodan poll error:', err);
+            }
         }
 
         function updateShodanManualBtn() {
@@ -1251,7 +1254,7 @@ ALPHA-3 | REAR"></textarea>
             
             const b = map.getBounds();
             const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
-            const apiBase = (hubUrl || (window.location.origin || '').replace(/:.*$/, ':8790')).replace(/\/$/, '');
+            const apiBase = (hubUrl || 'http://127.0.0.1:8789').replace(/\/$/, '');
             
             const selectedCats = Object.keys(shodanCategoryEnabled).filter(k => shodanCategoryEnabled[k]);
             const categoryParam = selectedCats.length > 0 ? `&category=${selectedCats.join(',')}` : '';
@@ -1353,17 +1356,23 @@ ALPHA-3 | REAR"></textarea>
             }
 
             if (layer === 'shodan') {
+                console.log(`Shodan toggle: ON=${layerVisible.shodan}, L.markerClusterGroup=${!!L?.markerClusterGroup}, markers=${Object.keys(shodanMarkers).length}`);
                 debugLog(`🛰️ Shodan layer toggled ${layerVisible.shodan ? 'ON' : 'OFF'}`);
                 
                 if (layerVisible.shodan) {
                     if (!shodanClusterGroup && window.L && L.markerClusterGroup) {
                         shodanClusterGroup = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 50 });
+                        console.log('Created Shodan cluster group:', shodanClusterGroup);
                     }
-                    if (shodanClusterGroup && !map.hasLayer(shodanClusterGroup)) map.addLayer(shodanClusterGroup);
+                    if (shodanClusterGroup && !map.hasLayer(shodanClusterGroup)) {
+                        map.addLayer(shodanClusterGroup);
+                        console.log('Added cluster group to map');
+                    }
                     Object.values(shodanMarkers).forEach(m => { 
                         if (shodanClusterGroup && !shodanClusterGroup.hasLayer(m)) shodanClusterGroup.addLayer(m); 
                     });
-                    pollShodanMarkers(true).catch(() => {});
+                    console.log('Calling pollShodanMarkers(true)...');
+                    pollShodanMarkers(true).catch(err => console.error('Poll failed:', err));
                 } else {
                     if (shodanClusterGroup) shodanClusterGroup.clearLayers();
                     if (shodanClusterGroup && map.hasLayer(shodanClusterGroup)) map.removeLayer(shodanClusterGroup);
