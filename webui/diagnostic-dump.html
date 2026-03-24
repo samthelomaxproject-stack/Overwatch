@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html><head><title>Diagnostics</title></head>
+<body>
+<h1>Overwatch Diagnostics</h1>
+<button onclick="dump()">Dump Console Log</button>
+<pre id="output"></pre>
+<script>
+function dump() {
+    const log = localStorage.getItem('overwatch_diagnostic_log') || 'No diagnostic log found';
+    document.getElementById('output').textContent = log;
+}
+window.addEventListener('storage', () => dump());
+setTimeout(dump, 500);
+</script>
+</body></html>

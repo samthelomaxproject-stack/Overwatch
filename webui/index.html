@@ -374,7 +374,8 @@
                             <option value="month">Month</option>
                         </select>
                         
-                        <button type="button" id="btnRefreshConflict" style="width:100%;padding:6px;margin-bottom:var(--space-sm);font-size:11px;background:rgba(0,212,255,0.2);border:1px solid var(--accent-cyan);color:var(--accent-cyan);border-radius:4px;cursor:pointer;">🔄 Refresh Events</button>
+                        <button type="button" id="btnRefreshConflict" style="width:100%;padding:6px;margin-bottom:4px;font-size:11px;background:rgba(0,212,255,0.2);border:1px solid var(--accent-cyan);color:var(--accent-cyan);border-radius:4px;cursor:pointer;">🔄 Refresh Events</button>
+                        <button type="button" onclick="alert(localStorage.getItem('overwatch_diagnostic_log') || 'No logs')" style="width:100%;padding:4px;margin-bottom:var(--space-sm);font-size:10px;background:rgba(139,92,246,0.2);border:1px solid #8b5cf6;color:#8b5cf6;border-radius:4px;cursor:pointer;">📋 Show Console Log</button>
 
 
                         <label class="tac-label" style="display:block; margin-bottom: 4px;">Heatmap Intensity</label>
@@ -752,8 +753,38 @@ ALPHA-3 | REAR"></textarea>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="conflict-module.js"></script>
     <script>
-        alert('JavaScript loaded! Version: 23:25');
+        // Diagnostic logger that also writes to localStorage for debugging
+        const diagnosticLog = [];
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        console.log = function(...args) {
+            const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+            diagnosticLog.push('[LOG] ' + msg);
+            if (diagnosticLog.length > 200) diagnosticLog.shift();
+            try { localStorage.setItem('overwatch_diagnostic_log', diagnosticLog.join('\n')); } catch(e) {}
+            originalConsoleLog.apply(console, args);
+        };
+        console.error = function(...args) {
+            const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+            diagnosticLog.push('[ERROR] ' + msg);
+            if (diagnosticLog.length > 200) diagnosticLog.shift();
+            try { localStorage.setItem('overwatch_diagnostic_log', diagnosticLog.join('\n')); } catch(e) {}
+            originalConsoleError.apply(console, args);
+        };
+        
+        alert('JavaScript loaded! Version: 01:24');
         console.log('conflict-module.js loaded, window.initConflictModule:', !!window.initConflictModule);
+        
+        // Add global function to dump diagnostics
+        window.dumpDiagnostics = function() {
+            const log = localStorage.getItem('overwatch_diagnostic_log') || 'No logs';
+            alert('Diagnostic log copied - check /tmp/overwatch-diagnostics.txt');
+            fetch('data:text/plain;charset=utf-8,' + encodeURIComponent(log))
+                .then(res => res.blob())
+                .catch(() => {});
+            console.log('=== DIAGNOSTIC LOG DUMP ===\n' + log);
+            return log;
+        };
         
         // State
         let map = null;
