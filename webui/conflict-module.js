@@ -58,6 +58,7 @@ window.initConflictModule = async function initConflictModule(map, options = {})
       markerLayer.clearLayers();
     
     console.log(`Conflict: Rendering ${conflictEvents.length} events`);
+    console.log('Leaflet available:', !!window.L, 'L.circleMarker:', !!window.L?.circleMarker);
     
     // Render conflict events
     let rendered = 0;
