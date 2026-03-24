@@ -916,7 +916,10 @@ ALPHA-3 | REAR"></textarea>
                         }
                         debugLog('Conflict module initialized');
                     })
-                    .catch(e => debugLog('Conflict module init failed: ' + (e?.message || e)));
+                    .catch(e => {
+                        console.error('❌ Conflict module init failed:', e);
+                        debugLog('Conflict module init failed: ' + (e?.message || e));
+                    });
             }
         }
 
@@ -6360,7 +6363,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('btnRefreshConflict');
     if (btn) {
         btn.addEventListener('click', async () => {
+            console.log('Refresh button clicked. window.conflictModule:', !!window.conflictModule);
             if (!window.conflictModule) {
+                console.warn('❌ Conflict module not found on window object');
                 debugLog('⚠️ Conflict module not initialized. Enable Conflict layer first.');
                 btn.textContent = '⚠️ Enable Layer';
                 setTimeout(() => { btn.textContent = '🔄 Refresh Events'; }, 2000);
