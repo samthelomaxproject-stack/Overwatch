@@ -1416,7 +1416,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<HubState>>) -> Resu
             // Render limit is independent of discovery budget — return all cached findings.
             let limit = parse_query_param(p, "limit")
                 .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(500)
+                .unwrap_or(100000)
                 .clamp(1, 100000);
 
             match resolve_shodan_db_path() {
