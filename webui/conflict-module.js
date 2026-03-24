@@ -8,6 +8,12 @@ window.initConflictModule = async function initConflictModule(map, options = {})
   const apiBase = (options.apiBase || '').replace(/\/$/, '');
   const markerLayer = (window.L.markerClusterGroup ? window.L.markerClusterGroup() : window.L.layerGroup());
   map.addLayer(markerLayer);
+  
+  // TEST: Add hardcoded marker to verify render pipeline
+  const testMarker = window.L.circleMarker([33.18, -96.88], { radius: 10, color: '#00ff00', fillColor: '#00ff00', fillOpacity: 0.8 });
+  testMarker.bindPopup('<b>TEST MARKER</b><br>If you see this, the render pipeline works');
+  markerLayer.addLayer(testMarker);
+  console.log('✅ Test marker added to conflict layer');
 
   const state = {
     visible: false,
