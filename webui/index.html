@@ -6353,44 +6353,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('btnRefreshConflict');
     if (btn) {
         btn.addEventListener('click', async () => {
+            if (!conflictModule) {
+                return;
+            }
+            
             btn.disabled = true;
             btn.textContent = '⏳ Fetching...';
             
             try {
-                const apiBase = 'http://127.0.0.1:8790';
-                const refreshRes = await fetch(`${apiBase}/api/conflict/refresh`, { method: 'POST' });
-                
-                let totalNew = 0;
-                if (refreshRes.ok) {
-                    const data = await refreshRes.json();
-                    totalNew = data.total_new || 0;
-                    console.log(`Conflict refresh: ${totalNew} new events ingested`);
-                } else {
-                    throw new Error(`Refresh API returned ${refreshRes.status}`);
-                }
-                
-                if (conflictModule) {
-                    await conflictModule.refreshIfVisible(true);
-                }
-                
-                btn.textContent = totalNew > 0 ? `✓ ${totalNew}` : '✓ OK';
+                const result = await conflictModule.refreshIfVisible(true);
+                btn.textContent = result.rendered > 0 ? `✓ ${result.rendered}` : '✓ OK';
                 setTimeout(() => {
                     btn.textContent = '🔄 Refresh Events';
                     btn.disabled = false;
                 }, 2000);
             } catch (e) {
                 btn.textContent = '✗ ERR';
-                console.error('Conflict refresh error:', e);
-                console.error('Error stack:', e.stack);
-                debugLog(`Conflict refresh failed: ${e.message || e}`);
                 setTimeout(() => {
                     btn.textContent = '🔄 Refresh Events';
                     btn.disabled = false;
                 }, 2000);
             }
         });
-    } else {
-        console.warn('btnRefreshConflict button not found');
     }
 });
 </script>
