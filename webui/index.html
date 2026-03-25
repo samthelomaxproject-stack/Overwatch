@@ -6370,8 +6370,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 if (conflictModule) {
-                    await conflictModule.load();
-                    console.log('Conflict layer reloaded after refresh');
+                    await conflictModule.refreshIfVisible(true);
                 }
                 
                 btn.textContent = totalNew > 0 ? `✓ ${totalNew}` : '✓ OK';
