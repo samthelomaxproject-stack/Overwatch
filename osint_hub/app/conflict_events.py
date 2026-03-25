@@ -198,7 +198,7 @@ def upsert_event(event: Dict) -> Dict[str, int]:
     return {"inserted": 1, "duplicate": 0}
 
 
-def get_events(window: str = "week", limit: int = 500) -> List[Dict]:
+def get_events(window: str = "week", limit: int = None) -> List[Dict]:
     """Get conflict events for time window."""
     now = datetime.now(timezone.utc)
     
@@ -212,14 +212,23 @@ def get_events(window: str = "week", limit: int = 500) -> List[Dict]:
     cutoff_str = cutoff.isoformat()
     
     with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT id, title, summary, source_type, source_name, source_url,
-                   published_at, event_type, location_name, lat, lon
-            FROM conflict_events
-            WHERE published_at >= ? AND lat IS NOT NULL AND lon IS NOT NULL
-            ORDER BY published_at DESC
-            LIMIT ?
-        """, (cutoff_str, limit)).fetchall()
+        if limit is None:
+            rows = conn.execute("""
+                SELECT id, title, summary, source_type, source_name, source_url,
+                       published_at, event_type, location_name, lat, lon
+                FROM conflict_events
+                WHERE published_at >= ? AND lat IS NOT NULL AND lon IS NOT NULL
+                ORDER BY published_at DESC
+            """, (cutoff_str,)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT id, title, summary, source_type, source_name, source_url,
+                       published_at, event_type, location_name, lat, lon
+                FROM conflict_events
+                WHERE published_at >= ? AND lat IS NOT NULL AND lon IS NOT NULL
+                ORDER BY published_at DESC
+                LIMIT ?
+            """, (cutoff_str, limit)).fetchall()
     
     return [{
         "id": r[0],

@@ -544,9 +544,9 @@ def conflict_refresh():
 
 
 @app.get("/api/conflict/events")
-def conflict_events_get(window: str = Query("week", pattern="^(day|week|month)$"), limit: int = Query(500, ge=1, le=2000)):
+def conflict_events_get(window: str = Query("week", pattern="^(day|week|month)$")):
     """Get conflict events for time window."""
-    events_list = conflict_events.get_events(window=window, limit=limit)
+    events_list = conflict_events.get_events(window=window, limit=None)
     return {"items": events_list, "count": len(events_list), "window": window}
 
 
