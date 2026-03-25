@@ -769,8 +769,9 @@ ALPHA-3 | REAR"></textarea>
         let squads = [];
         let zones = [];
         let sdrActive = { adsb: false, ais: false, satcom: false };
-        let conflictModule = null;
+        // Conflict uses inline polling (no module object needed)
         const conflictFilters = { windowRange: 'week', country: '', eventTypes: '', dateFrom: '', dateTo: '' };
+        let conflictModule = null;
         let shodanMarkers = {};
         let shodanClusterGroup = null;
         let shodanCategoryEnabled = {
@@ -892,51 +893,25 @@ ALPHA-3 | REAR"></textarea>
                 updateMyLocation(lastKnownLocation.lat, lastKnownLocation.lon, lastKnownLocation.accuracy);
             }
 
-            // Conflict module init (OSINT events)
+            // Conflict module init
             if (window.initConflictModule && !conflictModule) {
-                // Derive Conflict API base from configured hub URL input (8789 → 8790)
-                let apiBase = 'http://127.0.0.1:8790';
+                const configuredHub =
+                    document.getElementById('hubUrlInput')?.value?.trim() ||
+                    'http://127.0.0.1:8789';
+
+                let conflictApiBase = 'http://127.0.0.1:8790';
                 try {
-                    const configuredHub = document.getElementById('hubUrlInput')?.value?.trim() || hubUrl || 'http://127.0.0.1:8789';
                     const hubBase = new URL(configuredHub);
-                    apiBase = `${hubBase.protocol}//${hubBase.hostname}:8790`;
-                    console.log(`Conflict apiBase derived from hub input: ${configuredHub} → ${apiBase}`);
-                } catch (e) {
-                    console.warn('Failed to parse hub URL, using fallback:', apiBase);
+                    conflictApiBase = `${hubBase.protocol}//${hubBase.hostname}:8790`;
+                } catch (_) {}
+
+                conflictModule = window.initConflictModule(map, { apiBase: conflictApiBase });
+                if (conflictModule) {
+                    conflictModule.setFilters(conflictFilters);
+                    if (layerVisible.conflict) {
+                        conflictModule.setVisible(true);
+                    }
                 }
-                console.log('Conflict module final apiBase:', apiBase);
-                initConflictModule(map, { apiBase })
-                    .then(async (mod) => {
-                        conflictModule = mod;
-                        window.conflictModule = mod;
-                        if (conflictModule) {
-                            conflictModule.setFilters(conflictFilters);
-                            conflictModule.setVisible(!!layerVisible.conflict);
-                            syncConflictDateInputs();
-                            try {
-                                const meta = await conflictModule.loadMeta();
-                                const countrySel = document.getElementById('conflictCountrySel');
-                                if (countrySel && Array.isArray(meta?.countries)) {
-                                    const existing = new Set(Array.from(countrySel.options).map(o => o.value));
-                                    meta.countries.forEach(c => {
-                                        if (!existing.has(c)) {
-                                            const o = document.createElement('option');
-                                            o.value = c;
-                                            o.textContent = c;
-                                            countrySel.appendChild(o);
-                                        }
-                                    });
-                                }
-                            } catch (e) {
-                                debugLog('Conflict meta load failed: ' + (e?.message || e));
-                            }
-                        }
-                        debugLog('Conflict module initialized');
-                    })
-                    .catch(e => {
-                        console.error('❌ Conflict module init failed:', e);
-                        debugLog('Conflict module init failed: ' + (e?.message || e));
-                    });
             }
         }
 
@@ -1135,8 +1110,7 @@ ALPHA-3 | REAR"></textarea>
             });
             syncConflictDateInputs();
             if (conflictModule && layerVisible.conflict) {
-                conflictModule.setFilters(conflictFilters);
-                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
+                conflictModule.setFilters({ windowRange: conflictFilters.windowRange }).catch(e => debugLog('Conflict reload failed: ' + (e?.message || e)));
             }
             syncSidebarMapControls();
         }
@@ -1147,16 +1121,14 @@ ALPHA-3 | REAR"></textarea>
             conflictFilters.dateFrom = from?.value || '';
             conflictFilters.dateTo = to?.value || '';
             if (conflictModule && layerVisible.conflict && conflictFilters.windowRange === 'custom') {
-                conflictModule.setFilters(conflictFilters);
-                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict date reload failed: ' + (e?.message || e)));
+                conflictModule.setFilters(conflictFilters).catch(e => debugLog('Conflict date reload failed: ' + (e?.message || e)));
             }
         }
 
         function setConflictCountry(country) {
             conflictFilters.country = country || '';
             if (conflictModule && layerVisible.conflict) {
-                conflictModule.setFilters(conflictFilters);
-                conflictModule.refreshIfVisible(true).catch(e => debugLog('Conflict country reload failed: ' + (e?.message || e)));
+                conflictModule.setFilters(conflictFilters).catch(e => debugLog('Conflict country reload failed: ' + (e?.message || e)));
             }
         }
 
@@ -1231,6 +1203,8 @@ ALPHA-3 | REAR"></textarea>
                 console.error('Shodan poll error:', err);
             }
         }
+
+
 
         function updateShodanManualBtn() {
             if (!shodanManualBtn) return;
@@ -1356,63 +1330,9 @@ ALPHA-3 | REAR"></textarea>
 
             if (layer === 'conflict') {
                 debugLog(`🌍 Conflict layer toggled ${layerVisible.conflict ? 'ON' : 'OFF'}`);
-                console.log(`Conflict toggle check: conflictModule=${!!conflictModule}, visible=${layerVisible.conflict}, initFn=${!!window.initConflictModule}, map=${!!map}`);
                 
-                // Initialize module on first toggle if not already created
-                if (!conflictModule && layerVisible.conflict) {
-                    if (!window.initConflictModule) {
-                        console.error('❌ initConflictModule function not found!');
-                        debugLog('Conflict module init function missing');
-                        return;
-                    }
-                    if (!map) {
-                        console.error('❌ Map not initialized!');
-                        debugLog('Map not ready for conflict module');
-                        return;
-                    }
-                    
-                    console.log('🔄 Initializing conflict module on-demand...');
-                    // Derive from configured hub URL input
-                    let apiBase = 'http://127.0.0.1:8790';
-                    try {
-                        const configuredHub = document.getElementById('hubUrlInput')?.value?.trim() || hubUrl || 'http://127.0.0.1:8789';
-                        const hubBase = new URL(configuredHub);
-                        apiBase = `${hubBase.protocol}//${hubBase.hostname}:8790`;
-                        console.log(`Conflict apiBase (on-demand) derived from: ${configuredHub} → ${apiBase}`);
-                    } catch (e) {
-                        console.warn('Failed to parse hub URL, using fallback:', apiBase);
-                    }
-                    console.log('Conflict module final apiBase (on-demand):', apiBase);
-                    initConflictModule(map, { apiBase })
-                        .then(async (mod) => {
-                            conflictModule = mod;
-                            window.conflictModule = mod;
-                            console.log('✅ Conflict module initialized on toggle, window.conflictModule:', !!window.conflictModule);
-                            if (conflictModule) {
-                                conflictModule.setFilters(conflictFilters);
-                                conflictModule.setVisible(true);
-                                conflictModule.refreshIfVisible(true).catch(e => {
-                                    console.error('Conflict initial load error:', e);
-                                    console.error('Stack:', e.stack);
-                                    debugLog('Conflict load failed: ' + (e?.message || e));
-                                });
-                            }
-                        })
-                        .catch(e => {
-                            console.error('❌ Conflict module init failed:', e);
-                            debugLog('Conflict module init failed: ' + (e?.message || e));
-                        });
-                } else if (conflictModule) {
-                    // Module already exists, just toggle visibility
-                    conflictModule.setVisible(!!layerVisible.conflict);
-                    if (layerVisible.conflict) {
-                        conflictModule.setFilters(conflictFilters);
-                        conflictModule.refreshIfVisible(true).catch(e => {
-                            console.error('Conflict toggle load error:', e);
-                            console.error('Stack:', e.stack);
-                            debugLog('Conflict load failed: ' + (e?.message || e));
-                        });
-                    }
+                if (conflictModule) {
+                    conflictModule.setVisible(layerVisible.conflict).catch(err => console.error('Conflict toggle failed:', err));
                 }
             }
 
@@ -6433,15 +6353,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('btnRefreshConflict');
     if (btn) {
         btn.addEventListener('click', async () => {
-            console.log('Refresh button clicked. window.conflictModule:', !!window.conflictModule);
-            if (!window.conflictModule) {
-                console.warn('❌ Conflict module not found on window object');
-                debugLog('⚠️ Conflict module not initialized. Enable Conflict layer first.');
-                btn.textContent = '⚠️ Enable Layer';
-                setTimeout(() => { btn.textContent = '🔄 Refresh Events'; }, 2000);
-                return;
-            }
-            
             btn.disabled = true;
             btn.textContent = '⏳ Fetching...';
             
@@ -6458,9 +6369,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     throw new Error(`Refresh API returned ${refreshRes.status}`);
                 }
                 
-                // Reload the conflict layer to show new events
-                await window.conflictModule.load();
-                console.log('Conflict layer reloaded after refresh');
+                if (conflictModule) {
+                    await conflictModule.load();
+                    console.log('Conflict layer reloaded after refresh');
+                }
                 
                 btn.textContent = totalNew > 0 ? `✓ ${totalNew}` : '✓ OK';
                 setTimeout(() => {

@@ -1,51 +1,128 @@
-// Minimal Conflict layer for Overwatch Hub
-window.initConflictModule = function(map, opts) {
-  const base = (opts.apiBase || 'http://127.0.0.1:8790').replace(/\/$/, '');
-  const layer = window.L.layerGroup();
-  let visible = false;
-  let markers = {};
+window.initConflictModule = function initConflictModule(map, options = {}) {
+  if (!window.L || !map) return null;
+
+  const apiBase = (options.apiBase || 'http://127.0.0.1:8790').replace(/\/$/, '');
+  const markerLayer = window.L.layerGroup();
+
+  const state = {
+    visible: false,
+    windowRange: 'week', // day | week | month
+    lastLoadedAt: 0,
+  };
+
+  function normalizeItems(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (payload && Array.isArray(payload.items)) return payload.items;
+    return [];
+  }
+
+  function clearMarkers() {
+    markerLayer.clearLayers();
+  }
+
+  function makePopup(ev) {
+    const title = ev.title || 'Conflict Event';
+    const eventType = ev.event_type || ev.type || 'other';
+    const location =
+      ev.location ||
+      [ev.city, ev.admin1, ev.country].filter(Boolean).join(', ') ||
+      'Unknown location';
+    const summary = ev.summary || 'No summary available';
+    const source = ev.source_name || ev.source_type || 'Unknown source';
+    const published = ev.published_at || ev.date || '';
+
+    return `
+      <div>
+        <strong>${title}</strong><br/>
+        ${eventType}<br/>
+        ${location}<br/><br/>
+        ${summary}<br/><br/>
+        <strong>Source:</strong> ${source}${published ? `<br/><strong>Date:</strong> ${published}` : ''}
+      </div>
+    `;
+  }
+
+  function addMarker(ev) {
+    const lat = Number(ev.lat);
+    const lon = Number(ev.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+
+    const marker = window.L.marker([lat, lon]);
+    marker.bindPopup(makePopup(ev));
+    markerLayer.addLayer(marker);
+    return true;
+  }
 
   async function load() {
-    const url = `${base}/api/conflict/events?window=week`;
+    const url = `${apiBase}/api/conflict/events?window=${encodeURIComponent(state.windowRange)}`;
     const res = await fetch(url);
-    if (!res.ok) return;
-    const json = await res.json();
-    const items = json.items || json || [];
-    
-    layer.clearLayers();
-    markers = {};
-    
-    let created = 0;
-    items.forEach(ev => {
-      const lat = Number(ev.lat || ev.latitude);
-      const lon = Number(ev.lon || ev.longitude);
-      if (!isFinite(lat) || !isFinite(lon)) return;
-      
-      const m = window.L.marker([lat, lon]);
-      m.bindPopup(`<b>${ev.title || 'Event'}</b><br>${ev.location || ''}`);
-      layer.addLayer(m);
-      markers[ev.id || Math.random()] = m;
-      created++;
-    });
-    
-    if (visible && !map.hasLayer(layer)) map.addLayer(layer);
+    if (!res.ok) {
+      throw new Error(`Conflict events HTTP ${res.status}`);
+    }
+
+    const payload = await res.json();
+    const items = normalizeItems(payload);
+
+    clearMarkers();
+
+    let rendered = 0;
+    for (const ev of items) {
+      try {
+        if (addMarker(ev)) rendered++;
+      } catch (_) {
+        // skip malformed row, continue
+      }
+    }
+
+    state.lastLoadedAt = Date.now();
+    return { fetched: items.length, rendered };
   }
 
   async function setVisible(v) {
-    visible = !!v;
-    if (visible) {
-      await load();
-      if (!map.hasLayer(layer)) map.addLayer(layer);
+    state.visible = !!v;
+
+    if (state.visible) {
+      if (!map.hasLayer(markerLayer)) map.addLayer(markerLayer);
+      return await load();
     } else {
-      if (map.hasLayer(layer)) map.removeLayer(layer);
+      clearMarkers();
+      if (map.hasLayer(markerLayer)) map.removeLayer(markerLayer);
+      return { fetched: 0, rendered: 0 };
     }
+  }
+
+  async function setFilters(filters = {}) {
+    if (filters.windowRange && ['day', 'week', 'month'].includes(filters.windowRange)) {
+      state.windowRange = filters.windowRange;
+    }
+    if (state.visible) {
+      return await load();
+    }
+    return { fetched: 0, rendered: 0 };
+  }
+
+  async function refreshIfVisible(force = false) {
+    if (!state.visible) return { fetched: 0, rendered: 0 };
+    if (!force && Date.now() - state.lastLoadedAt < 30000) {
+      return { fetched: 0, rendered: 0 };
+    }
+    return await load();
+  }
+
+  async function loadMeta() {
+    const url = `${apiBase}/api/conflict/meta`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Conflict meta HTTP ${res.status}`);
+    }
+    return await res.json();
   }
 
   return {
     setVisible,
-    setFilters() {},
-    refreshIfVisible(force) { if (visible || force) return load(); },
+    setFilters,
+    refreshIfVisible,
     load,
-    loadMeta() { return Promise.resolve({}); }
+    loadMeta,
   };
 };
