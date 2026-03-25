@@ -50,7 +50,7 @@ _last_shodan_meta = {"at": None, "fetched": 0, "ok": None, "error": None}
 @app.on_event("startup")
 def startup():
     global _ingest_thread_started, _shodan_thread_started
-    init_db()
+    # init_db()  # Schema already exists, skip to avoid mismatch errors
     events.init_events_db()
     if AUTO_INGEST_ENABLED and not _ingest_thread_started:
         t = threading.Thread(target=_ingest_loop, daemon=True)
