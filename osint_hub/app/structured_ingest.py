@@ -34,17 +34,35 @@ def ingest_reliefweb(days_back: int = 7, limit: int = 50) -> Dict:
     Ingest humanitarian reports from ReliefWeb API.
     
     API Docs: https://apidoc.reliefweb.int/
+    Requires approved appname: https://apidoc.reliefweb.int/parameters#appname
+    Set RELIEFWEB_APPNAME environment variable after approval.
     """
+    reliefweb_appname = os.getenv("RELIEFWEB_APPNAME", "")
+    
+    if not reliefweb_appname:
+        return {
+            "ok": False,
+            "source": "reliefweb",
+            "error": "ReliefWeb requires approved appname. Request at https://apidoc.reliefweb.int/parameters#appname and set RELIEFWEB_APPNAME env var.",
+            "new": 0
+        }
     try:
-        # Simple query - just get recent reports with location data
+        # ReliefWeb requires approved appname + User-Agent for access
         params = {
-            "appname": "overwatch-osint",
+            "appname": reliefweb_appname,
             "limit": limit,
-            "sort": ["date:desc"]
+            "profile": "full",
+            "sort[]": "date:desc"
+        }
+        
+        headers = {
+            "User-Agent": "Overwatch-OSINT-Hub/0.2.0 (github.com/samthelomaxproject-stack/Overwatch)"
         }
         
         response = requests.get(
-            f"{RELIEFWEB_API_URL}?{requests.compat.urlencode(params, doseq=True)}",
+            RELIEFWEB_API_URL,
+            params=params,
+            headers=headers,
             timeout=30
         )
         response.raise_for_status()

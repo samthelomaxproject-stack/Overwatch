@@ -40,24 +40,35 @@ Structured sources provide verified, high-confidence intelligence from authorita
 }
 ```
 
-### 2. ReliefWeb 🚧 SCAFFOLDED
+### 2. ReliefWeb 🔐 REQUIRES APPNAME APPROVAL
 
 **API:** https://api.reliefweb.int/v1/reports  
-**Status:** API access issues (403 Forbidden)  
-**Confidence:** 0.85 (when working)  
+**Status:** Requires approved appname  
+**Confidence:** 0.85  
 **Event Types:** `conflict`, `disaster`, `humanitarian_incident`
 
-**Planned Features:**
+**Configuration Required:**
+1. Request appname approval: https://apidoc.reliefweb.int/parameters#appname
+2. Set environment variable: `RELIEFWEB_APPNAME=your_approved_name`
+3. Restart OSINT Hub
+
+**Why Appname Required:**
+- ReliefWeb tracks API usage by application
+- No API key needed - just registered appname
+- Free for humanitarian/research use
+- Approval typically granted within 24-48 hours
+
+**Features (when enabled):**
 - Humanitarian situation reports
 - Disaster response updates
 - Conflict impact assessments
 - Country-level geocoding
 
 **Current State:**
-- Module implemented
+- Module implemented and ready
 - Endpoint available: `POST /api/structured/ingest/reliefweb`
-- Fails soft if API unavailable
-- Needs API access resolution
+- Fails soft with clear error message if not configured
+- No impact on other sources
 
 ### 3. NASA FIRMS 🔐 REQUIRES API KEY
 
@@ -208,13 +219,15 @@ Existing types reused:
 ### Environment Variables
 
 ```bash
-# ReliefWeb (currently disabled due to API access)
-# No config needed - fails soft
+# ReliefWeb (requires appname approval)
+RELIEFWEB_APPNAME=your_approved_appname
+# Request at: https://apidoc.reliefweb.int/parameters#appname
 
 # NASA FIRMS (disabled by default)
 FIRMS_ENABLED=true
 FIRMS_API_KEY=your_firms_api_key
 FIRMS_MAP_KEY=alternative_map_key  # Alternative access method
+# Register at: https://firms.modaps.eosdis.nasa.gov/api/
 
 # General structured ingestion
 STRUCTURED_AUTO_INGEST=false  # Future: Auto-ingest on schedule
@@ -243,10 +256,13 @@ curl 'http://127.0.0.1:8790/api/conflict/events?window=day&source_type=usgs' | j
 
 ## Troubleshooting
 
-### ReliefWeb 403 Forbidden
-- **Status:** Known issue, fail-soft implemented
-- **Impact:** ReliefWeb events don't ingest, other sources unaffected
-- **Fix:** Investigate API access requirements (may need registration)
+### ReliefWeb Not Ingesting
+- **Cause:** Requires approved appname (not an API key)
+- **Fix:** 
+  1. Request appname: https://apidoc.reliefweb.int/parameters#appname
+  2. Set `RELIEFWEB_APPNAME=your_approved_name`
+  3. Restart hub
+- **Impact:** ReliefWeb disabled until configured, other sources unaffected
 
 ### FIRMS Not Ingesting
 - **Check:** `FIRMS_ENABLED=true` in environment
