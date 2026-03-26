@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        #map { height: 400px; width: 100%; }
+        #controls { padding: 10px; background: #f0f0f0; }
+        button { margin: 5px; padding: 8px 16px; cursor: pointer; }
+        #status { padding: 10px; background: #fff; margin: 10px; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="toggle">Toggle Conflict Layer</button>
+        <button data-window="day">Day</button>
+        <button data-window="week">Week</button>
+        <button data-window="month">Month</button>
+        <button id="refresh">Refresh</button>
+    </div>
+    <div id="status">Status: Ready</div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="http://127.0.0.1:8000/conflict-module.js"></script>
+    <script>
+        const map = L.map('map').setView([20, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        const statusDiv = document.getElementById('status');
+        let visible = false;
+        let conflictModule = null;
+        
+        function updateStatus(msg) {
+            statusDiv.textContent = 'Status: ' + msg;
+            console.log(msg);
+        }
+        
+        if (window.initConflictModule) {
+            conflictModule = window.initConflictModule(map, { apiBase: 'http://127.0.0.1:8790' });
+            updateStatus('Module initialized');
+        } else {
+            updateStatus('ERROR: initConflictModule not found!');
+        }
+        
+        document.getElementById('toggle').addEventListener('click', async () => {
+            if (!conflictModule) {
+                updateStatus('ERROR: Module not initialized');
+                return;
+            }
+            visible = !visible;
+            updateStatus('Setting visible=' + visible + '...');
+            try {
+                const result = await conflictModule.setVisible(visible);
+                updateStatus('Visible=' + visible + ', fetched=' + result.fetched + ', rendered=' + result.rendered);
+            } catch (e) {
+                updateStatus('ERROR: ' + e.message);
+            }
+        });
+        
+        document.querySelectorAll('[data-window]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!conflictModule) return;
+                const window = btn.getAttribute('data-window');
+                updateStatus('Setting window=' + window + '...');
+                try {
+                    const result = await conflictModule.setFilters({ windowRange: window });
+                    updateStatus('Window=' + window + ', fetched=' + result.fetched + ', rendered=' + result.rendered);
+                } catch (e) {
+                    updateStatus('ERROR: ' + e.message);
+                }
+            });
+        });
+        
+        document.getElementById('refresh').addEventListener('click', async () => {
+            if (!conflictModule) return;
+            updateStatus('Refreshing...');
+            try {
+                const result = await conflictModule.refreshIfVisible(true);
+                updateStatus('Refreshed: fetched=' + result.fetched + ', rendered=' + result.rendered);
+            } catch (e) {
+                updateStatus('ERROR: ' + e.message);
+            }
+        });
+    </script>
+</body>
+</html>

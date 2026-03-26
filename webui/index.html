@@ -6368,6 +6368,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.disabled = false;
                 }, 2000);
             } catch (e) {
+                console.error('Conflict refresh error:', e);
+                debugLog('Conflict refresh error: ' + (e?.message || e));
                 btn.textContent = '✗ ERR';
                 setTimeout(() => {
                     btn.textContent = '🔄 Refresh Events';
