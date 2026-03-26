@@ -34,7 +34,7 @@ def ingest_reliefweb(days_back: int = 7, limit: int = 50) -> Dict:
     Ingest humanitarian reports from ReliefWeb API.
     
     API Docs: https://apidoc.reliefweb.int/
-    Requires appname approval (lightweight, usually instant via web form).
+    As of Nov 2025, requires pre-approved appname (policy change).
     Request at: https://apidoc.reliefweb.int/parameters#appname
     """
     # Get approved appname from environment
@@ -44,7 +44,7 @@ def ingest_reliefweb(days_back: int = 7, limit: int = 50) -> Dict:
         return {
             "ok": False,
             "source": "reliefweb",
-            "error": "ReliefWeb appname not configured. Request approval (instant) at https://apidoc.reliefweb.int/parameters#appname then set RELIEFWEB_APPNAME env var.",
+            "error": "ReliefWeb requires pre-approved appname (policy since Nov 2025). Free registration at https://apidoc.reliefweb.int/parameters#appname - Set RELIEFWEB_APPNAME after approval.",
             "new": 0
         }
     
