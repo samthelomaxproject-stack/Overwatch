@@ -684,8 +684,8 @@ def structured_sources_list():
                 "enabled": bool(os.getenv("RELIEFWEB_APPNAME")),
                 "confidence": structured_ingest.CONFIDENCE_RELIEFWEB,
                 "event_types": ["conflict", "disaster", "humanitarian_incident"],
-                "requires_approval": True,
-                "approval_url": "https://apidoc.reliefweb.int/parameters#appname"
+                "requires_appname": True,
+                "note": "Lightweight approval (usually instant) - request at https://apidoc.reliefweb.int/parameters#appname"
             },
             {
                 "name": "USGS Earthquakes",

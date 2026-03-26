@@ -34,25 +34,26 @@ def ingest_reliefweb(days_back: int = 7, limit: int = 50) -> Dict:
     Ingest humanitarian reports from ReliefWeb API.
     
     API Docs: https://apidoc.reliefweb.int/
-    Requires approved appname: https://apidoc.reliefweb.int/parameters#appname
-    Set RELIEFWEB_APPNAME environment variable after approval.
+    Requires appname approval (lightweight, usually instant via web form).
+    Request at: https://apidoc.reliefweb.int/parameters#appname
     """
+    # Get approved appname from environment
     reliefweb_appname = os.getenv("RELIEFWEB_APPNAME", "")
     
     if not reliefweb_appname:
         return {
             "ok": False,
             "source": "reliefweb",
-            "error": "ReliefWeb requires approved appname. Request at https://apidoc.reliefweb.int/parameters#appname and set RELIEFWEB_APPNAME env var.",
+            "error": "ReliefWeb appname not configured. Request approval (instant) at https://apidoc.reliefweb.int/parameters#appname then set RELIEFWEB_APPNAME env var.",
             "new": 0
         }
+    
     try:
-        # ReliefWeb requires approved appname + User-Agent for access
+        # ReliefWeb requires appname parameter + User-Agent header
         params = {
             "appname": reliefweb_appname,
             "limit": limit,
-            "profile": "full",
-            "sort[]": "date:desc"
+            "profile": "list"  # Simpler profile for better reliability
         }
         
         headers = {
