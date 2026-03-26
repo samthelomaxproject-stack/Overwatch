@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from .acled import fetch_acled
 from . import events, rss_ingest, gdelt_ingest
@@ -33,6 +34,15 @@ from .shodan import (
 
 load_dotenv()
 app = FastAPI(title="Overwatch OSINT Conflict API", version="0.2.0")
+
+# Allow CORS for Tauri webview
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "300"))
 AUTO_INGEST_ENABLED = os.getenv("ACLED_AUTO_INGEST", "true").lower() in ("1", "true", "yes")

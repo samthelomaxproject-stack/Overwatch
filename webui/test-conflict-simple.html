@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Conflict Module Test</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <div id="map" style="height: 600px;"></div>
+    <button id="btnLoad">Load Conflict Events</button>
+    <div id="output"></div>
+
+    <script src="conflict-module.js"></script>
+    <script>
+        const map = L.map('map').setView([0, 0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const module = window.initConflictModule(map, { apiBase: 'http://127.0.0.1:8790' });
+        
+        document.getElementById('btnLoad').addEventListener('click', async () => {
+            const output = document.getElementById('output');
+            try {
+                output.textContent = 'Loading...';
+                const result = await module.load();
+                output.textContent = `✓ Loaded ${result.fetched} events, rendered ${result.rendered} markers`;
+            } catch (e) {
+                output.textContent = `✗ Error: ${e.message}`;
+                console.error(e);
+            }
+        });
+    </script>
+</body>
+</html>
