@@ -215,7 +215,7 @@ def get_events(window: str = "week", limit: int = None) -> List[Dict]:
         if limit is None:
             rows = conn.execute("""
                 SELECT id, title, summary, source_type, source_name, source_url,
-                       published_at, event_type, location_name, lat, lon
+                       published_at, event_type, location_name, lat, lon, raw_json
                 FROM conflict_events
                 WHERE published_at >= ? AND lat IS NOT NULL AND lon IS NOT NULL
                 ORDER BY published_at DESC
@@ -223,26 +223,43 @@ def get_events(window: str = "week", limit: int = None) -> List[Dict]:
         else:
             rows = conn.execute("""
                 SELECT id, title, summary, source_type, source_name, source_url,
-                       published_at, event_type, location_name, lat, lon
+                       published_at, event_type, location_name, lat, lon, raw_json
                 FROM conflict_events
                 WHERE published_at >= ? AND lat IS NOT NULL AND lon IS NOT NULL
                 ORDER BY published_at DESC
                 LIMIT ?
             """, (cutoff_str, limit)).fetchall()
     
-    return [{
-        "id": r[0],
-        "title": r[1],
-        "summary": r[2],
-        "source_type": r[3],
-        "source_name": r[4],
-        "source_url": r[5],
-        "published_at": r[6],
-        "event_type": r[7] or "other",
-        "location": r[8],
-        "lat": r[9],
-        "lon": r[10]
-    } for r in rows]
+    events_list = []
+    for r in rows:
+        event = {
+            "id": r[0],
+            "title": r[1],
+            "summary": r[2],
+            "source_type": r[3],
+            "source_name": r[4],
+            "source_url": r[5],
+            "published_at": r[6],
+            "event_type": r[7] or "other",
+            "location": r[8],
+            "lat": r[9],
+            "lon": r[10]
+        }
+        
+        # Parse raw_json if present to extract metadata
+        if r[11]:
+            try:
+                raw_data = json.loads(r[11])
+                if "confidence_score" in raw_data:
+                    event["confidence_score"] = raw_data["confidence_score"]
+                if "verification_status" in raw_data:
+                    event["verification_status"] = raw_data["verification_status"]
+            except:
+                pass
+        
+        events_list.append(event)
+    
+    return events_list
 
 
 def prune_old_events() -> int:

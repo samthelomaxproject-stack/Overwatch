@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .acled import fetch_acled
-from . import events, rss_ingest, gdelt_ingest
+from . import events, rss_ingest, gdelt_ingest, social_ingest
 from . import conflict_events, conflict_ingest
 
 load_dotenv()  # Load from .env in current directory (bundled)
@@ -62,6 +62,7 @@ def startup():
     global _ingest_thread_started, _shodan_thread_started
     # init_db()  # Schema already exists, skip to avoid mismatch errors
     events.init_events_db()
+    conflict_events.init_conflict_db()  # Initialize conflict events schema
     if AUTO_INGEST_ENABLED and not _ingest_thread_started:
         t = threading.Thread(target=_ingest_loop, daemon=True)
         t.start()
@@ -597,3 +598,27 @@ def conflict_feeds_test(feed_id: int):
         raise HTTPException(404, "Feed not found")
     
     return conflict_ingest.ingest_rss_feed(feed["id"], feed["name"], feed["url"])
+
+
+@app.post("/api/social/ingest")
+def social_ingest_trigger():
+    """Manually trigger social OSINT ingestion."""
+    return social_ingest.ingest_all_social()
+
+
+@app.get("/api/social/sources")
+def social_sources_list():
+    """List configured social sources."""
+    return {
+        "sources": social_ingest.SOCIAL_SOURCES,
+        "confidence_model": {
+            "base": social_ingest.CONFIDENCE_BASE_SOCIAL,
+            "boosts": {
+                "detailed_location": social_ingest.CONFIDENCE_BOOST_DETAILED_LOCATION,
+                "multiple_sources": social_ingest.CONFIDENCE_BOOST_MULTIPLE_SOURCES
+            },
+            "penalties": {
+                "vague_text": social_ingest.CONFIDENCE_PENALTY_VAGUE
+            }
+        }
+    }

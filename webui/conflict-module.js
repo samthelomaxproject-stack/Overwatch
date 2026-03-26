@@ -30,6 +30,15 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
     const summary = ev.summary || 'No summary available';
     const source = ev.source_name || ev.source_type || 'Unknown source';
     const published = ev.published_at || ev.date || '';
+    
+    // Show verification badge for social sources
+    const isSocial = ev.source_type === 'social';
+    const verification = ev.verification_status || 'unverified';
+    const confidence = ev.confidence_score ? ` (${Math.round(ev.confidence_score * 100)}%)` : '';
+    
+    const verificationBadge = isSocial
+      ? `<br/><span style="color: orange; font-size: 0.9em;">⚠️ Social OSINT - ${verification}${confidence}</span>`
+      : '';
 
     return `
       <div>
@@ -37,7 +46,7 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
         ${eventType}<br/>
         ${location}<br/><br/>
         ${summary}<br/><br/>
-        <strong>Source:</strong> ${source}${published ? `<br/><strong>Date:</strong> ${published}` : ''}
+        <strong>Source:</strong> ${source}${published ? `<br/><strong>Date:</strong> ${published}` : ''}${verificationBadge}
       </div>
     `;
   }
