@@ -6,6 +6,12 @@ Minimal public social media ingestion feeding the Conflict layer.
 
 Social OSINT provides **real-time, lower-confidence** intelligence from public social platforms. Events are marked as `unverified` and display with warning badges in the UI.
 
+**Key features:**
+- **Deduplication**: Checks against RSS/GDELT for similar events (title + time + location)
+- **Corroboration**: Upgrades to `corroborated` status if matches existing verified event
+- **Visual distinction**: Orange markers (darker for unverified, brighter for corroborated)
+- **API filtering**: Optional filtering by source type or exclusion of social sources
+
 ## Architecture
 
 - **Hub-only ingestion**: Runs on OSINT Hub (port 8790)
@@ -51,10 +57,23 @@ BASE_CONFIDENCE = 0.35
 # Boosts:
 + 0.10  # Detailed location (>10 chars)
 + 0.15  # Multiple similar reports (per additional source, max 3)
++ 0.15  # Corroborates existing RSS/GDELT event
 
 # Penalties:
 - 0.10  # Vague text (<100 chars)
 ```
+
+### Deduplication Logic
+
+Before inserting, checks for similar RSS/GDELT events:
+- **Title similarity**: >70% match (SequenceMatcher)
+- **Time proximity**: ±6 hours
+- **Location proximity**: <100km if both have coordinates
+
+If match found:
+- `verification_status` → `"corroborated"`
+- Confidence boosted by 0.15
+- `corroborates_event_id` stored in metadata
 
 ## Geocoding
 
@@ -90,6 +109,16 @@ Returns:
 curl http://127.0.0.1:8790/api/social/sources
 ```
 
+### Get Only Social Events
+```bash
+curl 'http://127.0.0.1:8790/api/conflict/events?window=week&source_type=social'
+```
+
+### Exclude Social Events
+```bash
+curl 'http://127.0.0.1:8790/api/conflict/events?window=week&include_social=false'
+```
+
 ## Event Format
 
 Social events follow the same schema as RSS/GDELT but include:
@@ -116,9 +145,14 @@ Social events follow the same schema as RSS/GDELT but include:
 
 The Conflict layer automatically handles social sources:
 
-- **Map markers**: Same as RSS/GDELT
-- **Popup badge**: `⚠️ Social OSINT - unverified (35%)`
-- **Styling**: Orange warning color
+- **Map markers**: Orange color (blue for RSS/GDELT)
+  - Dark orange (#FF6B00) for `unverified`
+  - Bright orange (#FFA500) for `corroborated`
+- **Marker opacity**: 0.7 for unverified, 0.9 for corroborated
+- **Popup badge**: 
+  - `⚠️ Social OSINT - unverified (35%)`
+  - `⚠️ Social OSINT - corroborated (50%)`
+- **Styling**: Orange warning color in popup text
 
 ## Rate Limiting
 
@@ -153,9 +187,24 @@ Edit `SOCIAL_SOURCES` in `social_ingest.py`, restart hub.
 ### Disable social ingestion
 Remove `POST /api/social/ingest` calls from any automation/cron.
 
+## Configuration
+
+Set environment variables:
+
+```bash
+ENABLE_SOCIAL_INGEST=true        # Enable/disable social ingestion
+ENABLE_SOCIAL_IN_CONFLICT=true   # Show social events in Conflict layer
+```
+
+Check config status:
+```bash
+curl http://127.0.0.1:8790/health | jq '.social_osint'
+```
+
 ## Security Notes
 
 - **Public data only**: No authentication, no login-dependent platforms
 - **User-Agent compliance**: Identifies as `Overwatch/0.2.0 (OSINT Hub)`
 - **Rate limiting**: Respects API policies (Nominatim, Reddit)
 - **No PII collection**: Events are public, pre-published content only
+- **Fail-soft**: If social ingest fails, RSS/GDELT continue unaffected
