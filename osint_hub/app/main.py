@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from .acled import fetch_acled
-from . import events, rss_ingest, gdelt_ingest, social_ingest
+from . import events, rss_ingest, gdelt_ingest, social_ingest, structured_ingest
 from . import conflict_events, conflict_ingest
 
 load_dotenv()  # Load from .env in current directory (bundled)
@@ -565,7 +565,7 @@ def conflict_refresh():
 @app.get("/api/conflict/events")
 def conflict_events_get(
     window: str = Query("week", pattern="^(day|week|month)$"),
-    source_type: Optional[str] = Query(None, pattern="^(rss|gdelt|social)$"),
+    source_type: Optional[str] = Query(None, pattern="^(rss|gdelt|social|usgs|firms|reliefweb)$"),
     include_social: bool = Query(True)
 ):
     """Get conflict events for time window with optional filtering."""
@@ -644,4 +644,61 @@ def social_sources_list():
                 "vague_text": social_ingest.CONFIDENCE_PENALTY_VAGUE
             }
         }
+    }
+
+
+# ========== Structured Source Endpoints ==========
+
+@app.post("/api/structured/ingest")
+def structured_ingest_trigger():
+    """Manually trigger structured source ingestion (ReliefWeb, USGS, FIRMS)."""
+    return structured_ingest.ingest_all_structured()
+
+
+@app.post("/api/structured/ingest/reliefweb")
+def structured_ingest_reliefweb(days_back: int = Query(7, ge=1, le=30)):
+    """Ingest ReliefWeb humanitarian reports."""
+    return structured_ingest.ingest_reliefweb(days_back=days_back)
+
+
+@app.post("/api/structured/ingest/usgs")
+def structured_ingest_usgs():
+    """Ingest USGS earthquake data."""
+    return structured_ingest.ingest_usgs_earthquakes()
+
+
+@app.post("/api/structured/ingest/firms")
+def structured_ingest_firms(days_back: int = Query(1, ge=1, le=10)):
+    """Ingest NASA FIRMS fire detections."""
+    return structured_ingest.ingest_nasa_firms(days_back=days_back)
+
+
+@app.get("/api/structured/sources")
+def structured_sources_list():
+    """List structured source configuration."""
+    return {
+        "sources": [
+            {
+                "name": "ReliefWeb",
+                "type": "reliefweb",
+                "enabled": True,
+                "confidence": structured_ingest.CONFIDENCE_RELIEFWEB,
+                "event_types": ["conflict", "disaster", "humanitarian_incident"]
+            },
+            {
+                "name": "USGS Earthquakes",
+                "type": "usgs",
+                "enabled": True,
+                "confidence": structured_ingest.CONFIDENCE_USGS,
+                "event_types": ["disaster"]
+            },
+            {
+                "name": "NASA FIRMS",
+                "type": "firms",
+                "enabled": structured_ingest.FIRMS_ENABLED,
+                "confidence": structured_ingest.CONFIDENCE_FIRMS,
+                "event_types": ["fire_activity", "disaster"],
+                "requires_api_key": True
+            }
+        ]
     }

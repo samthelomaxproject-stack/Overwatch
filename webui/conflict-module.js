@@ -81,14 +81,21 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
     const source = ev.source_name || ev.source_type || 'Unknown source';
     const published = ev.published_at || ev.date || '';
     
-    // Show verification badge for social sources
-    const isSocial = ev.source_type === 'social';
-    const verification = ev.verification_status || 'unverified';
+    // Show source badge
+    const sourceType = ev.source_type || 'rss';
     const confidence = ev.confidence_score ? ` (${Math.round(ev.confidence_score * 100)}%)` : '';
+    let sourceBadge = '';
     
-    const verificationBadge = isSocial
-      ? `<br/><span style="color: orange; font-size: 0.9em;">⚠️ Social OSINT - ${verification}${confidence}</span>`
-      : '';
+    if (sourceType === 'social') {
+      const verification = ev.verification_status || 'unverified';
+      sourceBadge = `<br/><span style="color: orange; font-size: 0.9em;">⚠️ Social OSINT - ${verification}${confidence}</span>`;
+    } else if (sourceType === 'usgs') {
+      sourceBadge = `<br/><span style="color: #9333EA; font-size: 0.9em;">🌍 USGS Verified${confidence}</span>`;
+    } else if (sourceType === 'reliefweb') {
+      sourceBadge = `<br/><span style="color: #9333EA; font-size: 0.9em;">🏛️ ReliefWeb${confidence}</span>`;
+    } else if (sourceType === 'firms') {
+      sourceBadge = `<br/><span style="color: #9333EA; font-size: 0.9em;">🛰️ NASA FIRMS${confidence}</span>`;
+    }
 
     // Find nearby cameras
     const nearbyCameras = findNearbyCameras(ev.lat, ev.lon);
@@ -119,7 +126,7 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
         ${eventType}<br/>
         ${location}<br/><br/>
         ${summary}<br/><br/>
-        <strong>Source:</strong> ${source}${published ? `<br/><strong>Date:</strong> ${published}` : ''}${verificationBadge}
+        <strong>Source:</strong> ${source}${published ? `<br/><strong>Date:</strong> ${published}` : ''}${sourceBadge}
         ${cameraSection}
       </div>
     `;
@@ -130,12 +137,13 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
     const lon = Number(ev.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
 
-    // Different marker for social sources
-    const isSocial = ev.source_type === 'social';
     const markerOptions = {};
     
-    if (isSocial) {
-      // Orange marker with lower opacity for social/unverified
+    // Color-code by source type
+    const sourceType = ev.source_type || 'rss';
+    
+    if (sourceType === 'social') {
+      // Orange marker for social sources
       const verification = ev.verification_status || 'unverified';
       const orangeIcon = window.L.icon({
         iconUrl: 'data:image/svg+xml;base64,' + btoa(`
@@ -151,7 +159,24 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
       });
       markerOptions.icon = orangeIcon;
       markerOptions.opacity = verification === 'corroborated' ? 0.9 : 0.7;
+    } else if (['usgs', 'firms', 'reliefweb'].includes(sourceType)) {
+      // Purple/violet marker for structured high-confidence sources
+      const purpleIcon = window.L.icon({
+        iconUrl: 'data:image/svg+xml;base64,' + btoa(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+            <path fill="#9333EA" stroke="#000" stroke-width="1" 
+              d="M12.5 0C5.6 0 0 5.6 0 12.5c0 8.4 12.5 28.5 12.5 28.5S25 20.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+            <circle cx="12.5" cy="12.5" r="7" fill="white" opacity="1"/>
+          </svg>
+        `),
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34]
+      });
+      markerOptions.icon = purpleIcon;
+      markerOptions.opacity = 1.0;
     }
+    // Default (rss/gdelt) uses standard blue Leaflet marker
 
     const marker = window.L.marker([lat, lon], markerOptions);
     marker.bindPopup(makePopup(ev));
