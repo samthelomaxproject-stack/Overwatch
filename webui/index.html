@@ -2137,6 +2137,7 @@ ALPHA-3 | REAR"></textarea>
         let cctvMarkers = {};
         let cctvCones = {};
         let cctvCameras = {};
+        window.cctvCameras = cctvCameras; // Expose globally for conflict module
         let cctvSnapshotTimers = {};
         let cctvHlsPlayers = {};
         let cctvSourceModalUrl = null;

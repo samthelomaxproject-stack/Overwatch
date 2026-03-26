@@ -20,6 +20,56 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
     markerLayer.clearLayers();
   }
 
+  // Config for camera correlation
+  const CCTV_EVENT_RADIUS_METERS = 500;
+  const CCTV_EVENT_MAX_NEARBY_DISPLAY = 3;
+
+  function calculateDistance(lat1, lon1, lat2, lon2) {
+    // Haversine formula for distance in meters
+    const R = 6371000; // Earth radius in meters
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    return R * c;
+  }
+
+  function findNearbyCameras(eventLat, eventLon) {
+    // Access global cctvCameras from index.html
+    if (typeof window.cctvCameras === 'undefined') return [];
+
+    const nearby = [];
+    
+    Object.values(window.cctvCameras).forEach(cam => {
+      if (!cam.lat || !cam.lon) return;
+      
+      const distance = calculateDistance(eventLat, eventLon, cam.lat, cam.lon);
+      
+      if (distance <= CCTV_EVENT_RADIUS_METERS) {
+        nearby.push({
+          id: cam.id,
+          name: cam.name,
+          lat: cam.lat,
+          lon: cam.lon,
+          distance: Math.round(distance),
+          hasStream: !!cam.snapshotUrl,
+          status: cam.status
+        });
+      }
+    });
+
+    // Sort by distance
+    nearby.sort((a, b) => a.distance - b.distance);
+    
+    return nearby;
+  }
+
   function makePopup(ev) {
     const title = ev.title || 'Conflict Event';
     const eventType = ev.event_type || ev.type || 'other';
@@ -40,13 +90,37 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
       ? `<br/><span style="color: orange; font-size: 0.9em;">⚠️ Social OSINT - ${verification}${confidence}</span>`
       : '';
 
+    // Find nearby cameras
+    const nearbyCameras = findNearbyCameras(ev.lat, ev.lon);
+    let cameraSection = '';
+    
+    if (nearbyCameras.length > 0) {
+      const nearest = nearbyCameras[0];
+      const cameraList = nearbyCameras.slice(0, CCTV_EVENT_MAX_NEARBY_DISPLAY).map(cam => {
+        const statusBadge = cam.status === 'ACTIVE' ? '🟢' : '🔴';
+        const streamBtn = cam.hasStream 
+          ? `<button onclick="window.startCctvLive('${cam.id}')" style="font-size:10px;padding:2px 6px;margin-left:4px;cursor:pointer;">▶️ Live</button>`
+          : '';
+        return `<div style="font-size:11px;margin-top:4px;">${statusBadge} ${cam.name} (${cam.distance}m)${streamBtn}</div>`;
+      }).join('');
+      
+      cameraSection = `
+        <hr style="margin:8px 0;border:none;border-top:1px solid #333;">
+        <div style="font-size:12px;">
+          <strong>🎥 Nearby CCTV:</strong> ${nearbyCameras.length}
+          ${cameraList}
+        </div>
+      `;
+    }
+
     return `
-      <div>
+      <div style="min-width:300px;">
         <strong>${title}</strong><br/>
         ${eventType}<br/>
         ${location}<br/><br/>
         ${summary}<br/><br/>
         <strong>Source:</strong> ${source}${published ? `<br/><strong>Date:</strong> ${published}` : ''}${verificationBadge}
+        ${cameraSection}
       </div>
     `;
   }
