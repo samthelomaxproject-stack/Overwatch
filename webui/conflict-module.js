@@ -56,7 +56,30 @@ window.initConflictModule = function initConflictModule(map, options = {}) {
     const lon = Number(ev.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
 
-    const marker = window.L.marker([lat, lon]);
+    // Different marker for social sources
+    const isSocial = ev.source_type === 'social';
+    const markerOptions = {};
+    
+    if (isSocial) {
+      // Orange marker with lower opacity for social/unverified
+      const verification = ev.verification_status || 'unverified';
+      const orangeIcon = window.L.icon({
+        iconUrl: 'data:image/svg+xml;base64,' + btoa(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41">
+            <path fill="${verification === 'corroborated' ? '#FFA500' : '#FF6B00'}" stroke="#000" stroke-width="1" 
+              d="M12.5 0C5.6 0 0 5.6 0 12.5c0 8.4 12.5 28.5 12.5 28.5S25 20.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+            <circle cx="12.5" cy="12.5" r="7" fill="white" opacity="${verification === 'corroborated' ? '1' : '0.7'}"/>
+          </svg>
+        `),
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34]
+      });
+      markerOptions.icon = orangeIcon;
+      markerOptions.opacity = verification === 'corroborated' ? 0.9 : 0.7;
+    }
+
+    const marker = window.L.marker([lat, lon], markerOptions);
     marker.bindPopup(makePopup(ev));
     markerLayer.addLayer(marker);
     return true;

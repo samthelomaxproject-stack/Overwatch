@@ -49,6 +49,10 @@ AUTO_INGEST_ENABLED = os.getenv("ACLED_AUTO_INGEST", "true").lower() in ("1", "t
 AUTO_INGEST_INTERVAL_MIN = int(os.getenv("ACLED_AUTO_INGEST_INTERVAL_MIN", "30"))
 AUTO_INGEST_DAYS = int(os.getenv("ACLED_AUTO_INGEST_DAYS", "7"))
 
+# Social OSINT config
+ENABLE_SOCIAL_INGEST = os.getenv("ENABLE_SOCIAL_INGEST", "true").lower() in ("1", "true", "yes")
+ENABLE_SOCIAL_IN_CONFLICT = os.getenv("ENABLE_SOCIAL_IN_CONFLICT", "true").lower() in ("1", "true", "yes")
+
 _cache: Dict[str, Tuple[float, list]] = {}
 _cache_lock = threading.Lock()
 _last_ingest_meta = {"at": None, "count": 0, "ok": None, "error": None}
@@ -306,6 +310,10 @@ def health():
             "scheduler_interval_sec": scheduler_interval_sec(),
             "last": _last_shodan_meta,
         },
+        "social_osint": {
+            "enabled": ENABLE_SOCIAL_INGEST,
+            "show_in_conflict": ENABLE_SOCIAL_IN_CONFLICT,
+        },
     }
 
 
@@ -555,9 +563,22 @@ def conflict_refresh():
 
 
 @app.get("/api/conflict/events")
-def conflict_events_get(window: str = Query("week", pattern="^(day|week|month)$")):
-    """Get conflict events for time window."""
+def conflict_events_get(
+    window: str = Query("week", pattern="^(day|week|month)$"),
+    source_type: Optional[str] = Query(None, pattern="^(rss|gdelt|social)$"),
+    include_social: bool = Query(True)
+):
+    """Get conflict events for time window with optional filtering."""
     events_list = conflict_events.get_events(window=window, limit=None)
+    
+    # Filter by source_type if specified
+    if source_type:
+        events_list = [e for e in events_list if e.get("source_type") == source_type]
+    
+    # Optionally exclude social
+    if not include_social:
+        events_list = [e for e in events_list if e.get("source_type") != "social"]
+    
     return {"items": events_list, "count": len(events_list), "window": window}
 
 
@@ -603,6 +624,8 @@ def conflict_feeds_test(feed_id: int):
 @app.post("/api/social/ingest")
 def social_ingest_trigger():
     """Manually trigger social OSINT ingestion."""
+    if not ENABLE_SOCIAL_INGEST:
+        raise HTTPException(403, "Social OSINT ingestion is disabled (ENABLE_SOCIAL_INGEST=false)")
     return social_ingest.ingest_all_social()
 
 

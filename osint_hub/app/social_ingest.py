@@ -1,12 +1,14 @@
 """
 Social OSINT Ingestion - minimal public sources feeding Conflict layer.
 First-pass sources: Telegram RSS, Reddit JSON, no auth required.
+Includes simple deduplication with existing RSS/GDELT events.
 """
 import hashlib
 import json
 import re
 import time
 from datetime import datetime, timezone, timedelta
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -14,6 +16,7 @@ import feedparser
 import requests
 
 from . import conflict_events, geocode
+from .db import get_conn
 
 
 # ========== CONFIGURATION ==========
@@ -95,6 +98,50 @@ def extract_location_from_text(text: str) -> Optional[str]:
     return None
 
 
+def find_similar_event(title: str, published_at: str, lat: Optional[float], lon: Optional[float]) -> Optional[int]:
+    """
+    Check if a similar RSS/GDELT event exists (simple deduplication).
+    Returns event ID if match found, None otherwise.
+    """
+    if not title or not published_at:
+        return None
+    
+    try:
+        pub_time = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+    except:
+        return None
+    
+    # Search window: ±6 hours
+    time_start = (pub_time - timedelta(hours=6)).isoformat()
+    time_end = (pub_time + timedelta(hours=6)).isoformat()
+    
+    with get_conn() as conn:
+        # Find RSS/GDELT events in time window
+        candidates = conn.execute("""
+            SELECT id, title, lat, lon
+            FROM conflict_events
+            WHERE source_type IN ('rss', 'gdelt')
+              AND published_at >= ? AND published_at <= ?
+        """, (time_start, time_end)).fetchall()
+        
+        for candidate in candidates:
+            # Title similarity (>70% match)
+            similarity = SequenceMatcher(None, title.lower(), candidate[1].lower()).ratio()
+            if similarity > 0.7:
+                # Location proximity if both have coords (<100km)
+                if lat and lon and candidate[2] and candidate[3]:
+                    dist_lat = abs(lat - candidate[2])
+                    dist_lon = abs(lon - candidate[3])
+                    # Rough approximation: 1 degree ≈ 111km
+                    if (dist_lat < 0.9 and dist_lon < 0.9):  # ~100km
+                        return candidate[0]
+                else:
+                    # No coords to check, accept title match
+                    return candidate[0]
+    
+    return None
+
+
 def normalize_social_event(item: Dict, source_config: Dict) -> Optional[Dict]:
     """Normalize social item to conflict event format."""
     # Extract basic fields
@@ -136,6 +183,15 @@ def normalize_social_event(item: Dict, source_config: Dict) -> Optional[Dict]:
     # Calculate confidence
     confidence = calculate_confidence(text, location_text)
     
+    # Check for duplicate with RSS/GDELT
+    published_at = item.get("published", datetime.now(timezone.utc).isoformat())
+    similar_event_id = find_similar_event(title, published_at, lat, lon)
+    
+    verification_status = "unverified"
+    if similar_event_id:
+        verification_status = "corroborated"
+        confidence = min(confidence + 0.15, 1.0)  # Boost if corroborates existing event
+    
     # Build normalized event
     event = {
         "title": title[:500],
@@ -143,16 +199,17 @@ def normalize_social_event(item: Dict, source_config: Dict) -> Optional[Dict]:
         "source_type": "social",
         "source_name": source_config["name"],
         "source_url": item.get("link", item.get("url", "")),
-        "published_at": item.get("published", datetime.now(timezone.utc).isoformat()),
+        "published_at": published_at,
         "event_type": source_config.get("event_type", "other"),
         "location_name": location_text,
         "lat": lat,
         "lon": lon,
         "raw_json": json.dumps({
             "confidence_score": confidence,
-            "verification_status": "unverified",
+            "verification_status": verification_status,
             "source_platform": source_config["type"],
             "region": source_config.get("region"),
+            "corroborates_event_id": similar_event_id,
         })
     }
     
