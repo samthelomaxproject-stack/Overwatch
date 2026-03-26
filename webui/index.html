@@ -6361,8 +6361,14 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.textContent = '⏳ Fetching...';
             
             try {
-                const result = await conflictModule.refreshIfVisible(true);
+                // Force load regardless of visibility state
+                const result = await conflictModule.load();
                 btn.textContent = result.rendered > 0 ? `✓ ${result.rendered}` : '✓ OK';
+                // Make sure layer is visible after successful load
+                if (result.rendered > 0 && !layerVisible.conflict) {
+                    layerVisible.conflict = true;
+                    conflictModule.setVisible(true);
+                }
                 setTimeout(() => {
                     btn.textContent = '🔄 Refresh Events';
                     btn.disabled = false;
